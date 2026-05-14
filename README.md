@@ -1,268 +1,96 @@
 # Eloquente Catering System (ECS)
 
-A full-stack catering booking and management system built with Laravel 12, Inertia.js, React, Tailwind CSS, and a shared PostgreSQL database hosted on Supabase.
+A premium, full-stack catering management platform. This system handles everything from landing pages and custom menu building to real-time client-staff communication and booking management.
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-| Area | Tool |
-| --- | --- |
-| Backend | Laravel 12, PHP 8.2+ |
-| Frontend | React 19, Inertia.js, Tailwind CSS |
-| Database | PostgreSQL on Supabase |
-| Build Tool | Vite 7 |
-
-## 🚀 Quick Start (Windows PowerShell)
-
-If you are using the bundled PHP version included in this folder, run these commands from the project folder:
-
-```powershell
-# 1. Add the local PHP folder to your terminal session (REQUIRED)
-$env:PATH = ".\php;" + $env:PATH
-
-# 2. Install dependencies (if not already done)
-php composer.phar install
-npm install
-
-# 3. Setup environment and database
-php artisan key:generate
-php artisan migrate --seed
-
-# 4. Start everything (Backend, Frontend, and Queues)
-composer run dev
-```
-
-> [!IMPORTANT]
-> You must run the `$env:PATH` command **every time** you open a new terminal window. Otherwise, Windows won't know where to find `php` or `composer`.
-
-Then open:
-
-```text
-http://127.0.0.1:8080
-```
-
-`composer run dev` starts the Laravel server (port 8080), queue listener, and Vite dev server together.
-
-## 📁 Local Environment Details
-
-This setup is designed to be portable and does not require you to install PHP or Composer globally on your Windows machine.
-
-| Tool | Path | Note |
-| --- | --- | --- |
-| **PHP** | `.\php\php.exe` | Version 8.2+ with pgsql/openssl/mbstring enabled |
-| **Composer** | `.\composer.phar` | Run via `php composer.phar` |
-| **Database** | `database/database.sqlite` | Default if Supabase is not configured |
-
-## Prerequisites
-
-Install these before running the project:
-
-| Tool | Required Version | Purpose |
-| --- | --- | --- |
-| Node.js | 18 or newer | Runs Vite and frontend tooling |
-| npm | Comes with Node.js | Installs JavaScript packages |
-| Supabase project | Active PostgreSQL database | Shared live database (Optional for local SQLite) |
+*   **Backend**: Laravel 11 (PHP 8.2+)
+*   **Frontend**: React 19 (Inertia.js), Tailwind CSS
+*   **Database**: PostgreSQL (Supabase)
+*   **Real-Time**: Laravel Reverb (WebSockets)
+*   **Build Tool**: Vite 6+
 
 ---
 
-## Required PHP Extensions
+## 🚀 One-Click Quick Start (Windows)
 
-Laravel needs the PostgreSQL PDO driver to connect to Supabase.
+This project is designed to be **portable**. It includes a local PHP folder, so you don't need to install PHP on your computer.
 
-Check your enabled PHP extensions:
+1.  **Open PowerShell** in the project folder.
+2.  **Activate Local PHP**:
+    ```powershell
+    $env:PATH = ".\php;" + $env:PATH
+    ```
+3.  **Install Everything**:
+    ```powershell
+    php composer.phar install
+    npm install
+    ```
+4.  **Setup Environment**:
+    *   Create a `.env` file (copy from `.env.example`).
+    *   Add your **Supabase PostgreSQL** credentials (see [Database Setup](#-database-setup)).
+    *   Add **Reverb Credentials** (see [Real-Time Chat Setup](#-real-time-chat-setup)).
+5.  **Initialize Database**:
+    ```powershell
+    php artisan key:generate
+    php artisan migrate --seed
+    ```
+6.  **Run the System**:
+    ```powershell
+    composer run dev
+    ```
 
-```powershell
-php -m
+> [!IMPORTANT]
+> `composer run dev` starts **4 essential processes**:
+> 1. Laravel Web Server (8080)
+> 2. Vite Dev Server (Frontend)
+> 3. Laravel Reverb (WebSocket Server)
+> 4. Queue Worker (for Emails & Notifications)
+
+---
+
+## 💬 Real-Time Chat Setup
+
+The chat system uses **Laravel Reverb**. For it to work correctly, your `.env` MUST have these values:
+
+```env
+BROADCAST_CONNECTION=reverb
+
+REVERB_APP_ID=your-id
+REVERB_APP_KEY=your-key
+REVERB_APP_SECRET=your-secret
+REVERB_HOST="127.0.0.1"
+REVERB_PORT=8085
+REVERB_SCHEME=http
+
+VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
+VITE_REVERB_HOST="${REVERB_HOST}"
+VITE_REVERB_PORT="${REVERB_PORT}"
+VITE_REVERB_SCHEME="${REVERB_SCHEME}"
 ```
 
-You should see both:
+### If Chat isn't connecting:
+1.  Ensure you ran `composer run dev` (it starts the Reverb server automatically).
+2.  Check that port `8085` is not blocked by a firewall.
+3.  Make sure your PHP has the `openssl` and `curl` extensions enabled in `php/php.ini`.
 
-```text
-pdo_pgsql
-pgsql
-```
+---
 
-If you get `could not find driver` when running migrations, open:
+## 📧 Email Notifications
 
-```text
-.\php\php.ini
-```
+Notifications (like "New Message" alerts) are sent to the **Laravel Queue**.
+*   **During Development**: Emails are logged to `storage/logs/laravel.log`.
+*   **To Send Real Emails**: Update the `MAIL_` variables in your `.env` with SMTP credentials (e.g., Gmail App Password).
 
-Find these lines:
+---
 
-```ini
-;extension=pdo_pgsql
-;extension=pgsql
-```
+## 🗄️ Database Setup
 
-Remove the semicolons so they become:
-
-```ini
-extension=pdo_pgsql
-extension=pgsql
-```
-
-Save the file, then restart any open terminals. If running through XAMPP Apache, restart Apache too.
-
-Verify again:
-
-```powershell
-php -m
-```
-
-## Environment Setup
-
-If `.env` does not exist yet, create it:
-
-```powershell
-copy .env.example .env
-php artisan key:generate
-```
-
-Update the database section of `.env` with your Supabase PostgreSQL credentials:
+We use **Supabase** for the live database. In your `.env`, set:
 
 ```env
 DB_CONNECTION=pgsql
-DB_HOST=your-supabase-host
-DB_PORT=6543
-DB_DATABASE=postgres
-DB_USERNAME=postgres.your-project-ref
-DB_PASSWORD=your-supabase-database-password
-DB_SSLMODE=require
-```
-
-Notes:
-
-- Use port `6543` when using the Supabase pooler connection string.
-- Use port `5432` only if you are using Supabase's direct database connection.
-- Do not commit `.env`; it contains private credentials.
-- After changing `.env`, always run:
-
-```powershell
-php artisan config:clear
-```
-
-
-## Daily Startup
-
-After the project has already been installed and migrated, use:
-
-```powershell
-$env:PATH = ".\php;" + $env:PATH
-composer run dev
-```
-
-This starts:
-
-| Process | Purpose |
-| --- | --- |
-| `php artisan serve --port=8080` | Laravel backend |
-| `php artisan queue:listen --tries=1 --timeout=0` | Laravel queue worker |
-| `npm run dev` | Vite frontend dev server |
-
-Open:
-
-```text
-http://127.0.0.1:8080
-```
-
-## Manual Startup Alternative
-
-If `composer run dev` does not work, run these in separate terminals:
-
-Terminal 1:
-
-```powershell
-$env:PATH = ".\php;" + $env:PATH
-php artisan serve --port=8080
-```
-
-Terminal 2:
-
-```powershell
-npm run dev
-```
-
-Terminal 3:
-
-```powershell
-$env:PATH = ".\php;" + $env:PATH
-php artisan queue:listen --tries=1 --timeout=0
-```
-
-## Database Commands
-
-Use these for normal development:
-
-```powershell
-$env:PATH = ".\php;" + $env:PATH
-php artisan migrate:status
-php artisan migrate
-php artisan db:seed
-```
-
-Use this only for the first setup of an empty Supabase database:
-
-```powershell
-php artisan migrate --seed
-```
-
-Be careful with this command:
-
-```powershell
-php artisan migrate:fresh --seed
-```
-
-`migrate:fresh --seed` deletes all database tables and recreates them. Do not run it on the shared Supabase database unless you intentionally want to wipe all existing data.
-
-## Default Accounts
-
-After seeding, these test accounts are available. All use the password:
-
-```text
-password123
-```
-
-| Role | Username |
-| --- | --- |
-| Admin | `admin` |
-| Marketing | `marketing` |
-| Accounting | `accounting` |
-| Client | `client` |
-
-You can also register a new client account through the website.
-
-## Troubleshooting
-
-### `could not find driver`
-
-PHP is missing the PostgreSQL driver. Enable these in `.\php\php.ini`:
-
-```ini
-extension=pdo_pgsql
-extension=pgsql
-```
-
-Then restart the terminal and check:
-
-```powershell
-php -m
-```
-
-### `.env` changes are not being used
-
-Clear Laravel's cached config:
-
-```powershell
-php artisan config:clear
-```
-
-### Cannot connect to Supabase
-
-Check these `.env` values:
-
-```env
-DB_CONNECTION=pgsql
-DB_HOST=your-supabase-host
+DB_HOST=aws-0-ap-southeast-1.pooler.supabase.com # Use your Supabase host
 DB_PORT=6543
 DB_DATABASE=postgres
 DB_USERNAME=postgres.your-project-ref
@@ -270,102 +98,39 @@ DB_PASSWORD=your-password
 DB_SSLMODE=require
 ```
 
-Also confirm your internet connection and that the Supabase project is not paused.
+> [!TIP]
+> If you get a "Prepared statement does not exist" error, ensure `DB_PORT=6543` is used (Supabase Transaction Mode).
 
-### `prepared statement ... does not exist`
+---
 
-This can happen when using the Supabase pooler on port `6543`. The project fixes this in `config/database.php` by disabling PostgreSQL server-side prepared statements for the `pgsql` connection:
+## 🔑 Default Accounts
 
-```php
-'options' => extension_loaded('pdo_pgsql') ? [
-    PDO::ATTR_EMULATE_PREPARES => true,
-    PDO::PGSQL_ATTR_DISABLE_PREPARES => true,
-] : [],
-```
+After running `php artisan db:seed`, use these credentials (Password: `password123`):
 
-After changing database config, run:
+| Role | Username |
+| :--- | :--- |
+| **Admin** | `admin` |
+| **Marketing** | `marketing` |
+| **Accounting** | `accounting` |
+| **Client** | `client` |
 
-```powershell
-php artisan config:clear
-```
+---
 
-If the app is already running, stop it and start it again:
+## 📂 Project Structure
 
-```powershell
-composer run dev
-```
+*   `app/Http/Controllers/ChatController.php`: Core logic for the ticketing/claiming system.
+*   `resources/js/Components/common/StaffMessaging.jsx`: Staff side chat interface.
+*   `resources/js/Components/common/ChatBubble.jsx`: Client side floating chat bubble.
+*   `app/Notifications/`: Email and database notification templates.
+*   `routes/channels.php`: Authorization rules for private WebSocket channels.
 
-### Port already in use
+---
 
-Start Laravel on another port:
+## 🛠️ Troubleshooting
 
-```powershell
-php artisan serve --port=8081
-```
+*   **"Could not find driver"**: Open `php/php.ini` and remove the `;` before `extension=pdo_pgsql` and `extension=pgsql`.
+*   **Vite not loading**: Ensure `npm run dev` is running (included in `composer run dev`).
+*   **PHP Commands not found**: Remember to run `$env:PATH = ".\php;" + $env:PATH` in **every new terminal window**.
 
-Then open:
-
-```text
-http://127.0.0.1:8081
-```
-
-### Frontend changes are not showing
-
-Make sure Vite is running:
-
-```powershell
-npm run dev
-```
-
-If needed, restart `composer run dev`.
-
-## Useful Commands
-
-```powershell
-php artisan config:clear
-php artisan cache:clear
-php artisan route:clear
-php artisan view:clear
-php artisan migrate:status
-php artisan test
-npm run build
-```
-
-## Features
-
-- Landing page with hero carousel, about section, and gallery
-- Menu gallery with category and price filtering
-- Custom package builder
-- Multi-step booking workflow
-- Booking cost summary
-- Client dashboard for bookings, payments, and event details
-- Marketing/Admin booking management
-- Accounting payment verification
-- Admin employee management, pricing overrides, and analytics
-- Notifications and messaging
-
-## Project Structure
-
-```text
-ECS-LATEST-main/
-|-- app/                 Laravel backend code
-|-- bootstrap/           Laravel bootstrap files
-|-- config/              Laravel configuration
-|-- database/            Migrations, factories, and seeders
-|-- public/              Public web assets
-|-- resources/
-|   |-- css/             Stylesheets
-|   |-- images/          Static images
-|   `-- js/              React/Inertia frontend
-|-- routes/              Laravel routes
-|-- storage/             Runtime storage and logs
-|-- tests/               Automated tests
-|-- .env                 Local private environment config
-|-- composer.json        PHP dependencies and scripts
-|-- package.json         Frontend dependencies and scripts
-`-- vite.config.js       Vite configuration
-```
-
-## License
-
-This project is proprietary software for Eloquente Catering.
+---
+*Developed for Eloquente Catering. Phase 2: WebSocket Integration Complete.*
