@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply font-sans text-slate-900 bg-white antialiased; }
+  h1,h2,h3,h4,h5,h6 { @apply font-display font-bold; }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(156,163,175,0.4); border-radius: 20px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(156,163,175,0.6); }
+}
+
+/* Reveal on scroll */
+.rv { opacity:0; transform:translateY(36px); transition: opacity .7s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1); }
+.rv.vis { opacity:1; transform:none; }
+.rv-d1 { transition-delay:.1s } .rv-d2 { transition-delay:.2s } .rv-d3 { transition-delay:.25s } .rv-d4 { transition-delay:.35s }
+.rv-left { transform:translateX(-40px); } .rv-left.vis { transform:none; }
+.rv-right { transform:translateX(40px); } .rv-right.vis { transform:none; }
+.rv-scale { opacity:0; transform:scale(.92); } .rv-scale.vis { opacity:1; transform:none; }
+
+/* Diagonal clip */
+.clip-slant-top { clip-path: polygon(0 6vw, 100% 0, 100% 100%, 0 100%); }
+.clip-slant-bot { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6vw), 0 100%); }
+
+/* Glow pulse */
+@keyframes glowPulse { 0%,100%{box-shadow:0 0 20px rgba(240,170,11,.15)} 50%{box-shadow:0 0 40px rgba(240,170,11,.3)} }
+.glow-gold { animation: glowPulse 3s ease-in-out infinite; }
+
+/* Counter roll */
+@keyframes countUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+
+/* Float */
+@keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+.float-anim { animation: floatY 5s ease-in-out infinite; }
+
+/* Marquee */
+@keyframes marquee { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+.marquee-track { animation: marquee 25s linear infinite; }
+
+/* Shimmer */
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+.shimmer-line {
+  height:3px; width:64px; border-radius:2px;
+  background: linear-gradient(90deg, transparent, #f0aa0b, transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s ease-in-out infinite;
+}
+
+/* Menu Gallery Animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-fadeInUp {
+  animation: fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fadeIn { animation: fadeIn 0.4s ease both; }
+
+/* Lightbox overlay */
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes imgZoomIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.lightbox-overlay { animation: overlayIn 0.25s ease both; }
+.lightbox-img    { animation: imgZoomIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Hide number input spinners */
+.custom-number-input::-webkit-outer-spin-button,
+.custom-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.custom-number-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Auth page enter transition (Login ↔ Register) */
+@keyframes authPageEnter {
+  0%   { opacity: 0; transform: translateY(20px) scale(0.98); filter: blur(4px); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes authBrandEnter {
+  0%   { opacity: 0; transform: translateX(-30px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
