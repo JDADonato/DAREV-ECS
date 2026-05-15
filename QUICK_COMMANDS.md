@@ -4,29 +4,29 @@
 
 ### Simple Usage:
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create {username} {password} --role={role}
+./php artisan user:create {username} {password} --role={role}
 ```
 
 ### Examples:
 
 **Create a marketing staff account:**
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create john_marketing mypassword123 --role=Marketing
+./php artisan user:create john_marketing mypassword123 --role=Marketing
 ```
 
 **Create an accounting staff account:**
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create jane_accounting securepass456 --role=Accounting
+./php artisan user:create jane_accounting securepass456 --role=Accounting
 ```
 
 **Create an admin account:**
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create supervisor adminpass789 --role=Admin
+./php artisan user:create supervisor adminpass789 --role=Admin
 ```
 
 **Create a client account with email:**
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create client_name password123 --role=Client --email=client@example.com --phone=+1234567890
+./php artisan user:create client_name password123 --role=Client --email=client@example.com --phone=+1234567890
 ```
 
 ---
@@ -81,15 +81,15 @@ $env:PATH = ".\php;" + $env:PATH; php artisan user:create client_name password12
 
 ### Scenario 1: Adding a new marketing person
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create marie_events event2024pass --role=Marketing --email=marie@company.com
+./php artisan user:create marie_events event2024pass --role=Marketing --email=marie@company.com
 ```
 Marie can now login with: **marie_events** / **event2024pass** from any device!
 
 ### Scenario 2: Creating multiple test accounts at once
 ```bash
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create test1 testpass --role=Client
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create test2 testpass --role=Marketing
-$env:PATH = ".\php;" + $env:PATH; php artisan user:create test3 testpass --role=Accounting
+./php artisan user:create test1 testpass --role=Client
+./php artisan user:create test2 testpass --role=Marketing
+./php artisan user:create test3 testpass --role=Accounting
 ```
 
 ### Scenario 3: Switching to a different device

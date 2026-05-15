@@ -1,118 +1,63 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import { Link } from '@inertiajs/react';
 import UserDropdown from './UserDropdown';
-import logoImg from '../../images/ECS_LOGO.png';
-const ClientNavbar = () => {
-    const { user, logout } = useAuth();
-    const navigate = useNavigate();
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+import NotificationBell from './NotificationBell';
+import logoImg from '../../../images/ECS_LOGO.png';
 
-    const navLinks = [
-        { name: 'Home', path: '/' },
-        { name: 'Book', path: '/book' },
-        { name: 'Menu', path: '/menu' },
+const ClientNavbar = ({ user, logout, activePath }) => {
+    const [mob, setMob] = useState(false);
+    const path = activePath || window.location.pathname;
+    const links = [
+        { n: 'Home', p: '/' },
+        { n: 'Menu', p: '/menu' },
+        { n: 'Book Now', p: '/book' },
+        { n: 'Food Tasting', p: '/food-tasting' },
+        { n: 'Contact', p: '/contact' },
     ];
+    const dash = () => !user ? '/' : ({ Client: '/dashboard/client', Marketing: '/dashboard/ops', Accounting: '/dashboard/finance', Admin: '/dashboard/admin' }[user.role] || '/');
 
     return (
-        <nav className="bg-brand-red shadow-lg py-4 relative z-50">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between items-center">
-                    {/* Logo */}
-                    <div className="flex-shrink-0 flex items-center cursor-pointer" onClick={() => navigate('/')}>
-                        <img src={logoImg} alt="Eloquente Catering" className="h-12 w-auto object-contain" />
-                    </div>
-
-                    {/* Desktop Menu */}
-                    <div className="hidden md:flex items-center space-x-8">
-                        {navLinks.map((link) => (
-                            <Link
-                                key={link.name}
-                                to={link.path}
-                                className="text-white hover:text-yellow-400 font-medium text-sm uppercase tracking-wider transition-colors"
-                            >
-                                {link.name}
+        <nav className="fixed top-0 z-50 w-full border-b border-white/10 bg-[#720101]/95 shadow-lg shadow-black/10 backdrop-blur">
+            <div className="mx-auto flex h-[68px] max-w-7xl items-center justify-between px-5 sm:px-8">
+                <Link href="/" className="flex items-center gap-3">
+                    <img src={logoImg} alt="ECS" className="h-12 w-auto" />
+                </Link>
+                <div className="hidden items-center gap-6 md:flex">
+                    {links.map(l => {
+                        const active = path === l.p || (l.p === '/' && path === '/');
+                        return (
+                            <Link key={l.n} href={l.p} className={`rounded-full px-3 py-2 text-[12px] font-bold uppercase tracking-widest transition-colors ${active ? 'bg-[#f0aa0b] text-[#1a1a1a]' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}>
+                                {l.n}
                             </Link>
-                        ))}
-
-                        <div className="border-l border-white/30 h-6 mx-4"></div>
-
-                        {user ? (
-                            <div className="flex items-center space-x-4">
-                                <UserDropdown 
-                                    user={user} 
-                                    dashLink={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} 
-                                />
-                            </div>
-                        ) : (
-                            <div className="flex items-center space-x-4">
-                                <Link to="/login" className="text-white hover:text-yellow-400 text-sm font-medium uppercase tracking-wider">
-                                    Login
-                                </Link>
-                                <Link
-                                    to="/register"
-                                    className="bg-yellow-500 hover:bg-yellow-400 text-red-900 font-bold py-2 px-6 rounded-full text-xs uppercase tracking-wider transition-transform transform hover:scale-105 shadow-lg"
-                                >
-                                    Register
-                                </Link>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Mobile Menu Button */}
-                    <div className="md:hidden flex items-center">
-                        <button
-                            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                            className="text-white hover:text-gray-200 focus:outline-none"
-                        >
-                            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                {isMobileMenuOpen ? (
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                ) : (
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-                                )}
-                            </svg>
-                        </button>
-                    </div>
+                        );
+                    })}
+                    {user ? (
+                        <div className="flex items-center gap-2">
+                            <Link href={dash()} className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-widest shadow-sm transition-colors ${path.startsWith('/dashboard') ? 'bg-[#f0aa0b] text-[#1a1a1a]' : 'bg-white text-[#720101] hover:bg-[#f0aa0b] hover:text-[#1a1a1a]'}`}>
+                                Dashboard
+                            </Link>
+                            <NotificationBell variant="light" />
+                            <UserDropdown user={user} dashLink={dash()} />
+                        </div>
+                    ) : (
+                        <Link href="/login" className="rounded-full bg-white px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#720101]">Login</Link>
+                    )}
                 </div>
+                <button onClick={() => setMob(!mob)} className="md:hidden text-white">
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">{mob ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>}</svg>
+                </button>
             </div>
-
-            {/* Mobile Menu Dropdown */}
-            {isMobileMenuOpen && (
-                <div className="md:hidden bg-red-800 absolute top-full left-0 w-full shadow-xl">
-                    <div className="px-4 pt-2 pb-4 space-y-2">
-                        {navLinks.map((link) => (
-                            <Link
-                                key={link.name}
-                                to={link.path}
-                                onClick={() => setIsMobileMenuOpen(false)}
-                                className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium"
-                            >
-                                {link.name}
-                            </Link>
-                        ))}
-                        {user ? (
-                            <>
-                                <Link to={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
-                                    Dashboard
-                                </Link>
-                                <a href="/profile" className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
-                                    My Profile
-                                </a>
-                                <button
-                                    onClick={() => { logout(); setIsMobileMenuOpen(false); }}
-                                    className="w-full text-left text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium"
-                                >
-                                    Logout
-                                </button>
-                            </>
-                        ) : (
-                            <div className="mt-4 flex flex-col space-y-2">
-                                <Link to="/login" className="block text-center text-white border border-white/30 px-3 py-2 rounded-md" onClick={() => setIsMobileMenuOpen(false)}>Login</Link>
-                                <Link to="/register" className="block text-center bg-yellow-500 text-red-900 px-3 py-2 rounded-md font-bold" onClick={() => setIsMobileMenuOpen(false)}>Register</Link>
-                            </div>
-                        )}
-                    </div>
+            {mob && (
+                <div className="border-t border-white/10 bg-[#5a0101] px-5 py-3 md:hidden">
+                    {links.map(l => <Link key={l.n} href={l.p} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10">{l.n}</Link>)}
+                    {user ? (
+                        <>
+                            <Link href={dash()} className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Dashboard</Link>
+                            {logout && <button onClick={logout} className="block w-full rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-white hover:bg-white/10">Logout</button>}
+                        </>
+                    ) : (
+                        <Link href="/login" className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Login</Link>
+                    )}
                 </div>
             )}
         </nav>

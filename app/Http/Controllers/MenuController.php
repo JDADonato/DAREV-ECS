@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\MenuItem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class MenuController extends Controller
 {
@@ -47,27 +48,31 @@ class MenuController extends Controller
     }
 
     /**
-     * Get all categories
+     * Get all categories (Cached for 24 hours)
      */
     public function categories()
     {
-        $categories = MenuItem::distinct()
-            ->pluck('category')
-            ->sort()
-            ->values();
+        $categories = Cache::remember('menu_categories', now()->addHours(24), function () {
+            return MenuItem::distinct()
+                ->pluck('category')
+                ->sort()
+                ->values();
+        });
 
         return response()->json($categories);
     }
 
     /**
-     * Get best seller items
+     * Get best seller items (Cached for 24 hours)
      */
     public function bestsellers()
     {
-        $items = MenuItem::whereRaw('is_best_seller is true')
-            ->whereRaw('is_active is true')
-            ->orderBy('name')
-            ->get();
+        $items = Cache::remember('menu_bestsellers', now()->addHours(24), function () {
+            return MenuItem::whereRaw('is_best_seller is true')
+                ->whereRaw('is_active is true')
+                ->orderBy('name')
+                ->get();
+        });
 
         return response()->json($items);
     }

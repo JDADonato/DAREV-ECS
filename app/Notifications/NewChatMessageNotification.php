@@ -47,14 +47,12 @@ class NewChatMessageNotification extends Notification implements ShouldQueue
 
         return (new MailMessage)
             ->subject("New Message from Eloquente Catering")
-            ->greeting("Hello {$notifiable->username}!")
-            ->line("A marketing staff member has replied to your inquiry.")
-            ->line("**From:** {$staffName}")
-            ->line("**Message Preview:**")
-            ->line("\"{$preview}\"")
-            ->action('View Message & Reply', $appUrl)
-            ->line('We look forward to making your event unforgettable!')
-            ->salutation("Warm regards,\nEloquente Catering Team");
+            ->view('emails.new_message', [
+                'clientName' => $notifiable->username,
+                'staffName' => $staffName,
+                'preview' => $preview,
+                'appUrl' => $appUrl,
+            ]);
     }
 
     /**

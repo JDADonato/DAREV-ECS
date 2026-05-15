@@ -6,6 +6,7 @@ import UserDropdown from '../../Components/common/UserDropdown';
 import NotificationBell from '../../Components/common/NotificationBell';
 import ChatBubble from '../../Components/common/ChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
+import ClientNavbar from '../../Components/common/ClientNavbar';
 
 const CATEGORY_LIMITS = { starter: 3, main: 4, side: 4, dessert: 4, drink: 3 };
 const STORAGE_KEY = 'ecs_booking_draft';
@@ -264,9 +265,10 @@ const MenuGallery = () => {
     const maxPrice = Math.max(...allPrices);
 
     return (
-        <div className="min-h-screen bg-white">
+        <div className="min-h-screen bg-white pt-[68px]">
+            <ClientNavbar user={user} />
             {/* Navbar */}
-            <nav className="bg-brand-red shadow-lg py-4 relative z-50">
+            <nav className="hidden bg-brand-red shadow-lg py-4 relative z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center">
                         <div className="flex-shrink-0 flex items-center">

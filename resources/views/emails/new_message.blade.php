@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Your Verification Code - Eloquente Catering System</title>
+    <title>New Message - Eloquente Catering</title>
     <style>
         body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -36,37 +36,41 @@
         }
         .content {
             padding: 40px 30px;
-            text-align: center;
         }
         .content h2 {
             color: #111827;
             font-size: 20px;
             margin-top: 0;
             margin-bottom: 20px;
+            text-align: center;
         }
         .content p {
             font-size: 16px;
             color: #4b5563;
-            margin-bottom: 25px;
+            margin-bottom: 20px;
         }
-        .otp-box {
+        .message-box {
             background-color: #fef2f2;
-            border: 2px dashed #720101;
-            border-radius: 12px;
-            padding: 30px 10px;
-            margin: 35px auto;
-            width: fit-content;
-            min-width: 320px;
-            text-align: center;
+            border-left: 4px solid #720101;
+            padding: 20px;
+            margin: 30px 0;
+            font-style: italic;
+            color: #111827;
         }
-        .otp-code {
-            font-size: 56px;
-            font-weight: 800;
-            color: #720101;
-            letter-spacing: 14px;
-            margin: 0;
-            margin-left: 14px; /* balances out the trailing letter-spacing */
-            font-family: 'Courier New', Courier, monospace;
+        .button-container {
+            text-align: center;
+            margin-top: 35px;
+            margin-bottom: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #720101;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 16px;
         }
         .footer {
             background-color: #f9fafb;
@@ -76,11 +80,6 @@
             color: #6b7280;
             border-top: 1px solid #f3f4f6;
         }
-        .security-notice {
-            font-size: 13px;
-            color: #9ca3af;
-            margin-top: 15px;
-        }
     </style>
 </head>
 <body>
@@ -89,19 +88,22 @@
             <h1>Eloquente Catering System</h1>
         </div>
         <div class="content">
-            <h2>Email Verification Required</h2>
-            <p>Welcome to Eloquente! To ensure the security of your account and complete your registration, please verify your email address using the code below.</p>
+            <h2>You Have a New Message</h2>
+            <p>Hello <strong>{{ $clientName }}</strong>,</p>
+            <p><strong>{{ $staffName }}</strong> from our Marketing team has replied to your inquiry.</p>
             
-            <div class="otp-box">
-                <p class="otp-code">{{ $otpCode }}</p>
+            <div class="message-box">
+                "{{ $preview }}"
             </div>
             
-            <p><strong>This code will expire in 15 minutes.</strong></p>
-            <p>If you did not request this verification, please safely ignore this email.</p>
+            <div class="button-container">
+                <a href="{{ $appUrl }}" class="button">View Message & Reply</a>
+            </div>
+            
+            <p style="text-align: center;">We look forward to making your event unforgettable!</p>
         </div>
         <div class="footer">
-            <p>&copy; {{ date('Y') }} Eloquente Catering System. All rights reserved.</p>
-            <p class="security-notice">Please do not reply to this email. For assistance, contact our support team.</p>
+            <p>&copy; {{ date('Y') }} Eloquente Catering. All rights reserved.</p>
         </div>
     </div>
 </body>

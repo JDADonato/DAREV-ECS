@@ -42,6 +42,8 @@ class Booking extends Model
         'labor_surcharge',
         'discount_value',
         'discount_type',
+        'expires_at',
+        'milestone_step',
     ];
 
     /**
@@ -51,6 +53,7 @@ class Booking extends Model
     {
         return [
             'event_date' => 'date',
+            'expires_at' => 'datetime',
             'total_cost' => 'decimal:2',
             'transport_fee' => 'decimal:2',
             'labor_surcharge' => 'decimal:2',

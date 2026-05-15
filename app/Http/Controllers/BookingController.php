@@ -122,51 +122,29 @@ class BookingController extends Controller
             'venue_building_details' => $request->venue_building_details,
             'transport_fee'        => $request->transport_fee ?? 0,
             'labor_surcharge'      => $request->labor_surcharge ?? 0,
+            'expires_at'           => now()->addHours(24), // Phase 1: Slot Expiration
         ]);
 
-        // 5. Auto-generate 3-tier payment schedule
+        // 5. Auto-generate dynamic payment schedule using PaymentCalculationService
         $cost = (float) ($request->total_cost ?? $request->budget ?? 0);
 
         if ($cost > 0) {
             try {
-                $eventDateObj = Carbon::parse($eventDate);
-                $reservationDue = now()->toDateString();
-                $downPaymentDue = $eventDateObj->copy()->subMonth()->toDateString();
-                $finalDue = $eventDateObj->copy()->subDays(10)->toDateString();
+                $paymentService = new \App\Services\PaymentCalculationService();
+                $tranches = $paymentService->calculateTranches($booking);
 
-                // 3 Payment Tranches: 10% Reservation, 70% DownPayment, 20% Final
-                $reservationAmount = round($cost * 0.10, 2);
-                $finalAmount = round($cost * 0.20, 2);
-                $downPaymentAmount = $cost - $reservationAmount - $finalAmount;
+                foreach ($tranches as $tranche) {
+                    Payment::create([
+                        'booking_id'     => $booking->id,
+                        'amount'         => $tranche['amount'],
+                        'payment_method' => 'Pending',
+                        'status'         => 'Pending',
+                        'payment_type'   => $tranche['name'],
+                        'due_date'       => Carbon::parse($tranche['due_date'])->toDateString(),
+                    ]);
+                }
 
-                Payment::create([
-                    'booking_id'     => $booking->id,
-                    'amount'         => $reservationAmount,
-                    'payment_method' => 'Pending',
-                    'status'         => 'Pending',
-                    'payment_type'   => 'Reservation',
-                    'due_date'       => $reservationDue,
-                ]);
-
-                Payment::create([
-                    'booking_id'     => $booking->id,
-                    'amount'         => $downPaymentAmount,
-                    'payment_method' => 'Pending',
-                    'status'         => 'Pending',
-                    'payment_type'   => 'DownPayment',
-                    'due_date'       => $downPaymentDue,
-                ]);
-
-                Payment::create([
-                    'booking_id'     => $booking->id,
-                    'amount'         => $finalAmount,
-                    'payment_method' => 'Pending',
-                    'status'         => 'Pending',
-                    'payment_type'   => 'Final',
-                    'due_date'       => $finalDue,
-                ]);
-
-                Log::info("Created 3 payment schedule rows for booking #{$booking->id}");
+                Log::info("Created dynamic payment schedule for booking #{$booking->id}");
             } catch (\Exception $e) {
                 Log::error("Payment schedule creation failed (booking still created): {$e->getMessage()}");
             }
@@ -254,6 +232,9 @@ class BookingController extends Controller
             'theme_uploads'         => $themeUploads,
             'special_instructions'  => $request->special_instructions,
             'venue_building_details' => $request->venue_building_details,
+            'selected_menu'         => $request->has('selected_menu')
+                ? (is_array($request->selected_menu) ? json_encode($request->selected_menu) : $request->selected_menu)
+                : $booking->selected_menu,
         ]);
 
         return response()->json(['message' => 'Event details updated successfully!']);
@@ -366,7 +347,8 @@ class BookingController extends Controller
                 ->where('status', 'Pending')
                 ->update([
                     'payment_method' => $request->payment_method,
-                    'status'         => 'Pending',
+                    'status'         => 'Verified',
+                    'verified_at'    => now(),
                 ]);
         } else {
             // Update single payment
@@ -374,10 +356,16 @@ class BookingController extends Controller
                 ->where('booking_id', $request->booking_id)
                 ->update([
                     'payment_method' => $request->payment_method,
-                    'status'         => 'Pending',
+                    'status'         => 'Verified',
+                    'verified_at'    => now(),
                 ]);
         }
 
-        return response()->json(['message' => 'Payment recorded successfully. Pending verification.']);
+        // If the booking is 'Pending' and payment was verified, we update the status
+        if ($booking->status === 'Pending') {
+            $booking->update(['status' => 'Confirmed', 'live_status' => 'Payment Verified']);
+        }
+
+        return response()->json(['message' => 'Payment processed and verified successfully.']);
     }
 }

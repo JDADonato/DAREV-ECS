@@ -297,9 +297,67 @@ class ChatController extends Controller
         ]);
     }
 
+    /**
+     * POST /api/chat/conversations/{conversation}/transfer
+     *
+     * Staff transfers a conversation to another staff member.
+     */
+    public function transfer(Request $request, Conversation $conversation)
+    {
+        $request->validate([
+            'new_staff_id' => 'required|exists:users,id',
+        ]);
+
+        $user = Auth::user();
+
+        if (!in_array($user->role, ['Marketing', 'Admin'])) {
+            return response()->json(['error' => 'Only staff can transfer conversations.'], 403);
+        }
+
+        if ($conversation->staff_id !== $user->id) {
+            return response()->json(['error' => 'You can only transfer your own claimed conversations.'], 403);
+        }
+
+        $newStaff = User::find($request->new_staff_id);
+        if (!in_array($newStaff->role, ['Marketing', 'Admin'])) {
+            return response()->json(['error' => 'Can only transfer to Marketing or Admin.'], 422);
+        }
+
+        $conversation->update(['staff_id' => $newStaff->id]);
+
+        $conversation->refresh();
+        $conversation->load(['client:id,username,email', 'staff:id,username']);
+
+        // Broadcast claim event so UI updates for everyone
+        broadcast(new ConversationClaimed($conversation));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Conversation transferred successfully.',
+        ]);
+    }
+
     // ─────────────────────────────────────────────
-    //  Utility: Unread Count
+    //  Utility: Staff & Unread
     // ─────────────────────────────────────────────
+
+    /**
+     * GET /api/chat/staff/available
+     */
+    public function availableStaff()
+    {
+        $user = Auth::user();
+        if (!in_array($user->role, ['Marketing', 'Admin'])) {
+            return response()->json([]);
+        }
+
+        $staff = User::whereIn('role', ['Marketing', 'Admin'])
+            ->where('id', '!=', $user->id)
+            ->select('id', 'username', 'role')
+            ->get();
+
+        return response()->json($staff);
+    }
 
     /**
      * GET /api/chat/unread-count

@@ -24,6 +24,9 @@ const StaffMessaging = () => {
     const [sending, setSending] = useState(false);
     const [claiming, setClaiming] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [availableStaff, setAvailableStaff] = useState([]);
+    const [showTransfer, setShowTransfer] = useState(false);
+    const [transferring, setTransferring] = useState(false);
     const messagesEndRef = useRef(null);
     const echoChannelsRef = useRef({});
     const selectedConvRef = useRef(null);
@@ -164,6 +167,35 @@ const StaffMessaging = () => {
                 fetchConversations();
             }
         } catch (e) { console.error('Resolve failed:', e); }
+    };
+
+    const fetchAvailableStaff = async () => {
+        try {
+            const res = await fetch('/api/chat/staff/available');
+            if (res.ok) setAvailableStaff(await res.json());
+        } catch (e) { console.error(e); }
+    };
+
+    const handleTransfer = async (staffId) => {
+        if (!selectedConv || transferring) return;
+        setTransferring(true);
+        try {
+            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/transfer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ new_staff_id: staffId })
+            });
+            if (res.ok) {
+                setShowTransfer(false);
+                setSelectedConv(null);
+                setMessages([]);
+                fetchConversations();
+            } else {
+                const err = await res.json();
+                alert(err.error || 'Failed to transfer.');
+            }
+        } catch (e) { console.error('Transfer failed'); }
+        finally { setTransferring(false); }
     };
 
     const handleSend = async (e) => {
@@ -318,13 +350,38 @@ const StaffMessaging = () => {
                                         </p>
                                     </div>
                                 </div>
-                                {/* Resolve button (only when claimed) */}
+                                {/* Actions (only when claimed) */}
                                 {isClaimedByMe && (
-                                    <button onClick={handleResolve}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg border border-gray-200 hover:border-red-200 transition-colors">
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                        Resolve
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative">
+                                            <button onClick={() => { setShowTransfer(!showTransfer); if (!showTransfer) fetchAvailableStaff(); }}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg border border-gray-200 hover:border-primary-200 transition-colors">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                                                Transfer
+                                            </button>
+                                            {showTransfer && (
+                                                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1">
+                                                    <div className="px-3 py-2 border-b border-gray-100"><p className="text-xs font-bold text-gray-500">Select Staff</p></div>
+                                                    {availableStaff.length === 0 ? (
+                                                        <div className="px-3 py-2 text-xs text-gray-400">No staff available</div>
+                                                    ) : (
+                                                        availableStaff.map(staff => (
+                                                            <button key={staff.id} onClick={() => handleTransfer(staff.id)} disabled={transferring}
+                                                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between">
+                                                                <span>{staff.username}</span>
+                                                                <span className="text-[10px] text-gray-400">{staff.role}</span>
+                                                            </button>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button onClick={handleResolve}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg border border-gray-200 hover:border-red-200 transition-colors">
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                            Resolve
+                                        </button>
+                                    </div>
                                 )}
                             </div>
 

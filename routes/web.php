@@ -14,6 +14,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OpsController;
 use App\Http\Controllers\PackageController;
+use App\Http\Controllers\PaymentController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -75,6 +76,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/chat/conversations/{conversation}/messages', [ChatController::class, 'sendMessage']);
     Route::post('/api/chat/conversations/{conversation}/claim', [ChatController::class, 'claim']);
     Route::post('/api/chat/conversations/{conversation}/resolve', [ChatController::class, 'resolve']);
+    Route::post('/api/chat/conversations/{conversation}/transfer', [ChatController::class, 'transfer']);
+    Route::get('/api/chat/staff/available', [ChatController::class, 'availableStaff']);
 });
 
 // Public pricing endpoint (used by menu components)
@@ -116,6 +119,10 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     // Dashboard — renders original ClientDashboard.jsx which fetches via API
     Route::get('/dashboard/client', fn () => Inertia::render('client/ClientDashboard'))->name('dashboard.client');
     Route::get('/pay', fn () => Inertia::render('client/PaymentPage'))->name('payment.page');
+    Route::post('/checkout/initialize', [PaymentController::class, 'initializeCheckout'])->name('checkout.initialize');
+    Route::get('/checkout/secure', [PaymentController::class, 'showSecureCheckout'])->middleware('signed')->name('checkout.secure');
+    Route::post('/checkout/process', [PaymentController::class, 'processPayment'])->name('checkout.process');
+    Route::get('/checkout/success', fn () => Inertia::render('client/PaymentSuccess'))->name('checkout.success');
 
     // Dashboard data API (used by original ClientDashboard.jsx fetch calls)
     Route::get('/api/dashboard/client', [ClientDashboardController::class, 'apiData']);

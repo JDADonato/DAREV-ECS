@@ -17,7 +17,15 @@ class OpsController extends Controller
      */
     public function index()
     {
-        return Inertia::render('Ops/DashboardOps');
+        return Inertia::render('Ops/DashboardOps', [
+            // Phase 2: Inertia.js Payload Optimization
+            // Lazy Evaluation: Only queries the database if the 'bookings' prop is explicitly requested via partial reloads.
+            'bookings' => Inertia::lazy(function () {
+                return Booking::with('user:id,username,role')
+                    ->orderBy('event_date', 'asc')
+                    ->get();
+            })
+        ]);
     }
 
     /**

@@ -12,85 +12,74 @@ A premium, full-stack catering management platform. This system handles everythi
 
 ---
 
-## 🚀 One-Click Quick Start (Windows)
+## 🚀 One-Time Setup (Windows)
 
-This project is designed to be **portable**. It includes a local PHP folder, so you don't need to install PHP on your computer.
+This project is designed to be **portable**. It includes a local PHP folder, so you don't need to install PHP globally on your computer.
 
 1.  **Open PowerShell** in the project folder.
-2.  **Activate Local PHP**:
+2.  **Enable Local PHP & Composer**:
     ```powershell
     $env:PATH = ".\php;" + $env:PATH
     ```
-3.  **Install Everything**:
+3.  **Ensure PostgreSQL Extensions are Enabled**:
+    Open `php/php.ini` and ensure these lines are **NOT** commented out (remove the `;`):
+    ```ini
+    extension=pdo_pgsql
+    extension=pgsql
+    extension=openssl
+    extension=curl
+    ```
+4.  **Install Dependencies**:
     ```powershell
     php composer.phar install
     npm install
     ```
-4.  **Setup Environment**:
-    *   Create a `.env` file (copy from `.env.example`).
+5.  **Setup Environment**:
+    *   Create a `.env` file from `.env.example`.
     *   Add your **Supabase PostgreSQL** credentials (see [Database Setup](#-database-setup)).
-    *   Add **Reverb Credentials** (see [Real-Time Chat Setup](#-real-time-chat-setup)).
-5.  **Initialize Database**:
+    *   Add **Reverb Credentials** for Chat.
+6.  **Initialize Database**:
     ```powershell
     php artisan key:generate
     php artisan migrate --seed
     ```
-6.  **Run the System**:
+
+---
+
+## ⚡ Daily Startup Routine
+
+Every time you start working, follow these steps in a new PowerShell window:
+
+1.  **Activate PHP Path**:
+    ```powershell
+    $env:PATH = ".\php;" + $env:PATH
+    ```
+2.  **Clear Caches (If needed)**:
+    ```powershell
+    php artisan optimize:clear
+    ```
+3.  **Run the System**:
     ```powershell
     composer run dev
     ```
 
 > [!IMPORTANT]
 > `composer run dev` starts **4 essential processes**:
-> 1. Laravel Web Server (8080)
-> 2. Vite Dev Server (Frontend)
-> 3. Laravel Reverb (WebSocket Server)
-> 4. Queue Worker (for Emails & Notifications)
+> 1. **Laravel Web Server** (http://127.0.0.1:8080)
+> 2. **Vite Dev Server** (Hot Module Replacement)
+> 3. **Laravel Reverb** (WebSocket Server for Chat)
+> 4. **Queue Worker** (Processes Emails & Notifications)
 
 ---
 
-## 💬 Real-Time Chat Setup
+## 🗄️ Database Setup (Supabase)
 
-The chat system uses **Laravel Reverb**. For it to work correctly, your `.env` MUST have these values:
+We use **Supabase** for the shared live database. Because Supabase uses a pooler, you must use **Port 6543** for Transaction Mode.
 
-```env
-BROADCAST_CONNECTION=reverb
-
-REVERB_APP_ID=your-id
-REVERB_APP_KEY=your-key
-REVERB_APP_SECRET=your-secret
-REVERB_HOST="127.0.0.1"
-REVERB_PORT=8085
-REVERB_SCHEME=http
-
-VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
-VITE_REVERB_HOST="${REVERB_HOST}"
-VITE_REVERB_PORT="${REVERB_PORT}"
-VITE_REVERB_SCHEME="${REVERB_SCHEME}"
-```
-
-### If Chat isn't connecting:
-1.  Ensure you ran `composer run dev` (it starts the Reverb server automatically).
-2.  Check that port `8085` is not blocked by a firewall.
-3.  Make sure your PHP has the `openssl` and `curl` extensions enabled in `php/php.ini`.
-
----
-
-## 📧 Email Notifications
-
-Notifications (like "New Message" alerts) are sent to the **Laravel Queue**.
-*   **During Development**: Emails are logged to `storage/logs/laravel.log`.
-*   **To Send Real Emails**: Update the `MAIL_` variables in your `.env` with SMTP credentials (e.g., Gmail App Password).
-
----
-
-## 🗄️ Database Setup
-
-We use **Supabase** for the live database. In your `.env`, set:
-
+**In your `.env`:**
 ```env
 DB_CONNECTION=pgsql
-DB_HOST=aws-0-ap-southeast-1.pooler.supabase.com # Use your Supabase host
+DB_HOST=aws-0-ap-southeast-1.pooler.supabase.com # Your Supabase Host
 DB_PORT=6543
 DB_DATABASE=postgres
 DB_USERNAME=postgres.your-project-ref
@@ -98,14 +87,31 @@ DB_PASSWORD=your-password
 DB_SSLMODE=require
 ```
 
-> [!TIP]
-> If you get a "Prepared statement does not exist" error, ensure `DB_PORT=6543` is used (Supabase Transaction Mode).
+**Supabase Configuration Note:**
+In `config/database.php`, the app is configured to disable server-side prepared statements to maintain compatibility with the Supabase pooler:
+```php
+'options' => [
+    PDO::ATTR_EMULATE_PREPARES => true,
+    PDO::PGSQL_ATTR_DISABLE_PREPARES => true,
+]
+```
 
 ---
 
-## 🔑 Default Accounts
+## 💬 Real-Time Chat & Notifications
 
-After running `php artisan db:seed`, use these credentials (Password: `password123`):
+The chat system uses **Laravel Reverb**. 
+
+1.  Ensure `BROADCAST_CONNECTION=reverb` in `.env`.
+2.  If the chat bubble says "Disconnected," verify that port `8085` is open.
+3.  Client side uses `ChatBubble.jsx`.
+4.  Staff side uses `StaffMessaging.jsx` inside the Operations Dashboard.
+
+---
+
+## 🔑 Default Accounts (Post-Seed)
+
+**Password for all:** `password123`
 
 | Role | Username |
 | :--- | :--- |
@@ -116,21 +122,23 @@ After running `php artisan db:seed`, use these credentials (Password: `password1
 
 ---
 
-## 📂 Project Structure
+## 📂 Key Files & Directories
 
-*   `app/Http/Controllers/ChatController.php`: Core logic for the ticketing/claiming system.
-*   `resources/js/Components/common/StaffMessaging.jsx`: Staff side chat interface.
-*   `resources/js/Components/common/ChatBubble.jsx`: Client side floating chat bubble.
-*   `app/Notifications/`: Email and database notification templates.
-*   `routes/channels.php`: Authorization rules for private WebSocket channels.
+*   `app/Http/Controllers/PaymentController.php`: Handles payment flow (Currently simulated - see [darevhandoff.md](file:///darevhandoff.md)).
+*   `resources/js/Pages/client/MenuGallery.jsx`: Main menu exploration for clients.
+*   `resources/js/Components/client/MenuBuilder.jsx`: Custom package builder.
+*   `app/Services/BusinessRulesService.php`: Core logic for booking availability and pax limits.
+*   `darevhandoff.md`: **Crucial Read** for technical gaps, security risks, and the remaining implementation roadmap.
 
 ---
 
 ## 🛠️ Troubleshooting
 
-*   **"Could not find driver"**: Open `php/php.ini` and remove the `;` before `extension=pdo_pgsql` and `extension=pgsql`.
-*   **Vite not loading**: Ensure `npm run dev` is running (included in `composer run dev`).
-*   **PHP Commands not found**: Remember to run `$env:PATH = ".\php;" + $env:PATH` in **every new terminal window**.
+*   **"Could not find driver"**: Ensure `pdo_pgsql` is enabled in `php/php.ini`.
+*   **"Prepared statement already exists"**: Ensure you are using **Port 6543** and not 5432.
+*   **White Screen on Login**: Run `php artisan config:clear` and `php artisan route:clear`.
+*   **Vite Manifest Missing**: Run `npm run build` once to generate assets if `composer run dev` is not being used.
 
 ---
-*Developed for Eloquente Catering. Phase 2: WebSocket Integration Complete.*
+*Developed for Eloquente Catering System.*
+

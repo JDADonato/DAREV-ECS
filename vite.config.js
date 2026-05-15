@@ -18,4 +18,17 @@ export default defineConfig({
             'react-router-dom': path.resolve(__dirname, 'resources/js/lib/router-compat.jsx'),
         },
     },
+    build: {
+        // Phase 3: Vite Chunk Splitting
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    // Split vendor libraries into their own heavily-cached chunks
+                    vendor: ['react', 'react-dom'],
+                    inertia: ['@inertiajs/react'],
+                    ui: ['@headlessui/react', 'lucide-react', 'recharts']
+                }
+            }
+        }
+    }
 });

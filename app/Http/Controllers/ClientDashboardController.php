@@ -24,7 +24,17 @@ class ClientDashboardController extends Controller
 
         $bookings = Booking::where('user_id', $userId)
             ->orderBy('event_date', 'desc')
-            ->get();
+            ->get()
+            ->map(function ($booking) {
+                $paymentService = new \App\Services\PaymentCalculationService();
+                $bookingService = new \App\Services\BookingManagementService();
+                $bookingArray = $booking->toArray();
+                $bookingArray['nextPaymentDue'] = $paymentService->getNextPaymentDue($booking);
+                $bookingArray['canEditSupplementary'] = $bookingService->canEditSupplementary($booking);
+                $bookingArray['canEditMenu'] = $bookingService->canEditMenu($booking);
+                $bookingArray['cancellationImpact'] = $bookingService->calculateCancellationImpact($booking);
+                return $bookingArray;
+            });
 
         $tastings = FoodTasting::where('user_id', $userId)
             ->orderBy('preferred_date', 'desc')

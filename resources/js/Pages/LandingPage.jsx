@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, router } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
-import UserDropdown from '../Components/common/UserDropdown';
-import NotificationBell from '../Components/common/NotificationBell';
 import ChatBubble from '../Components/common/ChatBubble';
+import ClientNavbar from '../Components/common/ClientNavbar';
 import logoImg from '../../images/ECS_LOGO.png';
 
 /* ── SVG Icons ── */
@@ -39,62 +38,195 @@ const Counter = ({ end, suffix = '' }) => {
     return <span ref={ref}>{val}{suffix}</span>;
 };
 
+const EventJourneyTracker = ({ booking }) => {
+    if (!booking) return null;
+    const steps = ['Reserved', 'Downpayment', 'Detailing', 'Final Payment'];
+    const activeStep = booking.milestone_step || 1;
+
+    return (
+        <div className="bg-white border-b border-gray-100 shadow-sm pt-28 pb-8 px-5">
+            <div className="max-w-4xl mx-auto">
+                <div className="flex justify-between items-end mb-6">
+                    <div>
+                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-1">Your Journey</p>
+                        <h2 className="text-[#1a1a1a] text-xl font-display font-bold">Event on {new Date(booking.event_date).toLocaleDateString()}</h2>
+                    </div>
+                    <button 
+                        onClick={() => router.get('/dashboard/client')}
+                        className="bg-[#720101] hover:bg-[#5a0101] text-white text-xs font-bold py-2 px-5 rounded-full shadow-md transition-all"
+                    >
+                        Go to Dashboard to Complete
+                    </button>
+                </div>
+                
+                <div className="relative">
+                    <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 rounded-full"></div>
+                    <div className="absolute top-1/2 left-0 h-1 bg-[#720101] -translate-y-1/2 rounded-full transition-all duration-500" style={{ width: `${((activeStep - 1) / 3) * 100}%` }}></div>
+                    
+                    <div className="relative flex justify-between">
+                        {steps.map((step, idx) => {
+                            const stepNum = idx + 1;
+                            const isCompleted = stepNum < activeStep;
+                            const isActive = stepNum === activeStep;
+                            
+                            return (
+                                <div key={idx} className="flex flex-col items-center">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-colors z-10 
+                                        ${isCompleted ? 'bg-[#720101] border-[#720101] text-white' : 
+                                          isActive ? 'bg-white border-[#720101] text-[#720101] shadow-[0_0_10px_rgba(114,1,1,0.3)]' : 
+                                          'bg-white border-gray-200 text-gray-300'}`}>
+                                        {isCompleted ? '✓' : stepNum}
+                                    </div>
+                                    <p className={`mt-3 text-xs font-bold uppercase tracking-wide
+                                        ${isActive ? 'text-[#720101]' : isCompleted ? 'text-gray-800' : 'text-gray-400'}`}>
+                                        {step}
+                                    </p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const settledStatuses = ['Paid', 'Verified'];
+const isSettled = (status) => settledStatuses.includes(status);
+
+const buildFloatingJourneySteps = (booking, payments) => {
+    const bookingPayments = payments.filter((payment) => payment.booking_id === booking.id);
+    const total = Number(booking.total_cost || 0);
+    const paid = bookingPayments
+        .filter((payment) => isSettled(payment.status))
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettled(payment.status)) || (total > 0 && paid / total >= 0.1);
+    const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
+    const menuDone = Boolean(booking.selected_menu);
+    const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettled(payment.status));
+
+    return [
+        { label: 'Booking created', done: true, action: 'Review booking', tab: 'details' },
+        { label: 'Reservation payment', done: hasReservation, action: 'Pay reservation fee', tab: 'payments' },
+        { label: 'Event details', done: eventDetailsDone, action: 'Add event details', tab: 'details' },
+        { label: 'Menu selection', done: menuDone, action: 'Finalize menu', tab: 'menu' },
+        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${booking.nextPaymentDue.payment_type}` : 'Review payments', tab: 'payments' },
+    ];
+};
+
+const FloatingJourneyTracker = ({ bookings, payments }) => {
+    const activeBookings = bookings.filter((booking) => !['Cancelled', 'cancelled', 'Completed'].includes(booking.status));
+    const [selectedId, setSelectedId] = useState(null);
+    const [open, setOpen] = useState(false);
+    const booking = activeBookings.find((item) => item.id === selectedId) || activeBookings[0];
+
+    useEffect(() => {
+        if (!selectedId && activeBookings[0]) {
+            setSelectedId(activeBookings[0].id);
+        }
+    }, [activeBookings, selectedId]);
+
+    if (!booking) return null;
+
+    const steps = buildFloatingJourneySteps(booking, payments);
+    const completed = steps.filter((step) => step.done).length;
+    const progress = Math.round((completed / steps.length) * 100);
+    const remaining = steps.filter((step) => !step.done);
+
+    if (!open) {
+        return (
+            <button onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-40 rounded-full border border-white/70 bg-white/95 px-4 py-3 text-left shadow-2xl shadow-black/20 backdrop-blur-md transition-transform hover:-translate-y-0.5">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey</p>
+                <div className="mt-1 flex items-center gap-3">
+                    <div className="h-2 w-24 rounded-full bg-gray-100">
+                        <div className="h-2 rounded-full bg-[#720101]" style={{ width: `${progress}%` }} />
+                    </div>
+                    <span className="text-xs font-bold text-gray-800">{remaining.length} left</span>
+                </div>
+            </button>
+        );
+    }
+
+    return (
+        <div className="fixed bottom-5 right-5 z-40 w-[calc(100%-2.5rem)] max-w-md rounded-2xl border border-white/70 bg-white/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-md">
+            <div className="mb-3 flex items-start justify-between gap-4">
+                <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey Tracker</p>
+                    <h2 className="mt-1 text-base font-display font-bold text-[#1a1a1a]">
+                        {remaining.length === 0 ? 'All steps complete' : `${remaining.length} step${remaining.length > 1 ? 's' : ''} remaining`}
+                    </h2>
+                    <p className="mt-1 text-xs font-semibold text-gray-500">Event on {new Date(booking.event_date).toLocaleDateString()}</p>
+                </div>
+                <button onClick={() => router.get('/dashboard/client')} className="shrink-0 rounded-full bg-[#720101] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[#5a0101]">
+                    Open Dashboard
+                </button>
+                <button onClick={() => setOpen(false)} className="rounded-full bg-gray-100 px-3 py-2 text-xs font-bold text-gray-500 hover:bg-gray-200">Hide</button>
+            </div>
+
+            {activeBookings.length > 1 && (
+                <select value={booking.id} onChange={(event) => setSelectedId(Number(event.target.value))} className="mb-3 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 outline-none focus:border-[#720101]">
+                    {activeBookings.map((item) => (
+                        <option key={item.id} value={item.id}>
+                            {item.client_full_name || 'Eloquente event'} - {new Date(item.event_date).toLocaleDateString()}
+                        </option>
+                    ))}
+                </select>
+            )}
+
+            <div className="mb-4">
+                <div className="mb-2 flex justify-between text-[11px] font-bold uppercase tracking-widest text-gray-500">
+                    <span>Progress</span>
+                    <span>{progress}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100">
+                    <div className="h-2 rounded-full bg-[#720101] transition-all duration-700" style={{ width: `${progress}%` }} />
+                </div>
+            </div>
+
+            <div className="grid gap-2">
+                {steps.map((step, index) => (
+                    <button key={step.label} onClick={() => router.get(`/dashboard/client?tab=${step.tab}`)} className="flex w-full items-center gap-3 rounded-xl bg-gray-50 p-2.5 text-left transition-colors hover:bg-[#720101]/5">
+                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : 'bg-white text-gray-400 ring-1 ring-gray-200'}`}>
+                            {step.done ? '✓' : index + 1}
+                        </div>
+                        <div className="min-w-0">
+                            <p className="truncate text-xs font-bold text-gray-900">{step.label}</p>
+                            {!step.done && <p className="truncate text-[11px] font-medium text-gray-500">{step.action}</p>}
+                        </div>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 const LandingPage = () => {
     const { user, logout } = useAuth();
-    const [mob, setMob] = useState(false);
-    const links = [{ n:'Home',p:'/' },{ n:'Menu',p:'/menu' },{ n:'Book Now',p:'/book' },{ n:'About',p:'/about' },{ n:'Contact',p:'/contact' }];
-    const dash = () => !user ? '/' : ({Client:'/dashboard/client',Marketing:'/dashboard/ops',Accounting:'/dashboard/finance',Admin:'/dashboard/admin'}[user.role]||'/');
+    const [journeyData, setJourneyData] = useState({ bookings: [], payments: [] });
+
+    useEffect(() => {
+        if (user && user.role === 'Client') {
+            fetch('/api/dashboard/client')
+                .then(r => r.json())
+                .then(data => {
+                    setJourneyData({
+                        bookings: data.bookings || [],
+                        payments: data.payments || [],
+                    });
+                })
+                .catch(err => console.error(err));
+        }
+    }, [user]);
 
     return (
         <div className="min-h-screen flex flex-col bg-white" style={{fontFamily:"'Inter',sans-serif"}}>
 
-            {/* NAV */}
-            <nav className="fixed w-full z-50 bg-[#720101]" style={{boxShadow:'0 2px 20px rgba(0,0,0,.3)'}}>
-                <div className="max-w-7xl mx-auto px-5 sm:px-8">
-                    <div className="flex items-center justify-between" style={{height:68}}>
-                        <Link href="/"><img src={logoImg} alt="ECS" className="h-12 w-auto" /></Link>
-                        <div className="hidden md:flex items-center gap-7">
-                            {links.map(l=>{
-                                const isActive = window.location.pathname === l.p || (l.p === '/' && window.location.pathname === '/');
-                                return (
-                                    <Link key={l.n} href={l.p} className="relative py-1 group">
-                                        <span className={`text-[13px] font-medium uppercase tracking-widest transition-colors duration-200 ${isActive ? 'text-[#f0aa0b]' : 'text-white/80 group-hover:text-[#f0aa0b]'}`}>{l.n}</span>
-                                        <span className={`absolute left-0 -bottom-1 h-[2px] bg-[#f0aa0b] rounded-full transition-all duration-300 ${isActive ? 'w-full' : 'w-0 group-hover:w-full'}`} />
-                                    </Link>
-                                );
-                            })}
-                            <span className="w-px h-5 bg-white/15"/>
-                            {user ? (
-                                <div className="flex items-center gap-2">
-                                    <NotificationBell variant="light" />
-                                    <UserDropdown user={user} dashLink={dash()} />
-                                </div>
-                            ) : (<>
-                                <Link href="/login" className="text-white/80 hover:text-[#f0aa0b] text-[13px] font-medium uppercase tracking-widest transition-colors">Login</Link>
-                                <Link href="/register" className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] text-xs font-bold py-2.5 px-6 rounded-full transition-colors shadow-sm">Register</Link>
-                            </>)}
-                        </div>
-                        <button onClick={()=>setMob(!mob)} className="md:hidden text-white p-1">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">{mob?<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>:<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>}</svg>
-                        </button>
-                    </div>
-                </div>
-                {mob&&<div className="md:hidden border-t border-white/10" style={{background:'#5a0101'}}>
-                    <div className="px-5 py-3 space-y-1">
-                        {links.map(l=><Link key={l.n} href={l.p} onClick={()=>setMob(false)} className="block text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/10">{l.n}</Link>)}
-                        {user?(<>
-                            <Link href={dash()} onClick={()=>setMob(false)} className="block text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/10">Dashboard</Link>
-                            <button onClick={()=>{logout();setMob(false)}} className="w-full text-left text-white text-sm py-2.5 px-3 rounded-lg hover:bg-white/10">Logout</button>
-                        </>):(<div className="pt-2 space-y-2">
-                            <Link href="/login" onClick={()=>setMob(false)} className="block text-center text-white border border-white/20 py-2.5 rounded-lg text-sm">Login</Link>
-                            <Link href="/register" onClick={()=>setMob(false)} className="block text-center bg-[#f0aa0b] text-[#1a1a1a] py-2.5 rounded-lg text-sm font-bold">Register</Link>
-                        </div>)}
-                    </div>
-                </div>}
-            </nav>
+            <ClientNavbar user={user} logout={logout} />
+
+            <FloatingJourneyTracker bookings={journeyData.bookings} payments={journeyData.payments} />
 
             {/* HERO */}
-            <section className="relative flex items-center overflow-hidden" style={{minHeight:'100vh',paddingTop:68}}>
+            <section className="relative flex items-center overflow-hidden" style={{minHeight:'100vh',paddingTop: 68}}>
                 <img src="/images/hero-catering.png" alt="" className="absolute inset-0 w-full h-full object-cover scale-105" style={{animation:'slowZoom 20s ease-in-out infinite alternate'}}/>
                 <div className="absolute inset-0" style={{background:'linear-gradient(to bottom, rgba(0,0,0,.7) 0%, rgba(114,1,1,.4) 50%, rgba(0,0,0,.75) 100%)'}}/>
                 <div className="relative z-10 w-full max-w-7xl mx-auto px-5 sm:px-8 py-20 flex flex-col lg:flex-row items-center gap-12">
@@ -221,6 +353,42 @@ const LandingPage = () => {
                             Browse Full Menu <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
                         </Link>
                     </div></Rv>
+                </div>
+            </section>
+
+            {/* TASTING SECTION */}
+            <section className="py-24 bg-white relative overflow-hidden">
+                <div className="max-w-6xl mx-auto px-5 sm:px-8">
+                    <Rv>
+                        <div className="flex flex-col md:flex-row items-center gap-12 bg-[#faf7f2] rounded-3xl p-8 md:p-12 border border-[#f0aa0b]/20 relative overflow-hidden shadow-sm">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-[#f0aa0b]/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
+                            <div className="absolute bottom-0 left-0 w-64 h-64 bg-[#720101]/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/3"></div>
+                            
+                            <div className="flex-1 z-10">
+                                <p className="text-[#720101] text-xs font-bold uppercase tracking-[.2em] mb-3">Try Before You Buy</p>
+                                <h2 className="font-display text-[#1a1a1a] text-3xl md:text-4xl mb-4">Schedule a Private Food Tasting</h2>
+                                <p className="text-[#1a1a1a]/60 leading-relaxed mb-8 max-w-md">
+                                    Not ready to book yet? Come experience our culinary excellence firsthand. Meet our chefs, taste our bestsellers, and discuss your vision—no strings attached.
+                                </p>
+                                <button onClick={()=>router.get('/food-tasting')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3.5 px-8 rounded-full text-sm uppercase tracking-wider transition-all shadow-md hover:shadow-lg inline-flex items-center gap-2">
+                                    Reserve Your Table
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+                                </button>
+                            </div>
+                            <div className="flex-1 w-full relative z-10">
+                                <img src="https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=600" alt="Food Tasting" className="w-full h-72 md:h-80 object-cover rounded-2xl shadow-lg border-4 border-white"/>
+                                <div className="absolute -bottom-5 -left-5 bg-white p-4 rounded-xl shadow-xl flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-[#f0aa0b]/20 flex items-center justify-center text-[#f0aa0b]">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-[#1a1a1a] font-bold text-sm">Free for 2 Guests</p>
+                                        <p className="text-[#1a1a1a]/50 text-xs">When you book an event</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </Rv>
                 </div>
             </section>
 
