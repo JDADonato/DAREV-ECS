@@ -36,9 +36,49 @@ const buildJourneySteps = (booking, payments) => {
     ];
 };
 
+const HistoryPanel = ({ bookings }) => (
+    <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">History</p>
+                <h3 className="mt-1 text-xl font-display font-bold text-[#1a1a1a]">Cancelled and completed events</h3>
+                <p className="mt-2 max-w-xl text-sm font-medium leading-6 text-gray-500">Past records stay read-only. Use Rebook to start a new booking with the proper availability, menu, pricing, and payment steps.</p>
+            </div>
+        </div>
+        {bookings.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+                <p className="font-bold text-gray-900">No history yet.</p>
+            </div>
+        ) : (
+            <div className="grid gap-4">
+                {bookings.map((booking) => (
+                    <div key={booking.id} className="rounded-2xl border border-gray-100 bg-[#faf7f2] p-5">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <h4 className="font-display text-lg font-bold text-[#1a1a1a]">{booking.client_full_name || 'Eloquente event'}</h4>
+                                    <span className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest ${String(booking.status).toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-700'}`}>
+                                        {booking.status}
+                                    </span>
+                                </div>
+                                <p className="text-sm font-semibold text-gray-600">
+                                    {new Date(booking.event_date).toLocaleDateString()} · {booking.pax} pax · {peso(booking.total_cost)}
+                                </p>
+                            </div>
+                            <button onClick={() => router.get('/book')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
+                                Rebook Event
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+    </div>
+);
+
 const ClientDashboard = () => {
     const { user, logout } = useAuth();
-    const [data, setData] = useState({ bookings: [], tastings: [], payments: [] });
+    const [data, setData] = useState({ bookings: [], historyBookings: [], tastings: [], payments: [] });
     const [loading, setLoading] = useState(true);
     const [activeBookingId, setActiveBookingId] = useState(null);
     const [activeSection, setActiveSection] = useState('details'); // details, menu, payments
@@ -49,6 +89,7 @@ const ClientDashboard = () => {
     const [menuCatalog, setMenuCatalog] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
     const [menuSelections, setMenuSelections] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
     const [savingMenu, setSavingMenu] = useState(false);
+    const [menuEditMode, setMenuEditMode] = useState(false);
     const [eventPickerOpen, setEventPickerOpen] = useState(false);
 
     const [submittingPayment, setSubmittingPayment] = useState(false);
@@ -61,7 +102,7 @@ const ClientDashboard = () => {
 
     useEffect(() => {
         const tab = new URLSearchParams(window.location.search).get('tab');
-        if (['details', 'menu', 'tastings', 'payments'].includes(tab)) {
+        if (['details', 'menu', 'tastings', 'payments', 'history'].includes(tab)) {
             setActiveSection(tab);
         }
         fetchData();
@@ -97,6 +138,7 @@ const ClientDashboard = () => {
         } catch (e) {
             setMenuSelections({ starter: [], main: [], side: [], dessert: [], drink: [] });
         }
+        setMenuEditMode(false);
     }, [activeBookingId, data.bookings]);
 
     useEffect(() => {
@@ -111,9 +153,17 @@ const ClientDashboard = () => {
             const response = await fetch('/api/dashboard/client');
             if (response.ok) {
                 const result = await response.json();
-                setData(result);
-                if (result.bookings.length > 0 && !activeBookingId) {
-                    setActiveBookingId(result.bookings[0].id);
+                setData({
+                    bookings: result.bookings || [],
+                    historyBookings: result.historyBookings || [],
+                    tastings: result.tastings || [],
+                    payments: result.payments || [],
+                });
+                const activeBookings = result.bookings || [];
+                if (activeBookings.length > 0 && (!activeBookingId || !activeBookings.some((booking) => booking.id === activeBookingId))) {
+                    setActiveBookingId(activeBookings[0].id);
+                } else if (activeBookings.length === 0) {
+                    setActiveBookingId(null);
                 }
             }
         } catch (error) {
@@ -246,17 +296,34 @@ const ClientDashboard = () => {
         }));
     };
 
+    const addMenuItem = (category, dishId) => {
+        const dish = menuCatalog[category]?.find(item => String(item.id) === String(dishId));
+        if (!dish) return;
+        setMenuSelections(prev => ({
+            ...prev,
+            [category]: [...(prev[category] || []), dish],
+        }));
+    };
+
+    const removeMenuItem = (category, indexToRemove) => {
+        setMenuSelections(prev => ({
+            ...prev,
+            [category]: (prev[category] || []).filter((_, index) => index !== indexToRemove),
+        }));
+    };
+
     const saveMenuSelection = async () => {
         setSavingMenu(true);
         try {
-            const res = await fetch(`/api/bookings/${activeBooking.id}/event-details`, {
+            const res = await fetch(`/api/bookings/${activeBooking.id}/menu`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...detailsForm, selected_menu: menuSelections }),
+                body: JSON.stringify({ selected_menu: menuSelections }),
             });
             const result = await res.json().catch(() => ({}));
             if (res.ok) {
-                setToast({ message: 'Menu selection updated.', type: 'success' });
+                setToast({ message: 'Menu selection updated. Pricing and unpaid balances were recalculated.', type: 'success' });
+                setMenuEditMode(false);
                 fetchData();
             } else {
                 setToast({ message: result.error || 'Unable to update menu.', type: 'error' });
@@ -318,7 +385,7 @@ const ClientDashboard = () => {
                     </div>
                 </div>
 
-                {data.bookings.length === 0 ? (
+                {data.bookings.length === 0 && data.historyBookings.length === 0 ? (
                     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-16 text-center">
                         <div className="w-20 h-20 bg-[#f0aa0b]/10 rounded-full flex items-center justify-center mx-auto mb-6">
                             <svg className="w-10 h-10 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
@@ -326,6 +393,15 @@ const ClientDashboard = () => {
                         <h2 className="text-2xl font-display font-bold text-[#1a1a1a] mb-2">No active bookings</h2>
                         <p className="text-[#1a1a1a]/50 mb-8 max-w-md mx-auto">You haven't booked any events with us yet. Let's create something memorable.</p>
                         <button onClick={() => router.get('/book')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3 px-8 rounded-full shadow-md transition-all">Book Your Event</button>
+                    </div>
+                ) : data.bookings.length === 0 ? (
+                    <div className="space-y-6">
+                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-10 text-center">
+                            <h2 className="text-2xl font-display font-bold text-[#1a1a1a] mb-2">No active bookings</h2>
+                            <p className="text-[#1a1a1a]/50 mb-6 max-w-md mx-auto">Cancelled or completed events are kept in history. Start a new event or rebook from a past one.</p>
+                            <button onClick={() => router.get('/book')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3 px-8 rounded-full shadow-md transition-all">Book Your Event</button>
+                        </div>
+                        <HistoryPanel bookings={data.historyBookings} />
                     </div>
                 ) : (
                     <div className="flex flex-col lg:flex-row gap-8">
@@ -387,7 +463,8 @@ const ClientDashboard = () => {
                                     { id: 'details', label: 'Event Details', needsWork: activeJourneySteps.some(s => s.label === 'Event details' && !s.done), icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
                                     { id: 'menu', label: 'Menu', needsWork: activeJourneySteps.some(s => s.label === 'Menu selection' && !s.done), icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
                                     { id: 'tastings', label: 'Food Tastings', needsWork: data.tastings.length === 0, icon: 'M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 4.5h15v15h-15z' },
-                                    { id: 'payments', label: 'Payments', needsWork: activeBooking.nextPaymentDue, icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' }
+                                    { id: 'payments', label: 'Payments', needsWork: activeBooking.nextPaymentDue, icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 014 0z' },
+                                    { id: 'history', label: 'History', needsWork: false, icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
                                 ].map(section => (
                                     <button 
                                         key={section.id} 
@@ -584,9 +661,23 @@ const ClientDashboard = () => {
                                         </div>
                                     )}
 
+                                    {activeSection === 'history' && (
+                                        <HistoryPanel bookings={data.historyBookings} />
+                                    )}
+
                                     {activeSection === 'menu' && (
                                         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8">
-                                            <h3 className="text-xl font-bold font-display text-[#1a1a1a] mb-6">Menu Selection</h3>
+                                            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                                <div>
+                                                    <h3 className="text-xl font-bold font-display text-[#1a1a1a]">Menu Selection</h3>
+                                                    <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-gray-500">Dish edits use current menu prices. When saved, the system recalculates the event total and updates unpaid balances only.</p>
+                                                </div>
+                                                {activeBooking.canEditMenu && !menuEditMode && (
+                                                    <button onClick={() => setMenuEditMode(true)} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
+                                                        Edit Menu
+                                                    </button>
+                                                )}
+                                            </div>
                                             
                                             {!activeBooking.canEditMenu && activeBooking.status !== 'Cancelled' && (
                                                 <div className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-red-50 border border-red-100">
@@ -611,35 +702,72 @@ const ClientDashboard = () => {
                                                                         <img src={item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=300'} alt={item.name} className="h-14 w-14 rounded-lg object-cover" />
                                                                         <div className="min-w-0 flex-1">
                                                                             <p className="truncate text-sm font-bold text-gray-900">{item.name}</p>
-                                                                            <p className="mt-1 text-xs font-semibold text-gray-500">{peso(item.costPerHead || item.priceAdj || 0)} per head</p>
+                                                                            <p className="mt-1 text-xs font-semibold text-gray-500">{peso((item.costPerHead || 0) + (item.priceAdj || 0))} per head</p>
                                                                         </div>
                                                                     </div>
-                                                                    {activeBooking.canEditMenu && (
+                                                                    {activeBooking.canEditMenu && menuEditMode && (
+                                                                        <div className="mt-3 flex gap-2">
                                                                         <select
                                                                             value={item.id || ''}
                                                                             onChange={(e) => swapMenuItem(category.id, index, e.target.value)}
-                                                                            className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 outline-none focus:border-[#720101]"
+                                                                            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 outline-none focus:border-[#720101]"
                                                                         >
                                                                             {(menuCatalog[category.id] || []).map((dish) => (
                                                                                 <option key={dish.id} value={dish.id}>{dish.name}</option>
                                                                             ))}
                                                                         </select>
+                                                                        <button onClick={() => removeMenuItem(category.id, index)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100">
+                                                                            Remove
+                                                                        </button>
+                                                                        </div>
                                                                     )}
                                                                 </div>
                                                             ))}
                                                         </div>
+                                                        {activeBooking.canEditMenu && menuEditMode && (
+                                                            <select
+                                                                value=""
+                                                                onChange={(e) => addMenuItem(category.id, e.target.value)}
+                                                                className="mt-4 w-full rounded-xl border border-dashed border-[#720101]/30 bg-white px-3 py-3 text-xs font-bold text-gray-600 outline-none focus:border-[#720101]"
+                                                            >
+                                                                <option value="">Add {category.label.slice(0, -1)}</option>
+                                                                {(menuCatalog[category.id] || []).map((dish) => (
+                                                                    <option key={dish.id} value={dish.id}>{dish.name} - {peso(dish.costPerHead + dish.priceAdj)} per head</option>
+                                                                ))}
+                                                            </select>
+                                                        )}
                                                     </div>
                                                 );
                                             })}
+                                            {activeBooking.canEditMenu && menuEditMode && menuCategories.some((category) => (menuSelections[category.id] || []).length === 0) && (
+                                                <div className="mb-5 rounded-2xl border border-dashed border-[#720101]/25 bg-[#720101]/5 p-4">
+                                                    <p className="mb-3 text-xs font-bold uppercase tracking-widest text-[#720101]">Add dishes to empty categories</p>
+                                                    <div className="grid gap-3 sm:grid-cols-2">
+                                                        {menuCategories.filter((category) => (menuSelections[category.id] || []).length === 0).map((category) => (
+                                                            <select
+                                                                key={category.id}
+                                                                value=""
+                                                                onChange={(e) => addMenuItem(category.id, e.target.value)}
+                                                                className="rounded-xl border border-white bg-white px-3 py-3 text-xs font-bold text-gray-600 outline-none focus:border-[#720101]"
+                                                            >
+                                                                <option value="">Add {category.label}</option>
+                                                                {(menuCatalog[category.id] || []).map((dish) => (
+                                                                    <option key={dish.id} value={dish.id}>{dish.name} - {peso(dish.costPerHead + dish.priceAdj)} per head</option>
+                                                                ))}
+                                                            </select>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                             {!Object.values(menuSelections).some(items => items.length > 0) && (
                                                 <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
                                                     <p className="font-bold text-gray-900">No menu has been selected yet.</p>
                                                     <p className="mt-1 text-sm text-gray-500">Choose dishes from the menu gallery to complete this step.</p>
                                                 </div>
                                             )}
-                                            {activeBooking.canEditMenu && (
+                                            {activeBooking.canEditMenu && menuEditMode && (
                                                 <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                                    <button onClick={() => router.get('/menu')} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">Browse Menu</button>
+                                                    <button onClick={() => setMenuEditMode(false)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">Cancel</button>
                                                     <button onClick={saveMenuSelection} disabled={savingMenu} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-60">{savingMenu ? 'Saving...' : 'Save Menu Changes'}</button>
                                                 </div>
                                             )}
@@ -756,6 +884,42 @@ const ClientDashboard = () => {
                                                                     );
                                                                 })}
                                                             </div>
+                                                            {activeBooking.nextPaymentDue ? (
+                                                                <form onSubmit={(e) => handlePaymentSubmit(e, activeBooking.nextPaymentDue)} className="mt-6 rounded-2xl border border-[#f0aa0b]/25 bg-white/[0.07] p-5">
+                                                                    <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
+                                                                        <div>
+                                                                            <p className="text-[11px] font-black uppercase tracking-widest text-[#f0aa0b]">Next Payment Required</p>
+                                                                            <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                                                                <h4 className="font-display text-2xl font-bold text-white">{activeBooking.nextPaymentDue.payment_type}</h4>
+                                                                                <p className="text-xl font-black text-[#f0aa0b]">{peso(activeBooking.nextPaymentDue.amount)}</p>
+                                                                            </div>
+                                                                            {activeBooking.nextPaymentDue.description && (
+                                                                                <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-white/60">{activeBooking.nextPaymentDue.description}</p>
+                                                                            )}
+                                                                            <div className="mt-4 rounded-xl border border-red-300/20 bg-red-500/10 p-3">
+                                                                                <p className="text-xs font-black uppercase tracking-widest text-red-200">Strict deadline: {new Date(activeBooking.nextPaymentDue.due_date).toLocaleDateString()}</p>
+                                                                                <p className="mt-1 text-xs font-medium leading-5 text-red-100/75">Failure to pay the exact amount by this date can result in automatic cancellation and forfeiture of reservation slots.</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex flex-col gap-3 lg:min-w-[220px]">
+                                                                            <div className="rounded-xl bg-black/20 p-3 text-xs font-bold text-white/65">
+                                                                                Encrypted checkout opens on the next screen.
+                                                                            </div>
+                                                                            <button
+                                                                                type="submit"
+                                                                                disabled={submittingPayment}
+                                                                                className={`rounded-xl bg-[#f0aa0b] px-6 py-3.5 text-sm font-black text-[#1a1a1a] shadow-lg shadow-black/20 transition-all hover:bg-[#d99a08] ${submittingPayment ? 'cursor-not-allowed opacity-70' : ''}`}
+                                                                            >
+                                                                                {submittingPayment ? 'Opening Checkout...' : 'Proceed to Checkout'}
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </form>
+                                                            ) : (
+                                                                <div className="mt-6 rounded-2xl border border-green-400/20 bg-green-500/10 p-5 text-center">
+                                                                    <p className="font-bold text-green-200">All caught up. You have no pending payments at this time.</p>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
                                                 })()}
@@ -800,7 +964,7 @@ const ClientDashboard = () => {
                                             })()}
 
                                             {/* Sequential Payment Action Card */}
-                                            {activeBooking.nextPaymentDue ? (
+                                            {false ? (
                                                 <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
                                                     <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
                                                         <div>
@@ -855,7 +1019,7 @@ const ClientDashboard = () => {
                                                     </form>
                                                 </div>
                                             ) : (
-                                                <div className="bg-green-50 border border-green-200 rounded-3xl p-8 text-center shadow-sm">
+                                                <div className="hidden">
                                                     <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
                                                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                                     </div>

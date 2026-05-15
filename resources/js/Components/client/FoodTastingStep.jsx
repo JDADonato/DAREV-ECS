@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Modal from '../common/Modal';
 
-const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
+const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmitting = false }) => {
     const [showTasting, setShowTasting] = useState(bookingData.wantsTasting || false);
     const [sameAsAbove, setSameAsAbove] = useState(false);
     const [tastingData, setTastingData] = useState({
@@ -31,6 +31,7 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
     };
 
     const handleSubmitWithTasting = () => {
+        if (isSubmitting) return;
         if (!tastingData.preferred_date || !tastingData.preferred_time) {
             setModal({
                 isOpen: true,
@@ -56,6 +57,7 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
     };
 
     const handleSkipToCheckout = () => {
+        if (isSubmitting) return;
         const finalData = { wantsTasting: false };
         updateBooking(finalData);
         onSubmit(finalData);
@@ -78,11 +80,23 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
             />
 
             <div className="space-y-8">
+                {isSubmitting && (
+                    <div className="rounded-2xl border border-[#f0aa0b]/30 bg-[#f0aa0b]/10 p-4">
+                        <div className="flex items-center gap-3">
+                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#720101] border-t-transparent" />
+                            <div>
+                                <p className="text-sm font-bold text-[#720101]">Submitting your booking...</p>
+                                <p className="text-xs font-medium text-gray-600">Please keep this page open while we save your event and prepare the confirmation.</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <div className="max-w-2xl mx-auto w-full space-y-6 mt-4">
                     {/* Toggle */}
                     <div className="flex gap-4">
                         <button
                             onClick={() => setShowTasting(true)}
+                            disabled={isSubmitting}
                             className={`flex-1 py-5 px-6 rounded-2xl border-2 transition-all duration-300 text-center ${showTasting
                                 ? 'border-primary-500 bg-primary-50 shadow-md'
                                 : 'border-gray-200 bg-white hover:border-gray-300'
@@ -100,14 +114,15 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
                         </button>
                         <button
                             onClick={handleSkipToCheckout}
-                            className="flex-1 py-5 px-6 rounded-2xl border-2 border-gray-200 bg-white hover:border-gray-300 transition-all duration-300 text-center"
+                            disabled={isSubmitting}
+                            className={`flex-1 py-5 px-6 rounded-2xl border-2 border-gray-200 bg-white transition-all duration-300 text-center ${isSubmitting ? 'cursor-not-allowed opacity-60' : 'hover:border-gray-300'}`}
                         >
                             <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center mb-2 text-gray-500 mx-auto">
                                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                             </div>
-                            <p className="font-bold text-gray-700">Skip to Checkout</p>
+                            <p className="font-bold text-gray-700">{isSubmitting ? 'Submitting...' : 'Submit Without Tasting'}</p>
                             <p className="text-xs text-gray-400 mt-1">Proceed without tasting</p>
                         </button>
                     </div>
@@ -224,7 +239,8 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
             <div className="flex justify-between pt-8 items-center border-t border-gray-100 mt-8">
                 <button
                     onClick={onBack}
-                    className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
+                    disabled={isSubmitting}
+                    className={`text-gray-500 font-medium px-4 py-3 transition-colors flex items-center text-sm ${isSubmitting ? 'cursor-not-allowed opacity-50' : 'hover:text-gray-800'}`}
                 >
                     <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -234,12 +250,22 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack }) => {
                 {showTasting && (
                     <button
                         onClick={handleSubmitWithTasting}
-                        className="bg-yellow-500 text-red-900 px-10 py-3.5 rounded-xl font-bold shadow-lg hover:bg-yellow-400 hover:shadow-xl transition-all transform hover:-translate-y-0.5 flex items-center text-sm"
+                        disabled={isSubmitting}
+                        className={`px-10 py-3.5 rounded-xl font-bold shadow-lg transition-all flex items-center text-sm ${isSubmitting ? 'cursor-not-allowed bg-gray-200 text-gray-500' : 'bg-yellow-500 text-red-900 hover:bg-yellow-400 hover:shadow-xl transform hover:-translate-y-0.5'}`}
                     >
-                        Confirm Booking
-                        <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
+                        {isSubmitting ? (
+                            <>
+                                <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
+                                Submitting...
+                            </>
+                        ) : (
+                            <>
+                                Submit Booking
+                                <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </>
+                        )}
                     </button>
                 )}
             </div>

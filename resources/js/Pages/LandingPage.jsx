@@ -135,7 +135,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
 
     if (!open) {
         return (
-            <button onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-40 rounded-full border border-white/70 bg-white/95 px-4 py-3 text-left shadow-2xl shadow-black/20 backdrop-blur-md transition-transform hover:-translate-y-0.5">
+            <button onClick={() => setOpen(true)} className="fixed bottom-5 left-5 z-40 rounded-full border border-white/70 bg-white/95 px-4 py-3 text-left shadow-2xl shadow-black/20 backdrop-blur-md transition-transform hover:-translate-y-0.5">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey</p>
                 <div className="mt-1 flex items-center gap-3">
                     <div className="h-2 w-24 rounded-full bg-gray-100">
@@ -148,7 +148,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
     }
 
     return (
-        <div className="fixed bottom-5 right-5 z-40 w-[calc(100%-2.5rem)] max-w-md rounded-2xl border border-white/70 bg-white/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-md">
+        <div className="fixed bottom-5 left-5 z-40 w-[calc(100%-2.5rem)] max-w-md rounded-2xl border border-white/70 bg-white/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-md">
             <div className="mb-3 flex items-start justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey Tracker</p>
@@ -227,27 +227,30 @@ const LandingPage = () => {
 
             {/* HERO */}
             <section className="relative flex items-center overflow-hidden" style={{minHeight:'100vh',paddingTop: 68}}>
-                <img src="/images/hero-catering.png" alt="" className="absolute inset-0 w-full h-full object-cover scale-105" style={{animation:'slowZoom 20s ease-in-out infinite alternate'}}/>
-                <div className="absolute inset-0" style={{background:'linear-gradient(to bottom, rgba(0,0,0,.7) 0%, rgba(114,1,1,.4) 50%, rgba(0,0,0,.75) 100%)'}}/>
+                <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=85&w=1800" alt="Elegant catered reception service" className="absolute inset-0 w-full h-full object-cover scale-105" style={{animation:'slowZoom 20s ease-in-out infinite alternate'}}/>
+                <div className="absolute inset-0" style={{background:'linear-gradient(90deg, rgba(12,10,8,.88) 0%, rgba(55,11,9,.62) 48%, rgba(12,10,8,.32) 100%)'}}/>
                 <div className="relative z-10 w-full max-w-7xl mx-auto px-5 sm:px-8 py-20 flex flex-col lg:flex-row items-center gap-12">
                     <div className="flex-1 text-center lg:text-left">
                         <div className="shimmer-line mb-6 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .6s .3s forwards'}}/>
                         <h1 className="font-display text-white leading-[1.1] mb-5" style={{fontSize:'clamp(2.4rem,5.5vw,4rem)',opacity:0,animation:'fadeUp .7s .4s forwards'}}>
-                            Where great food<br/><span style={{color:'#f0aa0b'}}>speaks for itself.</span>
+                            Eloquente Catering<br/><span style={{color:'#f0aa0b'}}>for events with taste.</span>
                         </h1>
                         <p className="text-white/85 text-base md:text-lg leading-relaxed max-w-lg mb-8 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .7s .55s forwards'}}>
                             Premium catering for weddings, corporate events, and private celebrations — crafted with precision, served with heart.
                         </p>
-                        <div style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
+                        <div className="flex flex-col items-center gap-3 sm:flex-row lg:items-start" style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
                             <button onClick={()=>router.get('/book')} className="glow-gold bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-all shadow-lg hover:shadow-xl">
                                 Book Eloquente Now →
+                            </button>
+                            <button onClick={()=>router.get('/food-tasting')} className="rounded-full border border-white/25 bg-white/10 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white backdrop-blur transition-all hover:bg-white hover:text-[#720101]">
+                                Book Tasting
                             </button>
                         </div>
                     </div>
                     <div className="hidden lg:block flex-1 max-w-md" style={{opacity:0,animation:'fadeUp .8s .6s forwards'}}>
                         <div className="relative float-anim">
                             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/10">
-                                <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-4">Quick Stats</p>
+                                <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-4">Service Proof</p>
                                 <div className="space-y-5">
                                     {[{n:'Events Catered',v:500,s:'+'},{n:'Happy Clients',v:420,s:'+'},{n:'Years of Excellence',v:15,s:''}].map((s,i)=>(
                                         <div key={i} className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -361,8 +364,7 @@ const LandingPage = () => {
                 <div className="max-w-6xl mx-auto px-5 sm:px-8">
                     <Rv>
                         <div className="flex flex-col md:flex-row items-center gap-12 bg-[#faf7f2] rounded-3xl p-8 md:p-12 border border-[#f0aa0b]/20 relative overflow-hidden shadow-sm">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-[#f0aa0b]/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
-                            <div className="absolute bottom-0 left-0 w-64 h-64 bg-[#720101]/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/3"></div>
+                            <div className="absolute inset-x-0 top-0 h-1 bg-[#f0aa0b]"></div>
                             
                             <div className="flex-1 z-10">
                                 <p className="text-[#720101] text-xs font-bold uppercase tracking-[.2em] mb-3">Try Before You Buy</p>
@@ -371,12 +373,12 @@ const LandingPage = () => {
                                     Not ready to book yet? Come experience our culinary excellence firsthand. Meet our chefs, taste our bestsellers, and discuss your vision—no strings attached.
                                 </p>
                                 <button onClick={()=>router.get('/food-tasting')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3.5 px-8 rounded-full text-sm uppercase tracking-wider transition-all shadow-md hover:shadow-lg inline-flex items-center gap-2">
-                                    Reserve Your Table
+                                    Book Tasting
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                                 </button>
                             </div>
                             <div className="flex-1 w-full relative z-10">
-                                <img src="https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=600" alt="Food Tasting" className="w-full h-72 md:h-80 object-cover rounded-2xl shadow-lg border-4 border-white"/>
+                                <img src="https://images.unsplash.com/photo-1528712306091-ed0763094c98?auto=format&fit=crop&q=80&w=760" alt="Tasting plates prepared for review" className="w-full h-72 md:h-80 object-cover rounded-2xl shadow-lg border-4 border-white"/>
                                 <div className="absolute -bottom-5 -left-5 bg-white p-4 rounded-xl shadow-xl flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full bg-[#f0aa0b]/20 flex items-center justify-center text-[#f0aa0b]">
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
@@ -392,17 +394,23 @@ const LandingPage = () => {
                 </div>
             </section>
 
-            {/* PROCESS - visual timeline */}
-            <section className="py-24 relative overflow-hidden" style={{background:'linear-gradient(160deg,#0f0f0f 0%,#1a1a1a 50%,#0f0f0f 100%)'}}>
-                <div className="absolute top-0 right-0 w-96 h-96 rounded-full opacity-[.03]" style={{background:'radial-gradient(circle,#f0aa0b,transparent 70%)'}}/>
-                <div className="max-w-4xl mx-auto px-5 sm:px-8 relative z-10">
-                    <Rv><div className="text-center mb-16">
-                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-[.2em] mb-3">Transparent Pricing</p>
-                        <h2 className="font-display text-white text-3xl md:text-4xl">The 10 / 70 / 20 Plan</h2>
-                        <p className="text-white/35 mt-3 max-w-md mx-auto">No hidden fees. A clear, structured payment flow from booking to event day.</p>
-                    </div></Rv>
+            {/* PRICING RULES */}
+            <section className="relative overflow-hidden bg-[#15110f] py-24 text-white">
+                <div className="absolute inset-x-0 top-0 h-1 bg-[#f0aa0b]"/>
+                <div className="mx-auto max-w-6xl px-5 sm:px-8">
+                    <Rv>
+                        <div className="mb-12 grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-[.22em] text-[#f0aa0b]">Transparent Pricing</p>
+                                <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">Payment rules that adjust to your booking timeline.</h2>
+                            </div>
+                            <p className="max-w-2xl text-sm font-medium leading-7 text-white/55">
+                                Your schedule is calculated from the event date. Standard bookings use the 10 / 70 / 20 plan, while closer event dates combine payments so sourcing, staffing, and final preparation stay realistic.
+                            </p>
+                        </div>
+                    </Rv>
 
-                    <div className="relative">
+                    <div className="hidden">
                         {/* Timeline line */}
                         <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-px bg-white/10 -translate-x-1/2"/>
                         <div className="space-y-12 md:space-y-0 md:grid md:grid-cols-1 md:gap-0">
@@ -432,6 +440,38 @@ const LandingPage = () => {
                             ))}
                         </div>
                     </div>
+                    <div className="grid gap-5 lg:grid-cols-3">
+                        {[
+                            { tag: 'Standard', title: 'More than 30 days before event', amount: '10% / 70% / 20%', points: ['10% reservation fee due within 24 hours', '70% down payment due 1 month before', '20% final balance due 10 days before'], accent: 'bg-[#f0aa0b] text-[#1a1a1a]' },
+                            { tag: 'Rush 1', title: '11 to 30 days before event', amount: '80% / 20%', points: ['80% combines reservation and down payment', 'Due within 24 hours to secure the date', '20% final balance due 10 days before'], accent: 'bg-white text-[#720101]' },
+                            { tag: 'Rush 2', title: '10 days or less before event', amount: '100%', points: ['Full payment is required immediately', 'Due within 24 hours after booking', 'Used for urgent sourcing and final staffing'], accent: 'bg-[#720101] text-white' },
+                        ].map((rule, index) => (
+                            <Rv key={rule.tag} d={`rv-d${index + 1}`}>
+                                <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/10 backdrop-blur transition-transform hover:-translate-y-1">
+                                    <div className="mb-6 flex items-start justify-between gap-4">
+                                        <span className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest ${rule.accent}`}>{rule.tag}</span>
+                                        <p className="font-display text-3xl font-bold text-[#f0aa0b]">{rule.amount}</p>
+                                    </div>
+                                    <h3 className="font-display text-xl font-bold text-white">{rule.title}</h3>
+                                    <div className="mt-6 grid gap-3">
+                                        {rule.points.map((point) => (
+                                            <div key={point} className="flex gap-3 rounded-xl bg-black/20 p-3">
+                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#f0aa0b]"/>
+                                                <p className="text-sm font-medium leading-6 text-white/65">{point}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </Rv>
+                        ))}
+                    </div>
+                    <Rv>
+                        <div className="mt-6 rounded-2xl border border-[#f0aa0b]/25 bg-[#f0aa0b]/10 p-5">
+                            <p className="text-sm font-semibold leading-6 text-white/75">
+                                All unpaid balances are shown in the dashboard. If dishes are changed while editing is still allowed, the system recalculates the total using current menu prices and updates only unpaid balances.
+                            </p>
+                        </div>
+                    </Rv>
                 </div>
             </section>
 
@@ -466,7 +506,7 @@ const LandingPage = () => {
 
             {/* FINAL CTA */}
             <section className="relative py-28 overflow-hidden" style={{background:'linear-gradient(135deg,#720101 0%,#4a0000 50%,#1a1a1a 100%)'}}>
-                <div className="absolute inset-0 opacity-[.04]" style={{backgroundImage:'radial-gradient(circle at 30% 40%,#f0aa0b,transparent 60%),radial-gradient(circle at 70% 60%,#f0aa0b,transparent 60%)'}}/>
+                <div className="absolute inset-x-0 top-0 h-1 bg-[#f0aa0b]/70"/>
                 <div className="relative z-10 max-w-xl mx-auto px-5 text-center">
                     <Rv>
                         <div className="shimmer-line mx-auto mb-8"/>
@@ -480,10 +520,10 @@ const LandingPage = () => {
             </section>
 
             {/* FOOTER */}
-            <footer className="bg-[#0f0f0f] text-white py-10">
-                <div className="max-w-6xl mx-auto px-5 sm:px-8 flex flex-col md:flex-row items-center justify-between gap-5">
-                    <img src={logoImg} alt="Eloquente" className="h-9 w-auto opacity-60"/>
-                    <div className="flex gap-6 text-xs text-white/30">
+            <footer className="bg-[#15110f] text-white py-12">
+                <div className="max-w-6xl mx-auto px-5 sm:px-8 flex flex-col md:flex-row items-center justify-between gap-8">
+                    <img src={logoImg} alt="Eloquente" className="h-10 w-auto opacity-80"/>
+                    <div className="flex flex-wrap gap-6 text-sm font-semibold text-white/45">
                         <Link href="/about" className="hover:text-white/60 transition-colors">About</Link>
                         <Link href="/menu" className="hover:text-white/60 transition-colors">Menu</Link>
                         <Link href="/contact" className="hover:text-white/60 transition-colors">Contact</Link>

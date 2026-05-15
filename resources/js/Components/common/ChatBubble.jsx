@@ -255,9 +255,14 @@ const ChatBubble = ({ user }) => {
             {/* Floating Bubble Button */}
             {!isOpen && (
                 <button onClick={handleOpen} id="chat-bubble"
-                    className="fixed bottom-6 right-6 w-14 h-14 bg-[#720101] hover:bg-[#5a0101] text-white rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110 z-50"
-                    style={{ boxShadow: '0 4px 20px rgba(114, 1, 1, 0.4)' }}>
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    className="fixed bottom-6 right-6 z-50 flex h-16 items-center gap-3 rounded-full border border-white/70 bg-white/95 px-4 pr-5 text-left text-[#1a1a1a] shadow-2xl shadow-black/20 backdrop-blur-md transition-all hover:-translate-y-0.5 hover:shadow-[#720101]/25">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#720101] text-white shadow-lg shadow-[#720101]/30">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    </span>
+                    <span className="hidden sm:block">
+                        <span className="block text-[11px] font-black uppercase tracking-widest text-[#720101]">Support</span>
+                        <span className="block text-xs font-bold text-gray-500">Message the team</span>
+                    </span>
                     {unreadTotal > 0 && (
                         <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[20px] h-[20px] text-[10px] font-bold text-white bg-[#f0aa0b] rounded-full px-1 shadow-sm animate-pulse">
                             {unreadTotal > 99 ? '99+' : unreadTotal}
@@ -268,9 +273,9 @@ const ChatBubble = ({ user }) => {
 
             {/* Chat Panel */}
             {isOpen && (
-                <div className="fixed bottom-6 right-6 w-[370px] h-[520px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden border border-gray-200" style={{ animation: 'fadeIn .25s ease' }}>
+                <div className="fixed bottom-6 right-6 w-[calc(100%-2rem)] max-w-[390px] h-[540px] bg-white rounded-3xl shadow-2xl flex flex-col z-50 overflow-hidden border border-gray-200" style={{ animation: 'fadeIn .25s ease' }}>
                     {/* Header */}
-                    <div className="bg-[#720101] text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
+                    <div className="bg-gradient-to-r from-[#720101] to-[#3a0101] text-white px-4 py-4 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-2">
                             <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                             <div>

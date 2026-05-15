@@ -130,6 +130,7 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     // Booking API endpoints (JSON responses for React AJAX calls)
     Route::post('/api/bookings', [BookingController::class, 'store']);
     Route::put('/api/bookings/{id}/event-details', [BookingController::class, 'updateEventDetails']);
+    Route::put('/api/bookings/{id}/menu', [BookingController::class, 'updateMenu']);
     Route::put('/api/bookings/{id}/cancel', [BookingController::class, 'cancel']);
     Route::put('/api/bookings/{id}/update', [BookingController::class, 'update']);
     Route::post('/api/bookings/pay', [BookingController::class, 'recordPayment']);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Booking;
+use App\Models\MenuItem;
 use App\Models\Payment;
 use App\Models\User;
 use App\Notifications\BookingConfirmedNotification;
@@ -238,6 +239,105 @@ class BookingController extends Controller
         ]);
 
         return response()->json(['message' => 'Event details updated successfully!']);
+    }
+
+    /**
+     * Update selected dishes while preserving payment integrity.
+     * Server recalculates with current menu prices, updates total_cost, and redistributes
+     * unpaid tranches only. Verified payments are never modified.
+     */
+    public function updateMenu(Request $request, int $id)
+    {
+        $userId = Auth::id();
+
+        $booking = Booking::where('id', $id)->where('user_id', $userId)->first();
+
+        if (!$booking) {
+            return response()->json(['error' => 'Booking not found.'], 404);
+        }
+
+        if (in_array($booking->status, ['Cancelled', 'cancelled', 'Completed', 'completed'], true)) {
+            return response()->json(['error' => 'This booking can no longer be edited.'], 400);
+        }
+
+        $bookingService = new \App\Services\BookingManagementService();
+        if (!$bookingService->canEditMenu($booking)) {
+            return response()->json(['error' => 'Menu changes are locked within 30 days of the event.'], 400);
+        }
+
+        $validated = $request->validate([
+            'selected_menu' => 'required|array',
+        ]);
+
+        $selectedMenu = $validated['selected_menu'];
+        $menuItemIds = collect($selectedMenu)
+            ->flatMap(fn ($items) => is_array($items) ? $items : [])
+            ->map(function ($item) {
+                if (is_array($item)) {
+                    return $item['id'] ?? null;
+                }
+                return $item;
+            })
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        if ($menuItemIds->isEmpty()) {
+            return response()->json(['error' => 'Please select at least one dish.'], 422);
+        }
+
+        $menuItems = MenuItem::whereIn('id', $menuItemIds)->where('is_active', true)->get()->keyBy('id');
+        if ($menuItems->count() !== $menuItemIds->unique()->count()) {
+            return response()->json(['error' => 'One or more selected dishes are unavailable. Please refresh your menu.'], 422);
+        }
+
+        $newTotal = $menuItemIds->reduce(function ($sum, $itemId) use ($menuItems, $booking) {
+            $item = $menuItems[$itemId];
+            return $sum + (($item->cost_per_head + ($item->price_adj ?? 0)) * (int) $booking->pax);
+        }, 0);
+
+        DB::transaction(function () use ($booking, $selectedMenu, $newTotal) {
+            $paidTotal = $booking->payments()
+                ->whereIn('status', ['Paid', 'Verified'])
+                ->sum('amount');
+
+            $pendingPayments = $booking->payments()
+                ->whereIn('status', ['Pending', 'Failed', 'Rejected'])
+                ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 ELSE 4 END")
+                ->get();
+
+            $remaining = max($newTotal - (float) $paidTotal, 0);
+            $pendingTotal = (float) $pendingPayments->sum('amount');
+
+            foreach ($pendingPayments as $index => $payment) {
+                if ($remaining <= 0) {
+                    $payment->update(['amount' => 0]);
+                    continue;
+                }
+
+                if ($index === $pendingPayments->count() - 1) {
+                    $amount = $remaining;
+                } elseif ($pendingTotal > 0) {
+                    $amount = round($remaining * ((float) $payment->amount / $pendingTotal), 2);
+                } else {
+                    $amount = round($remaining / max($pendingPayments->count(), 1), 2);
+                }
+
+                $payment->update(['amount' => $amount]);
+                $remaining -= $amount;
+            }
+
+            $booking->update([
+                'selected_menu' => json_encode($selectedMenu),
+                'total_cost' => $newTotal,
+                'live_status' => $paidTotal > $newTotal ? 'Credit Review' : $booking->live_status,
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Menu updated and pricing recalculated.',
+            'total_cost' => $newTotal,
+        ]);
     }
 
     /**

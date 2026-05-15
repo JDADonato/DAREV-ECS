@@ -22,7 +22,7 @@ class ClientDashboardController extends Controller
     {
         $userId = Auth::id();
 
-        $bookings = Booking::where('user_id', $userId)
+        $allBookings = Booking::where('user_id', $userId)
             ->orderBy('event_date', 'desc')
             ->get()
             ->map(function ($booking) {
@@ -35,6 +35,14 @@ class ClientDashboardController extends Controller
                 $bookingArray['cancellationImpact'] = $bookingService->calculateCancellationImpact($booking);
                 return $bookingArray;
             });
+
+        $historyStatuses = ['Cancelled', 'cancelled', 'Completed', 'completed'];
+        $bookings = $allBookings
+            ->reject(fn ($booking) => in_array($booking['status'] ?? null, $historyStatuses, true))
+            ->values();
+        $historyBookings = $allBookings
+            ->filter(fn ($booking) => in_array($booking['status'] ?? null, $historyStatuses, true))
+            ->values();
 
         $tastings = FoodTasting::where('user_id', $userId)
             ->orderBy('preferred_date', 'desc')
@@ -57,6 +65,7 @@ class ClientDashboardController extends Controller
 
         return response()->json([
             'bookings' => $bookings,
+            'historyBookings' => $historyBookings,
             'tastings' => $tastings,
             'payments' => $payments,
         ]);

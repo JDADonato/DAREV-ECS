@@ -208,6 +208,7 @@ const BookingWizard = () => {
         onConfirm: null,
         confirmText: null
     });
+    const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
 
     const showModal = (type, title, message, onConfirm = null, confirmText = null) => {
         setModal({ isOpen: true, type, title, message, onConfirm, confirmText });
@@ -218,6 +219,7 @@ const BookingWizard = () => {
     };
 
     const submitBooking = async (extraData = {}) => {
+        if (isSubmittingBooking) return;
         const merged = { ...bookingData, ...extraData };
 
         // Full validation pass
@@ -278,6 +280,7 @@ const BookingWizard = () => {
             selected_menu: merged.customMenu
         };
 
+        setIsSubmittingBooking(true);
         try {
             const response = await axios.post('/api/bookings', payload);
 
@@ -300,10 +303,10 @@ const BookingWizard = () => {
             clearDraft();
             showModal(
                 'success',
-                'Booking Confirmed! 🎉',
-                'Your booking has been successfully submitted! You can fill in additional event details such as Reservation Time, Serving Time, Event Timeline, and Color Motif in your Dashboard under the "My Events" tab.',
+                'Booking Submitted',
+                'Your event request has been submitted. Open your dashboard to track the booking, complete payments, add event details, manage your menu while editing is allowed, and message the Eloquente team.',
                 () => router.get('/dashboard/client'),
-                'Go to My Events'
+                'Go to Dashboard'
             );
         } catch (error) {
             console.error("Submission Error:", error);
@@ -320,6 +323,8 @@ const BookingWizard = () => {
             }
             
             showModal('error', 'Booking Failed', errorMsg);
+        } finally {
+            setIsSubmittingBooking(false);
         }
     };
 
@@ -604,6 +609,7 @@ const BookingWizard = () => {
                                 updateBooking={updateBooking}
                                 onSubmit={submitBooking}
                                 onBack={prevStep}
+                                isSubmitting={isSubmittingBooking}
                             />
                         )}
                         </div>

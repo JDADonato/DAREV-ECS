@@ -1,189 +1,94 @@
-import React, { useState } from 'react';
-import { Link, router } from '@inertiajs/react';
+import React from 'react';
+import { Link } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
-import logoImg from '../../images/ECS_LOGO.png';
+import ClientNavbar from '../Components/common/ClientNavbar';
+import Footer from '../Components/common/Footer';
+import ChatBubble from '../Components/common/ChatBubble';
+
+const stats = [
+    ['500+', 'events catered'],
+    ['15', 'years serving'],
+    ['4', 'event specialties'],
+];
 
 const About = () => {
-    const { user } = useAuth();
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-    const navLinks = [
-        { name: 'Home', path: '/' },
-        { name: 'Menu', path: '/menu' },
-        { name: 'Book Now', path: '/book' },
-        { name: 'About', path: '/about' },
-        { name: 'Contact', path: '/contact' },
-    ];
+    const { user, logout } = useAuth();
 
     return (
-        <div className="min-h-screen flex flex-col font-sans bg-gray-50">
-            {/* Navbar */}
-            <nav className="bg-brand-red shadow-lg py-4 relative z-50">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center">
-                        <div className="flex-shrink-0 flex items-center">
-                            <Link href="/">
-                                <img src={logoImg} alt="Eloquente Catering" className="h-12 w-auto object-contain" />
-                            </Link>
-                        </div>
+        <div className="min-h-screen bg-[#f7f4ee] font-sans">
+            <ClientNavbar user={user} logout={logout} activePath="/about" />
 
-                        {/* Desktop Menu */}
-                        <div className="hidden md:flex items-center space-x-8">
-                            {navLinks.map((link) => (
-                                <Link
-                                    key={link.name}
-                                    href={link.path}
-                                    className="text-white hover:text-yellow-400 font-medium text-sm uppercase tracking-wider transition-colors"
-                                >
-                                    {link.name}
-                                </Link>
+            <main className="pt-[68px]">
+                <section className="relative overflow-hidden bg-[#17120f] text-white">
+                    <img
+                        src="https://images.unsplash.com/photo-1559329007-40df8a9345d8?auto=format&fit=crop&q=85&w=1800"
+                        alt="Catering team preparing an event table"
+                        className="absolute inset-0 h-full w-full object-cover opacity-45"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#15110f] via-[#15110f]/80 to-[#720101]/35" />
+                    <div className="relative mx-auto grid min-h-[560px] max-w-7xl items-end gap-10 px-5 py-16 sm:px-8 lg:grid-cols-[1fr_0.8fr]">
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[0.24em] text-[#f0aa0b]">About Eloquente</p>
+                            <h1 className="mt-5 max-w-3xl font-display text-4xl font-bold leading-tight sm:text-6xl">Event catering built on taste, timing, and trust.</h1>
+                            <p className="mt-6 max-w-2xl text-base font-medium leading-7 text-white/70">
+                                We combine curated menus, transparent planning, and disciplined event operations so clients can make confident decisions before the first plate is served.
+                            </p>
+                        </div>
+                        <div className="grid gap-3 rounded-2xl border border-white/15 bg-white/10 p-5 backdrop-blur-md sm:grid-cols-3 lg:grid-cols-1">
+                            {stats.map(([value, label]) => (
+                                <div key={label} className="rounded-xl bg-white/10 p-4">
+                                    <p className="font-display text-3xl font-bold text-white">{value}</p>
+                                    <p className="mt-1 text-xs font-black uppercase tracking-widest text-white/55">{label}</p>
+                                </div>
                             ))}
-
-                            <div className="border-l border-white/30 h-6 mx-4"></div>
-
-                            {user ? (
-                                <div className="flex items-center space-x-4">
-                                    <span className="text-white text-sm mr-2">Hello, {user.username}</span>
-                                    <Link
-                                        href={
-                                            user.role === 'Client' ? '/dashboard/client' :
-                                                user.role === 'Marketing' ? '/dashboard/ops' :
-                                                    user.role === 'Accounting' ? '/dashboard/finance' :
-                                                        (user.role === 'Admin') ? '/dashboard/admin' : '/'
-                                        }
-                                        className="text-white hover:text-yellow-400 text-sm font-medium uppercase tracking-wider"
-                                    >
-                                        Dashboard
-                                    </Link>
-                                    <button
-                                        onClick={() => router.post('/logout')}
-                                        className="bg-white/10 hover:bg-white/20 text-white font-bold py-2 px-6 rounded-full text-xs uppercase tracking-wider transition-all border border-white/30"
-                                    >
-                                        Logout
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center space-x-4">
-                                    <Link href="/login" className="text-white hover:text-yellow-400 text-sm font-medium uppercase tracking-wider">
-                                        Login
-                                    </Link>
-                                    <Link
-                                        href="/register"
-                                        className="bg-yellow-500 hover:bg-yellow-400 text-red-900 font-bold py-2 px-6 rounded-full text-xs uppercase tracking-wider transition-transform transform hover:scale-105 shadow-lg"
-                                    >
-                                        Register
-                                    </Link>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Mobile Menu Button */}
-                        <div className="md:hidden flex items-center">
-                            <button
-                                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                                className="text-white hover:text-gray-200 focus:outline-none"
-                            >
-                                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    {isMobileMenuOpen ? (
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                    ) : (
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-                                    )}
-                                </svg>
-                            </button>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                {/* Mobile Menu Dropdown */}
-                {isMobileMenuOpen && (
-                    <div className="md:hidden bg-red-800 absolute top-full left-0 w-full shadow-xl">
-                        <div className="px-4 pt-2 pb-4 space-y-2">
-                            {navLinks.map((link) => (
-                                <Link
-                                    key={link.name}
-                                    href={link.path}
-                                    onClick={() => setIsMobileMenuOpen(false)}
-                                    className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium"
-                                >
-                                    {link.name}
-                                </Link>
-                            ))}
-                            {user ? (
-                                <>
-                                    <Link href="/dashboard/client" className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
-                                        Dashboard
-                                    </Link>
-                                    <button
-                                        onClick={() => { router.post('/logout'); setIsMobileMenuOpen(false); }}
-                                        className="w-full text-left text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium"
-                                    >
-                                        Logout
-                                    </button>
-                                </>
-                            ) : (
-                                <div className="mt-4 flex flex-col space-y-2">
-                                    <Link href="/login" className="block text-center text-white border border-white/30 px-3 py-2 rounded-md" onClick={() => setIsMobileMenuOpen(false)}>Login</Link>
-                                    <Link href="/register" className="block text-center bg-yellow-500 text-red-900 px-3 py-2 rounded-md font-bold" onClick={() => setIsMobileMenuOpen(false)}>Register</Link>
-                                </div>
-                            )}
-                        </div>
+                <section className="mx-auto grid max-w-7xl gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[0.85fr_1.15fr]">
+                    <div>
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#720101]">Our Standard</p>
+                        <h2 className="mt-4 font-display text-3xl font-bold text-[#1a1a1a] sm:text-4xl">Professional service without making planning feel complicated.</h2>
                     </div>
-                )}
-            </nav>
+                    <div className="grid gap-5 sm:grid-cols-2">
+                        {[
+                            ['Menu clarity', 'Dish choices are tied to real pricing so every menu change has visible cost impact.'],
+                            ['Event readiness', 'Timing, venue notes, guest count, and final sourcing rules are managed before the rush window.'],
+                            ['Guest experience', 'Food, service flow, and presentation are planned around the kind of event you are hosting.'],
+                            ['Accountability', 'The dashboard keeps bookings, payments, tastings, and updates in one place.'],
+                        ].map(([title, text]) => (
+                            <div key={title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                                <h3 className="font-display text-xl font-bold text-[#1a1a1a]">{title}</h3>
+                                <p className="mt-3 text-sm font-medium leading-6 text-gray-500">{text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </section>
 
-            {/* Header */}
-            <div className="bg-red-900 py-16 px-4 text-center">
-                <h1 className="text-4xl md:text-5xl font-display font-bold text-white mb-4">
-                    About Eloquente
-                </h1>
-                <p className="text-red-100 max-w-2xl mx-auto text-lg font-light">
-                    Crafting unforgettable culinary experiences since 2010.
-                </p>
-            </div>
-
-            {/* Main Content */}
-            <div className="flex-grow py-16">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex flex-col lg:flex-row gap-16 items-center">
-                        <div className="w-full lg:w-1/2">
-                            <img 
-                                src="https://images.unsplash.com/photo-1555244162-803834f70033?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80" 
-                                alt="Chef cooking" 
-                                className="rounded-2xl shadow-2xl object-cover h-[500px] w-full"
-                            />
-                        </div>
-                        <div className="w-full lg:w-1/2 space-y-6">
-                            <h2 className="text-3xl font-display font-bold text-red-900 mb-4">Our Story</h2>
-                            <p className="text-gray-600 text-lg leading-relaxed">
-                                At Eloquente Catering, we believe that food is not just nourishment, but an art form that brings people together. What started as a small family kitchen has blossomed into one of the city's premier catering services.
+                <section className="bg-white py-20">
+                    <div className="mx-auto grid max-w-7xl gap-10 px-5 sm:px-8 lg:grid-cols-2">
+                        <img
+                            src="https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&q=85&w=1100"
+                            alt="Chef plating food for service"
+                            className="h-[440px] w-full rounded-2xl object-cover shadow-xl"
+                        />
+                        <div className="self-center">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">How We Work</p>
+                            <h2 className="mt-4 font-display text-3xl font-bold text-[#1a1a1a]">From tasting to final balance, every step has a purpose.</h2>
+                            <p className="mt-5 text-sm font-medium leading-7 text-gray-600">
+                                Eloquente treats catering as both culinary work and operations work. We help clients taste, choose, price, confirm, and prepare on a schedule that protects food quality and event execution.
                             </p>
-                            <p className="text-gray-600 text-lg leading-relaxed">
-                                Our philosophy is simple: source the freshest local ingredients, prepare them with passion and creativity, and serve them with impeccable hospitality. Whether it's an intimate corporate luncheon or a grand wedding celebration, our team is dedicated to making every event truly spectacular.
-                            </p>
-                            
-                            <div className="grid grid-cols-2 gap-8 pt-8 border-t border-gray-200 mt-8">
-                                <div>
-                                    <h4 className="text-4xl font-bold text-yellow-500 mb-2">500+</h4>
-                                    <p className="text-gray-500 font-medium uppercase tracking-wider text-sm">Events Catered</p>
-                                </div>
-                                <div>
-                                    <h4 className="text-4xl font-bold text-yellow-500 mb-2">15</h4>
-                                    <p className="text-gray-500 font-medium uppercase tracking-wider text-sm">Years Experience</p>
-                                </div>
+                            <div className="mt-8 flex flex-wrap gap-3">
+                                <Link href="/book" className="rounded-full bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-[#5a0101]">Book Event</Link>
+                                <Link href="/food-tasting" className="rounded-full border border-[#720101]/20 bg-white px-6 py-3 text-sm font-black uppercase tracking-widest text-[#720101] hover:bg-[#720101]/5">Book Tasting</Link>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
+                </section>
+            </main>
 
-            {/* Footer */}
-            <footer className="bg-gray-900 text-white py-8 mt-auto">
-                <div className="max-w-7xl mx-auto px-4 text-center">
-                    <p className="font-display font-bold text-lg mb-2">Eloquente Catering</p>
-                    <p className="text-gray-400 text-sm">© 2026 All rights reserved.</p>
-                </div>
-            </footer>
+            <Footer />
+            {user && <ChatBubble user={user} />}
         </div>
     );
 };

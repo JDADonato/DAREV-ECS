@@ -9,9 +9,9 @@ const ClientNavbar = ({ user, logout, activePath }) => {
     const path = activePath || window.location.pathname;
     const links = [
         { n: 'Home', p: '/' },
+        { n: 'About', p: '/about' },
         { n: 'Menu', p: '/menu' },
         { n: 'Book Now', p: '/book' },
-        { n: 'Food Tasting', p: '/food-tasting' },
         { n: 'Contact', p: '/contact' },
     ];
     const dash = () => !user ? '/' : ({ Client: '/dashboard/client', Marketing: '/dashboard/ops', Accounting: '/dashboard/finance', Admin: '/dashboard/admin' }[user.role] || '/');

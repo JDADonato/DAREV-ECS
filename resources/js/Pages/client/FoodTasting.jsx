@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { router } from '@inertiajs/react';
-import { CalendarDays, CheckCircle2, Clock, MessageSquareText, Phone, Utensils } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CheckCircle2, Clock, MessageSquareText, Phone, Utensils } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import ClientNavbar from '../../Components/common/ClientNavbar';
 
 const FoodTasting = () => {
     const { user, logout } = useAuth();
@@ -48,7 +47,21 @@ const FoodTasting = () => {
 
     return (
         <div className="min-h-screen bg-[#f7f4ee] font-sans text-[#1a1a1a]">
-            <ClientNavbar user={user} logout={logout} />
+            <header className="fixed top-0 z-50 w-full border-b border-[#720101]/10 bg-white/95 shadow-sm backdrop-blur">
+                <div className="mx-auto flex h-[68px] max-w-7xl items-center justify-between px-5 sm:px-8">
+                    <button onClick={() => window.history.length > 1 ? window.history.back() : router.get('/')} className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#720101] transition-colors hover:bg-[#720101]/5">
+                        <ArrowLeft className="h-4 w-4" />
+                        Back
+                    </button>
+                    <div className="text-center">
+                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-[#720101]">Food Tasting</p>
+                        <p className="hidden text-xs font-semibold text-gray-500 sm:block">Schedule a tasting session before finalizing your menu</p>
+                    </div>
+                    <button onClick={() => router.get('/dashboard/client?tab=tastings')} className="rounded-full bg-[#720101] px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-[#5a0101]">
+                        Tastings
+                    </button>
+                </div>
+            </header>
 
             <main className="mx-auto grid max-w-7xl gap-8 px-5 pb-12 pt-28 sm:px-8 lg:grid-cols-[0.9fr_1.1fr]">
                 <section className="rounded-3xl bg-[#1a1a1a] p-8 text-white shadow-xl shadow-black/10 lg:sticky lg:top-24 lg:self-start">
