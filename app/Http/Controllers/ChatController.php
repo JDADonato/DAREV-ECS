@@ -415,7 +415,9 @@ class ChatController extends Controller
             return response()->json([]);
         }
 
+        // Issue 4: Exclude cancelled and expired bookings from the chat share dropdown
         $bookings = Booking::where('user_id', $user->id)
+            ->whereNotIn('status', ['Cancelled', 'Canceled', 'Expired'])
             ->orderBy('event_date', 'desc')
             ->get()
             ->map(fn ($b) => [
@@ -457,6 +459,9 @@ class ChatController extends Controller
      */
     private function formatMessage($msg, $currentUser): array
     {
+        // Convert created_at to Asia/Manila for display
+        $localTime = $msg->created_at->setTimezone('Asia/Manila');
+
         return [
             'id' => $msg->id,
             'conversation_id' => $msg->conversation_id,
@@ -465,7 +470,7 @@ class ChatController extends Controller
             'is_mine' => $msg->sender_id === $currentUser->id,
             'read_at' => $msg->read_at,
             'created_at' => $msg->created_at->toISOString(),
-            'time' => $msg->created_at->format('g:i A'),
+            'time' => $localTime->format('g:i A'),
             'sender_name' => $msg->sender->username ?? 'Unknown',
             'sender_role' => $msg->sender->role ?? 'Unknown',
             'is_booking_card' => str_starts_with($msg->message, '📋 BOOKING DETAILS'),

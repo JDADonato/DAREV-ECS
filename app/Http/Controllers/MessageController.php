@@ -106,7 +106,7 @@ class MessageController extends Controller
             'is_mine' => true,
             'read_at' => null,
             'created_at' => $message->created_at->toISOString(),
-            'time' => $message->created_at->format('g:i A'),
+            'time' => $message->created_at->setTimezone('Asia/Manila')->format('g:i A'),
             'sender_name' => $currentUser->username,
             'is_booking_card' => false,
         ], 201);
@@ -165,6 +165,7 @@ class MessageController extends Controller
         }
 
         $bookings = Booking::where('user_id', $user->id)
+            ->whereNotIn('status', ['Cancelled', 'Canceled', 'Expired'])
             ->orderBy('event_date', 'desc')
             ->get()
             ->map(function ($b) {
@@ -190,6 +191,8 @@ class MessageController extends Controller
     {
         $messageText = $msg->message;
         $isBookingCard = str_starts_with($messageText, '📋 BOOKING DETAILS');
+        // Convert timestamp to Asia/Manila for display
+        $localTime = $msg->created_at->setTimezone('Asia/Manila');
 
         return [
             'id' => $msg->id,
@@ -199,7 +202,7 @@ class MessageController extends Controller
             'is_mine' => $msg->sender_id === $currentUser->id,
             'read_at' => $msg->read_at,
             'created_at' => $msg->created_at->toISOString(),
-            'time' => $msg->created_at->format('g:i A'),
+            'time' => $localTime->format('g:i A'),
             'sender_name' => $msg->sender->username ?? 'Unknown',
             'is_booking_card' => $isBookingCard,
         ];

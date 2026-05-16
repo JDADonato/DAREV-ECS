@@ -53,11 +53,11 @@ const Contact = () => {
                         <h2 className="font-display text-2xl font-bold text-[#1a1a1a]">Send a Message</h2>
                         <form className="mt-6 space-y-5" onSubmit={(e) => { e.preventDefault(); toast.success("Message sent successfully. We'll get back to you soon."); }}>
                             <div className="grid gap-5 sm:grid-cols-2">
-                                <input required className="rounded-xl border-gray-200 px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101]" placeholder="Full name" />
-                                <input required type="email" className="rounded-xl border-gray-200 px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101]" placeholder="Email address" />
+                                <input required className="rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Full name" />
+                                <input required type="email" className="rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Email address" />
                             </div>
-                            <input required className="w-full rounded-xl border-gray-200 px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101]" placeholder="Subject" />
-                            <textarea required rows="6" className="w-full resize-none rounded-xl border-gray-200 px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101]" placeholder="Tell us about your event, timeline, guest count, or question." />
+                            <input required className="w-full rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Subject" />
+                            <textarea required rows="6" className="w-full resize-none rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Tell us about your event, timeline, guest count, or question." />
                             <button type="submit" className="rounded-xl bg-[#720101] px-7 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101]">
                                 Send Message
                             </button>

@@ -6,6 +6,8 @@ import ClientNavbar from '../Components/common/ClientNavbar';
 import logoImg from '../../images/ECS_LOGO.png';
 
 /* ── SVG Icons ── */
+const settledStatuses = ['Paid', 'Verified'];
+const isSettled = (status) => settledStatuses.includes(status);
 const IcoBudget = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const IcoMenu = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>;
 const IcoChart = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
@@ -38,48 +40,51 @@ const Counter = ({ end, suffix = '' }) => {
     return <span ref={ref}>{val}{suffix}</span>;
 };
 
-const EventJourneyTracker = ({ booking }) => {
+const EventJourneyTracker = ({ booking, payments }) => {
     if (!booking) return null;
-    const steps = ['Reserved', 'Downpayment', 'Detailing', 'Final Payment'];
-    const activeStep = booking.milestone_step || 1;
+    const steps = buildFloatingJourneySteps(booking, payments);
+    const activeStepIndex = steps.findIndex(s => !s.done);
+    const activeStep = activeStepIndex === -1 ? steps.length : activeStepIndex;
 
     return (
         <div className="bg-white border-b border-gray-100 shadow-sm pt-28 pb-8 px-5">
-            <div className="max-w-4xl mx-auto">
-                <div className="flex justify-between items-end mb-6">
+            <div className="max-w-5xl mx-auto">
+                <div className="flex justify-between items-end mb-8">
                     <div>
-                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-1">Your Journey</p>
-                        <h2 className="text-[#1a1a1a] text-xl font-display font-bold">Event on {new Date(booking.event_date).toLocaleDateString()}</h2>
+                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-1">Your Event Journey</p>
+                        <h2 className="text-[#1a1a1a] text-2xl font-display font-bold">Event on {new Date(booking.event_date).toLocaleDateString()}</h2>
                     </div>
                     <button 
                         onClick={() => router.get('/dashboard/client')}
-                        className="bg-[#720101] hover:bg-[#5a0101] text-white text-xs font-bold py-2 px-5 rounded-full shadow-md transition-all"
+                        className="bg-[#720101] hover:bg-[#5a0101] text-white text-xs font-black uppercase tracking-widest py-3 px-8 rounded-2xl shadow-xl shadow-[#720101]/20 transition-all active:scale-95"
                     >
-                        Go to Dashboard to Complete
+                        View Dashboard
                     </button>
                 </div>
                 
-                <div className="relative">
-                    <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 rounded-full"></div>
-                    <div className="absolute top-1/2 left-0 h-1 bg-[#720101] -translate-y-1/2 rounded-full transition-all duration-500" style={{ width: `${((activeStep - 1) / 3) * 100}%` }}></div>
+                <div className="relative pt-4 pb-12">
+                    <div className="absolute top-[2.1rem] left-0 w-full h-1 bg-gray-100 rounded-full"></div>
+                    <div className="absolute top-[2.1rem] left-0 h-1 bg-[#720101] rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(114,1,1,0.3)]" style={{ width: `${(steps.filter(s => s.done).length / (steps.length - 1)) * 100}%` }}></div>
                     
                     <div className="relative flex justify-between">
                         {steps.map((step, idx) => {
-                            const stepNum = idx + 1;
-                            const isCompleted = stepNum < activeStep;
-                            const isActive = stepNum === activeStep;
+                            const isCompleted = step.done;
+                            const isActive = idx === activeStep;
+                            const isLocked = step.locked;
                             
                             return (
-                                <div key={idx} className="flex flex-col items-center">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-colors z-10 
+                                <div key={idx} className="flex flex-col items-center group">
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-all duration-500 z-10 
                                         ${isCompleted ? 'bg-[#720101] border-[#720101] text-white' : 
-                                          isActive ? 'bg-white border-[#720101] text-[#720101] shadow-[0_0_10px_rgba(114,1,1,0.3)]' : 
-                                          'bg-white border-gray-200 text-gray-300'}`}>
-                                        {isCompleted ? '✓' : stepNum}
+                                          isActive ? 'bg-white border-[#720101] text-[#720101] shadow-xl' : 
+                                          'bg-white border-gray-100 text-gray-300'}`}>
+                                        {isCompleted ? '✓' : isLocked ? (
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                        ) : idx + 1}
                                     </div>
-                                    <p className={`mt-3 text-xs font-bold uppercase tracking-wide
+                                    <p className={`mt-4 text-[10px] font-black uppercase tracking-[0.15em] text-center max-w-[80px] transition-colors
                                         ${isActive ? 'text-[#720101]' : isCompleted ? 'text-gray-800' : 'text-gray-400'}`}>
-                                        {step}
+                                        {step.label}
                                     </p>
                                 </div>
                             );
@@ -91,26 +96,27 @@ const EventJourneyTracker = ({ booking }) => {
     );
 };
 
-const settledStatuses = ['Paid', 'Verified'];
-const isSettled = (status) => settledStatuses.includes(status);
 
 const buildFloatingJourneySteps = (booking, payments) => {
-    const bookingPayments = payments.filter((payment) => payment.booking_id === booking.id);
+    const bookingPayments = (payments || []).filter((payment) => payment.booking_id === booking.id);
     const total = Number(booking.total_cost || 0);
     const paid = bookingPayments
         .filter((payment) => isSettled(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    
+    const isApproved = booking.status === 'Confirmed';
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettled(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettled(payment.status));
 
     return [
-        { label: 'Booking created', done: true, action: 'Review booking', tab: 'details' },
-        { label: 'Reservation payment', done: hasReservation, action: 'Pay reservation fee', tab: 'payments' },
-        { label: 'Event details', done: eventDetailsDone, action: 'Add event details', tab: 'details' },
-        { label: 'Menu selection', done: menuDone, action: 'Finalize menu', tab: 'menu' },
-        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${booking.nextPaymentDue.payment_type}` : 'Review payments', tab: 'payments' },
+        { label: 'Booking submitted', done: true, action: 'Review event details', tab: 'details' },
+        { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices', tab: 'menu' },
+        { label: 'Booking approved', done: isApproved, action: 'Awaiting approval', tab: 'details', isPendingGate: !isApproved },
+        { label: 'Reservation payment', done: hasReservation, action: 'Complete payment', tab: 'payments', locked: !isApproved },
+        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline/motif', tab: 'details' },
+        { label: 'Payment balance', done: paymentsDone, action: 'Review final balance', tab: 'payments', locked: !isApproved },
     ];
 };
 
@@ -183,16 +189,34 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                 </div>
             </div>
 
-            <div className="grid gap-2">
+            <div className="grid gap-2.5">
                 {steps.map((step, index) => (
-                    <button key={step.label} onClick={() => router.get(`/dashboard/client?tab=${step.tab}`)} className="flex w-full items-center gap-3 rounded-xl bg-gray-50 p-2.5 text-left transition-colors hover:bg-[#720101]/5">
-                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : 'bg-white text-gray-400 ring-1 ring-gray-200'}`}>
-                            {step.done ? '✓' : index + 1}
+                    <button 
+                        key={step.label} 
+                        onClick={() => router.get(`/dashboard/client?tab=${step.tab}`)} 
+                        className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all ${step.locked ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'bg-gray-50/50 hover:bg-[#720101]/5 active:scale-[0.98]'}`}
+                        disabled={step.locked}
+                    >
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                            step.done ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 
+                            step.locked ? 'bg-gray-200 text-gray-400' :
+                            step.isPendingGate ? 'bg-[#720101] text-white animate-pulse shadow-lg shadow-red-200' :
+                            'bg-white text-[#720101] ring-2 ring-[#720101]/10 shadow-sm'
+                        }`}>
+                            {step.done ? '✓' : step.locked ? (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                            ) : index + 1}
                         </div>
-                        <div className="min-w-0">
-                            <p className="truncate text-xs font-bold text-gray-900">{step.label}</p>
-                            {!step.done && <p className="truncate text-[11px] font-medium text-gray-500">{step.action}</p>}
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                                <p className={`truncate text-xs font-black uppercase tracking-wider ${step.done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{step.label}</p>
+                                {step.isPendingGate && <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#720101] animate-ping" />}
+                            </div>
+                            {!step.done && <p className="truncate text-[10px] font-bold text-[#720101]/60 uppercase tracking-widest mt-0.5">{step.locked ? 'Step Locked' : step.action}</p>}
                         </div>
+                        {!step.done && !step.locked && (
+                            <svg className="w-4 h-4 text-[#720101]/30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+                        )}
                     </button>
                 ))}
             </div>

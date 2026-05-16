@@ -22,21 +22,23 @@ const buildJourneySteps = (booking, payments) => {
     const paid = bookingPayments
         .filter((payment) => isSettledPaymentStatus(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const isApproved = booking.status === 'Confirmed';
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettledPaymentStatus(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettledPaymentStatus(payment.status));
 
     return [
-        { label: 'Booking created', done: true, action: 'Review event details' },
-        { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee' },
-        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline, venue notes, and motif' },
+        { label: 'Booking submitted', done: true, action: 'Review event details' },
         { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices' },
-        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${booking.nextPaymentDue.payment_type}` : 'No remaining payment' },
+        { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', isPendingGate: !isApproved },
+        { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', locked: !isApproved },
+        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline, venue notes, and motif' },
+        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${booking.nextPaymentDue.payment_type}` : 'No remaining payment', locked: !isApproved },
     ];
 };
 
-const HistoryPanel = ({ bookings }) => (
+const HistoryPanel = ({ bookings, onRemove }) => (
     <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -52,7 +54,7 @@ const HistoryPanel = ({ bookings }) => (
         ) : (
             <div className="grid gap-4">
                 {bookings.map((booking) => (
-                    <div key={booking.id} className="rounded-2xl border border-gray-100 bg-[#faf7f2] p-5">
+                    <div key={booking.id} className="group relative rounded-2xl border border-gray-100 bg-[#faf7f2] p-5 transition-all hover:border-gray-200 hover:shadow-sm">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -65,9 +67,19 @@ const HistoryPanel = ({ bookings }) => (
                                     {new Date(booking.event_date).toLocaleDateString()} · {booking.pax} pax · {peso(booking.total_cost)}
                                 </p>
                             </div>
-                            <button onClick={() => router.get('/book')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
-                                Rebook Event
-                            </button>
+                            <div className="flex items-center gap-3">
+                                {onRemove && (
+                                    <button 
+                                        onClick={() => { if (window.confirm('Remove this event from your history?')) onRemove(booking.id); }}
+                                        className="rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-bold text-red-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-700"
+                                    >
+                                        Remove
+                                    </button>
+                                )}
+                                <button onClick={() => router.get('/book')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
+                                    Rebook Event
+                                </button>
+                            </div>
                         </div>
                     </div>
                 ))}
@@ -91,6 +103,8 @@ const ClientDashboard = () => {
     const [savingMenu, setSavingMenu] = useState(false);
     const [menuEditMode, setMenuEditMode] = useState(false);
     const [eventPickerOpen, setEventPickerOpen] = useState(false);
+    const [activeDetailRow, setActiveDetailRow] = useState(null);
+    const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
 
     const [submittingPayment, setSubmittingPayment] = useState(false);
 
@@ -99,6 +113,16 @@ const ClientDashboard = () => {
     const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
     const isSettledPayment = (payment) => isSettledPaymentStatus(payment.status);
+
+    const calculateMenuTotal = (selections, pax) => {
+        let sum = 0;
+        Object.values(selections).forEach(catItems => {
+            catItems.forEach(item => {
+                sum += ((item.costPerHead || 0) + (item.priceAdj || 0)) * pax;
+            });
+        });
+        return sum;
+    };
 
     useEffect(() => {
         const tab = new URLSearchParams(window.location.search).get('tab');
@@ -161,7 +185,14 @@ const ClientDashboard = () => {
                 });
                 const activeBookings = result.bookings || [];
                 if (activeBookings.length > 0 && (!activeBookingId || !activeBookings.some((booking) => booking.id === activeBookingId))) {
-                    setActiveBookingId(activeBookings[0].id);
+                    // Default to the event with the closest upcoming date
+                    const now = new Date();
+                    const sorted = [...activeBookings].sort((a, b) => {
+                        const da = Math.abs(new Date(a.event_date) - now);
+                        const db = Math.abs(new Date(b.event_date) - now);
+                        return da - db;
+                    });
+                    setActiveBookingId(sorted[0].id);
                 } else if (activeBookings.length === 0) {
                     setActiveBookingId(null);
                 }
@@ -312,27 +343,24 @@ const ClientDashboard = () => {
         }));
     };
 
-    const saveMenuSelection = async () => {
+    const saveMenuSelection = () => {
         setSavingMenu(true);
-        try {
-            const res = await fetch(`/api/bookings/${activeBooking.id}/menu`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ selected_menu: menuSelections }),
-            });
-            const result = await res.json().catch(() => ({}));
-            if (res.ok) {
+        router.put(`/api/bookings/${activeBooking.id}/menu`, {
+            selected_menu: menuSelections
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
                 setToast({ message: 'Menu selection updated. Pricing and unpaid balances were recalculated.', type: 'success' });
                 setMenuEditMode(false);
                 fetchData();
-            } else {
-                setToast({ message: result.error || 'Unable to update menu.', type: 'error' });
+            },
+            onError: (errors) => {
+                setToast({ message: errors.error || 'Unable to update menu.', type: 'error' });
+            },
+            onFinish: () => {
+                setSavingMenu(false);
             }
-        } catch (e) {
-            setToast({ message: 'Network error while updating menu.', type: 'error' });
-        } finally {
-            setSavingMenu(false);
-        }
+        });
     };
 
     const handleRenegotiate = async () => {
@@ -460,11 +488,11 @@ const ClientDashboard = () => {
 
                             <nav className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                                 {[
-                                    { id: 'details', label: 'Event Details', needsWork: activeJourneySteps.some(s => s.label === 'Event details' && !s.done), icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+                                    { id: 'details', label: 'Event Details', needsWork: activeJourneySteps.some(s => s.label === 'Event details' && !s.done), icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1 -18 0 a 9 9 0 0 1 18 0z' },
                                     { id: 'menu', label: 'Menu', needsWork: activeJourneySteps.some(s => s.label === 'Menu selection' && !s.done), icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
                                     { id: 'tastings', label: 'Food Tastings', needsWork: data.tastings.length === 0, icon: 'M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 4.5h15v15h-15z' },
-                                    { id: 'payments', label: 'Payments', needsWork: activeBooking.nextPaymentDue, icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 014 0z' },
-                                    { id: 'history', label: 'History', needsWork: false, icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+                                    { id: 'payments', label: 'Payments', needsWork: activeBooking.nextPaymentDue, icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 1 1 -4 0 a 2 2 0 0 1 4 0z' },
+                                    { id: 'history', label: 'History', needsWork: false, icon: 'M12 8v4l3 3m6-3a9 9 0 1 1 -18 0 a 9 9 0 0 1 18 0z' },
                                 ].map(section => (
                                     <button 
                                         key={section.id} 
@@ -543,18 +571,37 @@ const ClientDashboard = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="grid gap-3 sm:grid-cols-5">
+                                        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
                                             {activeJourneySteps.map((step, index) => (
-                                                <div key={step.label} className={`rounded-2xl border p-3 ${step.done ? 'border-green-100 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
-                                                    <div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
-                                                        {step.done ? '✓' : index + 1}
+                                                <div key={step.label} className={`rounded-2xl border p-3 relative ${step.done ? 'border-green-200 bg-green-50' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20' : step.locked ? 'border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50'}`}>
+                                                    <div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
+                                                        {step.done ? '✓' : step.locked ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> : index + 1}
                                                     </div>
-                                                    <p className="text-xs font-bold text-gray-900">{step.label}</p>
-                                                    {!step.done && <p className="mt-1 text-[11px] font-medium leading-4 text-gray-500">{step.action}</p>}
+                                                    <p className={`text-xs font-bold ${step.locked ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
+                                                    {!step.done && <p className={`mt-1 text-[11px] font-medium leading-4 ${step.isPendingGate ? 'text-[#b27a00]' : 'text-gray-500'}`}>{step.action}</p>}
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
+
+                                    {/* Pending Approval Banner */}
+                                    {activeBooking.status === 'Pending' && (
+                                        <div className="rounded-3xl border-2 border-[#f0aa0b]/30 bg-gradient-to-r from-[#f0aa0b]/5 via-white to-[#f0aa0b]/5 p-6 sm:p-8 shadow-sm">
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[#f0aa0b]/15">
+                                                    <svg className="w-7 h-7 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h3 className="text-lg font-display font-bold text-[#1a1a1a]">Awaiting Approval</h3>
+                                                    <p className="mt-1 text-sm font-medium text-gray-600 leading-6">Your booking has been submitted and is under review by our Marketing Executive. Once approved, you'll be able to proceed with the reservation payment and complete the remaining steps. You can still update your event details and food tasting schedule in the meantime.</p>
+                                                </div>
+                                                <span className="inline-flex items-center gap-2 rounded-full bg-[#f0aa0b]/15 px-4 py-2 text-xs font-black uppercase tracking-widest text-[#b27a00] border border-[#f0aa0b]/25">
+                                                    <span className="h-2 w-2 rounded-full bg-[#f0aa0b] animate-pulse" />
+                                                    Pending Review
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Content based on Active Section */}
                                     {activeSection === 'details' && (
@@ -565,210 +612,310 @@ const ClientDashboard = () => {
                                                 <div className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-red-50 border border-red-100">
                                                     <svg className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                                                     <div>
-                                                        <p className="text-sm font-bold text-red-800">14-Day Hard Freeze Active</p>
+                                                        <p className="text-sm font-bold text-red-800">Hard Freeze Active</p>
                                                         <p className="text-xs text-red-700 mt-1">Your event details are currently locked as our team is making final preparations. If you need to make an urgent change, please use the messaging module to contact your Marketing Executive directly.</p>
                                                     </div>
                                                 </div>
                                             )}
 
-                                            <div className="grid gap-4 sm:grid-cols-2">
-                                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Venue</p>
-                                                    <input 
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border-b border-gray-300 py-1 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60"
-                                                        value={detailsForm.venue_address_line || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, venue_address_line: e.target.value }))}
-                                                        placeholder="Venue Address"
-                                                    />
-                                                </div>
-                                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Color Motif</p>
-                                                    <input 
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border-b border-gray-300 py-1 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60"
-                                                        value={detailsForm.color_motif || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, color_motif: e.target.value }))}
-                                                        placeholder="e.g., Gold & Navy"
-                                                    />
-                                                </div>
-                                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Reservation Time</p>
-                                                    <input
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border-b border-gray-300 py-1 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60"
-                                                        value={detailsForm.reservation_time || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, reservation_time: e.target.value }))}
-                                                        placeholder="e.g., 4:00 PM"
-                                                    />
-                                                </div>
-                                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Serving Time</p>
-                                                    <input
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border-b border-gray-300 py-1 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60"
-                                                        value={detailsForm.serving_time || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, serving_time: e.target.value }))}
-                                                        placeholder="e.g., 6:30 PM"
-                                                    />
-                                                </div>
-                                                <div className="sm:col-span-2 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Event Timeline / Program</p>
-                                                    <textarea 
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border border-gray-300 rounded p-2 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60 resize-none h-24"
-                                                        value={detailsForm.event_timeline || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, event_timeline: e.target.value }))}
-                                                        placeholder="e.g., 6PM Cocktails, 7PM Dinner"
-                                                    />
-                                                </div>
-                                                <div className="sm:col-span-2 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Special Instructions & Allergies</p>
-                                                    <textarea 
-                                                        readOnly={!activeBooking.canEditSupplementary}
-                                                        disabled={!activeBooking.canEditSupplementary}
-                                                        className="w-full bg-transparent border border-gray-300 rounded p-2 text-sm font-semibold text-gray-900 focus:outline-none focus:border-[#720101] disabled:opacity-60 resize-none h-24"
-                                                        value={detailsForm.special_instructions || ''}
-                                                        onChange={(e) => setDetailsForm(prev => ({ ...prev, special_instructions: e.target.value }))}
-                                                        placeholder="e.g., 2 vegan guests"
-                                                    />
-                                                </div>
-                                                <div className="sm:col-span-2 rounded-2xl border border-dashed border-[#720101]/25 bg-[#720101]/5 p-4">
-                                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                                        <div>
-                                                            <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">Inspiration Image</p>
-                                                            <p className="mt-1 text-sm font-medium text-gray-600">Upload a mood board, theme sample, or layout reference.</p>
-                                                            {detailsForm.theme_uploads && <p className="mt-2 text-xs font-bold text-green-700">Image attached</p>}
+                                            <div className="flex flex-col gap-4">
+                                                {[
+                                                    { id: 'venue', label: 'Venue Address', value: detailsForm.venue_address_line, type: 'text', key: 'venue_address_line', placeholder: 'Complete Venue Address', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z' },
+                                                    { id: 'color_motif', label: 'Color Motif', value: detailsForm.color_motif, type: 'text', key: 'color_motif', placeholder: 'e.g., Royal Gold & Deep Navy', icon: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01' },
+                                                    { id: 'reservation_time', label: 'Reservation Time', value: detailsForm.reservation_time, type: 'text', key: 'reservation_time', placeholder: 'e.g., 4:00 PM', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+                                                    { id: 'serving_time', label: 'Serving Time', value: detailsForm.serving_time, type: 'text', key: 'serving_time', placeholder: 'e.g., 6:30 PM', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z' },
+                                                    { id: 'event_timeline', label: 'Event Timeline / Program', value: detailsForm.event_timeline, type: 'textarea', key: 'event_timeline', placeholder: 'Outline your program here...', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
+                                                    { id: 'special_instructions', label: 'Special Instructions & Allergies', value: detailsForm.special_instructions, type: 'textarea', key: 'special_instructions', placeholder: 'Dietary restrictions, guest count adjustments, etc.', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+                                                ].map(field => {
+                                                    const isExpanded = activeDetailRow === field.id;
+                                                    return (
+                                                        <div 
+                                                            key={field.id}
+                                                            className={`group relative overflow-hidden rounded-2xl border transition-all duration-500 ${isExpanded ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/50 p-5 cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md'}`}
+                                                            onClick={() => { if (!isExpanded && activeBooking.canEditSupplementary) setActiveDetailRow(field.id); }}
+                                                        >
+                                                            <div className="flex items-start gap-4">
+                                                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${isExpanded ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
+                                                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={field.icon} /></svg>
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center justify-between gap-4">
+                                                                        <h4 className={`text-xs font-black uppercase tracking-[0.15em] transition-colors ${isExpanded ? 'text-[#720101]' : 'text-gray-400 group-hover:text-gray-600'}`}>{field.label}</h4>
+                                                                        {!isExpanded && (
+                                                                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
+                                                                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {!isExpanded && (
+                                                                        <p className="mt-1 text-sm font-bold text-gray-900 truncate pr-4">
+                                                                            {field.value ? field.value : <span className="text-gray-300 italic font-medium">Click to specify...</span>}
+                                                                        </p>
+                                                                    )}
+                                                                    {isExpanded && (
+                                                                        <div className="mt-4 animate-fadeIn">
+                                                                            {field.type === 'textarea' ? (
+                                                                                <textarea 
+                                                                                    autoFocus
+                                                                                    className="w-full bg-gray-50 border-0 border-b-2 border-gray-200 rounded-t-xl px-4 py-3 text-sm font-bold text-gray-900 focus:border-[#720101] focus:ring-0 focus:bg-white transition-all resize-none h-32"
+                                                                                    value={detailsForm[field.key] || ''}
+                                                                                    onChange={(e) => setDetailsForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                                                                    placeholder={field.placeholder}
+                                                                                />
+                                                                            ) : (
+                                                                                <input 
+                                                                                    autoFocus
+                                                                                    className="w-full bg-gray-50 border-0 border-b-2 border-gray-200 rounded-t-xl px-4 py-3 text-sm font-bold text-gray-900 focus:border-[#720101] focus:ring-0 focus:bg-white transition-all h-12"
+                                                                                    value={detailsForm[field.key] || ''}
+                                                                                    onChange={(e) => setDetailsForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                                                                    placeholder={field.placeholder}
+                                                                                />
+                                                                            )}
+                                                                            <div className="mt-4 flex justify-end gap-3">
+                                                                                <button 
+                                                                                    type="button" 
+                                                                                    onClick={(e) => { e.stopPropagation(); setActiveDetailRow(null); }} 
+                                                                                    className="rounded-xl border border-gray-200 bg-white px-5 py-2 text-xs font-black uppercase tracking-widest text-gray-500 hover:bg-gray-50 transition-colors shadow-sm"
+                                                                                >
+                                                                                    Confirm
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                        <label className={`inline-flex cursor-pointer items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-bold text-[#720101] shadow-sm ring-1 ring-[#720101]/15 ${!activeBooking.canEditSupplementary ? 'pointer-events-none opacity-50' : ''}`}>
-                                                            {uploadingImage ? 'Uploading...' : 'Upload Image'}
-                                                            <input type="file" accept="image/*" className="hidden" disabled={!activeBooking.canEditSupplementary || uploadingImage} onChange={(e) => uploadInspirationImage(e.target.files?.[0])} />
-                                                        </label>
+                                                    );
+                                                })}
+                                                
+                                                {/* Image Upload Accordion */}
+                                                <div 
+                                                    className={`group relative overflow-hidden rounded-2xl border transition-all duration-500 ${activeDetailRow === 'image' ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/50 p-5 cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md'}`}
+                                                    onClick={() => { if (activeDetailRow !== 'image' && activeBooking.canEditSupplementary) setActiveDetailRow('image'); }}
+                                                >
+                                                    <div className="flex items-start gap-4">
+                                                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${activeDetailRow === 'image' ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
+                                                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-4">
+                                                                <h4 className={`text-xs font-black uppercase tracking-[0.15em] transition-colors ${activeDetailRow === 'image' ? 'text-[#720101]' : 'text-gray-400 group-hover:text-gray-600'}`}>Inspiration Image</h4>
+                                                                {activeDetailRow !== 'image' && (
+                                                                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
+                                                                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {activeDetailRow !== 'image' && (
+                                                                <p className="mt-1 text-sm font-bold text-gray-900 truncate pr-4">
+                                                                    {detailsForm.theme_uploads ? <span className="text-green-600 flex items-center gap-1.5"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" /></svg>Image uploaded</span> : <span className="text-gray-300 italic font-medium">Click to upload reference...</span>}
+                                                                </p>
+                                                            )}
+                                                            {activeDetailRow === 'image' && (
+                                                                <div className="mt-4 animate-fadeIn">
+                                                                    <div className="flex flex-col gap-6">
+                                                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                                            <p className="text-sm font-medium text-gray-500 leading-relaxed max-w-xs">Upload a mood board, theme sample, or layout reference for our team.</p>
+                                                                            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#720101] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[#720101]/20 hover:bg-[#5a0101] transition-all active:scale-95">
+                                                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                                                                {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                                                                                <input type="file" accept="image/*" className="hidden" disabled={uploadingImage} onChange={(e) => uploadInspirationImage(e.target.files?.[0])} />
+                                                                            </label>
+                                                                        </div>
+                                                                        
+                                                                        {detailsForm.theme_uploads && (
+                                                                            <div className="relative group/img aspect-video sm:aspect-auto sm:h-64 overflow-hidden rounded-2xl border-4 border-white shadow-lg">
+                                                                                <img src={detailsForm.theme_uploads} alt="Event inspiration" className="h-full w-full object-cover" />
+                                                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                                                                                    <span className="bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest border border-white/30">Current Reference</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        <div className="flex justify-end pt-2">
+                                                                            <button 
+                                                                                type="button" 
+                                                                                onClick={(e) => { e.stopPropagation(); setActiveDetailRow(null); }} 
+                                                                                className="rounded-xl border border-gray-200 bg-white px-5 py-2 text-xs font-black uppercase tracking-widest text-gray-500 hover:bg-gray-50 transition-colors shadow-sm"
+                                                                            >
+                                                                                Confirm
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                    {detailsForm.theme_uploads && <img src={detailsForm.theme_uploads} alt="Event inspiration" className="mt-4 h-32 w-full rounded-xl object-cover" />}
                                                 </div>
                                             </div>
+
                                             {activeBooking.canEditSupplementary && (
-                                                <div className="mt-6 flex justify-end">
-                                                    <button onClick={saveEventDetails} disabled={savingDetails} className="bg-[#1a1a1a] text-white font-bold py-2.5 px-6 rounded-xl shadow-sm hover:bg-black transition-colors disabled:opacity-60">{savingDetails ? 'Saving...' : 'Save Details'}</button>
+                                                <div className="mt-8 pt-6 border-t border-gray-100 flex justify-end">
+                                                    <button onClick={saveEventDetails} disabled={savingDetails} className="group relative bg-[#1a1a1a] hover:bg-black text-white font-black uppercase tracking-widest text-xs py-4 px-8 rounded-2xl shadow-xl transition-all active:scale-95 disabled:opacity-50 overflow-hidden">
+                                                        <span className="relative z-10 flex items-center gap-2">
+                                                            {savingDetails ? (
+                                                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                                            ) : (
+                                                                <svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            {savingDetails ? 'Synchronizing...' : 'Save All Details'}
+                                                        </span>
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>
                                     )}
 
                                     {activeSection === 'history' && (
-                                        <HistoryPanel bookings={data.historyBookings} />
+                                        <HistoryPanel bookings={data.historyBookings} onRemove={(id) => {
+                                            fetch(`/api/bookings/${id}/remove-history`, { method: 'DELETE' })
+                                                .then(() => fetchData())
+                                                .catch(err => setToast({ message: 'Error removing history.', type: 'error' }));
+                                        }} />
                                     )}
 
                                     {activeSection === 'menu' && (
-                                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8">
-                                            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                                                <div>
-                                                    <h3 className="text-xl font-bold font-display text-[#1a1a1a]">Menu Selection</h3>
-                                                    <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-gray-500">Dish edits use current menu prices. When saved, the system recalculates the event total and updates unpaid balances only.</p>
+                                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8 animate-fadeIn">
+                                            <div className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+                                                <div className="max-w-2xl">
+                                                    <h3 className="text-2xl font-bold font-display text-[#1a1a1a]">Curated Menu</h3>
+                                                    <p className="mt-2 text-sm font-medium leading-relaxed text-gray-500">Fine-tune your culinary journey. Swapping dishes will automatically adjust your event total based on current seasonal pricing.</p>
                                                 </div>
                                                 {activeBooking.canEditMenu && !menuEditMode && (
-                                                    <button onClick={() => setMenuEditMode(true)} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
-                                                        Edit Menu
+                                                    <button onClick={() => setMenuEditMode(true)} className="group flex items-center gap-2 rounded-2xl bg-[#720101] px-6 py-3.5 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-[#720101]/20 hover:bg-[#5a0101] transition-all active:scale-95">
+                                                        <svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        Customize Menu
                                                     </button>
                                                 )}
                                             </div>
                                             
                                             {!activeBooking.canEditMenu && activeBooking.status !== 'Cancelled' && (
-                                                <div className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-red-50 border border-red-100">
-                                                    <svg className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                                <div className="mb-8 p-5 rounded-2xl flex items-start gap-4 bg-red-50 border border-red-100 shadow-sm">
+                                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                                    </div>
                                                     <div>
-                                                        <p className="text-sm font-bold text-red-800">30-Day Menu Freeze Active</p>
-                                                        <p className="text-xs text-red-700 mt-1">Your menu is locked for final sourcing and preparation. Dish swapping is no longer available.</p>
+                                                        <p className="text-sm font-black uppercase tracking-widest text-red-800">30-Day Menu Freeze</p>
+                                                        <p className="text-xs font-medium text-red-700/80 mt-1 leading-relaxed">Your menu is locked for final sourcing. Contact your Marketing Executive for critical adjustments.</p>
                                                     </div>
                                                 </div>
                                             )}
 
-                                            {menuCategories.map((category) => {
+                                            {/* Category Tabs */}
+                                            <div className="flex overflow-x-auto border-b border-gray-100 mb-8 pb-1 gap-8 no-scrollbar">
+                                                {menuCategories.map(cat => (
+                                                    <button
+                                                        key={cat.id}
+                                                        onClick={() => setActiveMenuCategory(cat.id)}
+                                                        className={`relative whitespace-nowrap pb-4 text-xs font-black uppercase tracking-[0.2em] transition-all ${activeMenuCategory === cat.id ? 'text-[#720101]' : 'text-gray-400 hover:text-gray-600'}`}
+                                                    >
+                                                        {cat.label}
+                                                        {activeMenuCategory === cat.id && (
+                                                            <div className="absolute bottom-0 left-0 right-0 h-1 rounded-full bg-[#720101] animate-scaleX" />
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {menuEditMode && (
+                                                <div className="mb-8 overflow-hidden rounded-3xl bg-[#1a1a1a] p-6 text-white shadow-2xl relative">
+                                                    <div className="absolute top-0 right-0 p-8 opacity-10">
+                                                        <svg className="w-24 h-24 text-[#f0aa0b]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" /></svg>
+                                                    </div>
+                                                    <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                                        <div>
+                                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#f0aa0b]">Live Price Estimate</p>
+                                                            <div className="mt-1 flex items-baseline gap-2">
+                                                                <h4 className="text-3xl font-display font-bold">{peso(calculateMenuTotal(menuSelections, activeBooking.pax))}</h4>
+                                                                <span className="text-xs font-bold text-white/40 italic">Projected New Total</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="h-px w-full sm:h-10 sm:w-px bg-white/10" />
+                                                        <p className="text-xs font-medium text-white/60 max-w-[200px]">Includes seasonal adjustments and pax count of <span className="text-white font-bold">{activeBooking.pax}</span>.</p>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Active Category Content */}
+                                            {menuCategories.filter(c => c.id === activeMenuCategory).map((category) => {
                                                 const items = menuSelections[category.id] || [];
-                                                if (!items.length) return null;
                                                 return (
-                                                    <div key={category.id} className="mb-5 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                        <p className="mb-3 text-xs font-bold uppercase tracking-widest text-[#720101]">{category.label}</p>
-                                                        <div className="grid gap-3 sm:grid-cols-2">
+                                                    <div key={category.id} className="animate-fadeIn">
+                                                        <div className="grid gap-4 sm:grid-cols-2">
                                                             {items.map((item, index) => (
-                                                                <div key={`${category.id}-${index}`} className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
-                                                                    <div className="flex gap-3">
-                                                                        <img src={item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=300'} alt={item.name} className="h-14 w-14 rounded-lg object-cover" />
+                                                                <div key={`${category.id}-${index}`} className="group relative overflow-hidden rounded-3xl border border-gray-100 bg-[#faf7f2]/40 p-4 transition-all hover:bg-white hover:shadow-xl hover:shadow-[#720101]/5">
+                                                                    <div className="flex gap-4">
+                                                                        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl shadow-sm">
+                                                                            <img src={item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=300'} alt={item.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                                                        </div>
                                                                         <div className="min-w-0 flex-1">
-                                                                            <p className="truncate text-sm font-bold text-gray-900">{item.name}</p>
-                                                                            <p className="mt-1 text-xs font-semibold text-gray-500">{peso((item.costPerHead || 0) + (item.priceAdj || 0))} per head</p>
+                                                                            <h5 className="truncate text-base font-bold text-gray-900">{item.name}</h5>
+                                                                            <p className="mt-1 text-xs font-bold text-[#720101]">{peso((item.costPerHead || 0) + (item.priceAdj || 0))} <span className="text-gray-400 font-medium">/ head</span></p>
+                                                                            {item.priceAdj > 0 && <span className="mt-2 inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700 ring-1 ring-orange-200">Premium Choice</span>}
                                                                         </div>
                                                                     </div>
                                                                     {activeBooking.canEditMenu && menuEditMode && (
-                                                                        <div className="mt-3 flex gap-2">
-                                                                        <select
-                                                                            value={item.id || ''}
-                                                                            onChange={(e) => swapMenuItem(category.id, index, e.target.value)}
-                                                                            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 outline-none focus:border-[#720101]"
-                                                                        >
-                                                                            {(menuCatalog[category.id] || []).map((dish) => (
-                                                                                <option key={dish.id} value={dish.id}>{dish.name}</option>
-                                                                            ))}
-                                                                        </select>
-                                                                        <button onClick={() => removeMenuItem(category.id, index)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100">
-                                                                            Remove
-                                                                        </button>
+                                                                        <div className="mt-4 flex gap-2">
+                                                                            <div className="relative flex-1">
+                                                                                <select
+                                                                                    value={item.id || ''}
+                                                                                    onChange={(e) => swapMenuItem(category.id, index, e.target.value)}
+                                                                                    className="w-full appearance-none rounded-xl border border-gray-200 bg-white pl-4 pr-10 py-3 text-xs font-bold text-gray-700 outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/5 transition-all cursor-pointer"
+                                                                                >
+                                                                                    {(menuCatalog[category.id] || []).map((dish) => (
+                                                                                        <option key={dish.id} value={dish.id}>{dish.name} (+{peso(dish.priceAdj || 0)})</option>
+                                                                                    ))}
+                                                                                </select>
+                                                                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#720101]">
+                                                                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+                                                                                </div>
+                                                                            </div>
+                                                                            <button 
+                                                                                onClick={() => removeMenuItem(category.id, index)} 
+                                                                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors shadow-sm active:scale-90"
+                                                                                title="Remove dish"
+                                                                            >
+                                                                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                            </button>
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                             ))}
                                                         </div>
                                                         {activeBooking.canEditMenu && menuEditMode && (
-                                                            <select
-                                                                value=""
-                                                                onChange={(e) => addMenuItem(category.id, e.target.value)}
-                                                                className="mt-4 w-full rounded-xl border border-dashed border-[#720101]/30 bg-white px-3 py-3 text-xs font-bold text-gray-600 outline-none focus:border-[#720101]"
-                                                            >
-                                                                <option value="">Add {category.label.slice(0, -1)}</option>
-                                                                {(menuCatalog[category.id] || []).map((dish) => (
-                                                                    <option key={dish.id} value={dish.id}>{dish.name} - {peso(dish.costPerHead + dish.priceAdj)} per head</option>
-                                                                ))}
-                                                            </select>
+                                                            <div className="mt-6">
+                                                                <div className="relative">
+                                                                    <select
+                                                                        value=""
+                                                                        onChange={(e) => addMenuItem(category.id, e.target.value)}
+                                                                        className="w-full appearance-none rounded-2xl border-2 border-dashed border-gray-200 bg-white px-6 py-5 text-sm font-bold text-gray-400 outline-none hover:border-[#720101]/30 hover:bg-[#720101]/5 hover:text-[#720101] transition-all cursor-pointer text-center"
+                                                                    >
+                                                                        <option value="">+ Add {category.label.slice(0, -1)} Selection</option>
+                                                                        {(menuCatalog[category.id] || []).map((dish) => (
+                                                                            <option key={dish.id} value={dish.id}>{dish.name} - {peso((dish.costPerHead || 0) + (dish.priceAdj || 0))} / head</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {items.length === 0 && !menuEditMode && (
+                                                            <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-gray-200 bg-[#faf7f2]/30 p-12 text-center mt-4">
+                                                                <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                                                                    <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                                                                </div>
+                                                                <p className="font-bold text-gray-400 tracking-wide">No {category.label.toLowerCase()} in current selection.</p>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 );
                                             })}
-                                            {activeBooking.canEditMenu && menuEditMode && menuCategories.some((category) => (menuSelections[category.id] || []).length === 0) && (
-                                                <div className="mb-5 rounded-2xl border border-dashed border-[#720101]/25 bg-[#720101]/5 p-4">
-                                                    <p className="mb-3 text-xs font-bold uppercase tracking-widest text-[#720101]">Add dishes to empty categories</p>
-                                                    <div className="grid gap-3 sm:grid-cols-2">
-                                                        {menuCategories.filter((category) => (menuSelections[category.id] || []).length === 0).map((category) => (
-                                                            <select
-                                                                key={category.id}
-                                                                value=""
-                                                                onChange={(e) => addMenuItem(category.id, e.target.value)}
-                                                                className="rounded-xl border border-white bg-white px-3 py-3 text-xs font-bold text-gray-600 outline-none focus:border-[#720101]"
-                                                            >
-                                                                <option value="">Add {category.label}</option>
-                                                                {(menuCatalog[category.id] || []).map((dish) => (
-                                                                    <option key={dish.id} value={dish.id}>{dish.name} - {peso(dish.costPerHead + dish.priceAdj)} per head</option>
-                                                                ))}
-                                                            </select>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {!Object.values(menuSelections).some(items => items.length > 0) && (
-                                                <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-                                                    <p className="font-bold text-gray-900">No menu has been selected yet.</p>
-                                                    <p className="mt-1 text-sm text-gray-500">Choose dishes from the menu gallery to complete this step.</p>
-                                                </div>
-                                            )}
+
                                             {activeBooking.canEditMenu && menuEditMode && (
-                                                <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                                    <button onClick={() => setMenuEditMode(false)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">Cancel</button>
-                                                    <button onClick={saveMenuSelection} disabled={savingMenu} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-60">{savingMenu ? 'Saving...' : 'Save Menu Changes'}</button>
+                                                <div className="mt-10 flex flex-wrap justify-end gap-4 pt-8 border-t border-gray-100">
+                                                    <button onClick={() => setMenuEditMode(false)} className="rounded-2xl border border-gray-200 bg-white px-8 py-3.5 text-xs font-black uppercase tracking-widest text-gray-500 hover:bg-gray-50 transition-all shadow-sm active:scale-95">Discard Changes</button>
+                                                    <button onClick={saveMenuSelection} disabled={savingMenu} className="flex items-center gap-2 rounded-2xl bg-[#720101] px-10 py-3.5 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-[#720101]/20 hover:bg-[#5a0101] transition-all active:scale-95 disabled:opacity-50">
+                                                        {savingMenu ? 'Processing Selection...' : 'Save & Recalculate Total'}
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>
@@ -816,9 +963,27 @@ const ClientDashboard = () => {
                                                                         <p><span className="block text-xs font-bold uppercase tracking-widest text-gray-400">Phone</span>{tasting.guest_phone || 'Not provided'}</p>
                                                                     </div>
                                                                 </div>
-                                                                <div className="rounded-2xl bg-gray-50 p-4 md:max-w-xs">
-                                                                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Notes</p>
-                                                                    <p className="mt-2 text-sm font-medium leading-6 text-gray-600">{tasting.notes || 'No special notes were added for this tasting session.'}</p>
+                                                                <div className="flex flex-col gap-4 md:items-end">
+                                                                    <div className="rounded-2xl bg-gray-50 p-4 md:max-w-xs w-full text-left">
+                                                                        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Notes</p>
+                                                                        <p className="mt-2 text-sm font-medium leading-6 text-gray-600">{tasting.notes || 'No special notes were added for this tasting session.'}</p>
+                                                                    </div>
+                                                                    {tasting.status !== 'Cancelled' && (
+                                                                        <div className="flex gap-2">
+                                                                            <button 
+                                                                                onClick={() => {
+                                                                                    if (window.confirm('Cancel this food tasting session?')) {
+                                                                                        fetch(`/api/food-tasting/${tasting.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' } })
+                                                                                            .then(() => { setToast({ message: 'Tasting cancelled.', type: 'success' }); fetchData(); })
+                                                                                            .catch(() => setToast({ message: 'Error cancelling tasting.', type: 'error' }));
+                                                                                    }
+                                                                                }}
+                                                                                className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg"
+                                                                            >
+                                                                                Cancel Session
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -885,7 +1050,16 @@ const ClientDashboard = () => {
                                                                 })}
                                                             </div>
                                                             {activeBooking.nextPaymentDue ? (
-                                                                <form onSubmit={(e) => handlePaymentSubmit(e, activeBooking.nextPaymentDue)} className="mt-6 rounded-2xl border border-[#f0aa0b]/25 bg-white/[0.07] p-5">
+                                                                <form onSubmit={(e) => handlePaymentSubmit(e, activeBooking.nextPaymentDue)} className={`mt-6 rounded-2xl border border-[#f0aa0b]/25 bg-white/[0.07] p-5 relative overflow-hidden ${activeBooking.status === 'Pending' ? 'opacity-80' : ''}`}>
+                                                                    {activeBooking.status === 'Pending' && (
+                                                                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm p-6 text-center">
+                                                                            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#f0aa0b] text-[#1a1a1a] shadow-lg">
+                                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                                                            </div>
+                                                                            <h5 className="text-sm font-black uppercase tracking-widest text-white">Payment Locked</h5>
+                                                                            <p className="mt-1 text-xs font-bold text-white/80 leading-relaxed max-w-[240px]">Payments are disabled until your booking is officially approved by our team.</p>
+                                                                        </div>
+                                                                    )}
                                                                     <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
                                                                         <div>
                                                                             <p className="text-[11px] font-black uppercase tracking-widest text-[#f0aa0b]">Next Payment Required</p>
@@ -907,10 +1081,10 @@ const ClientDashboard = () => {
                                                                             </div>
                                                                             <button
                                                                                 type="submit"
-                                                                                disabled={submittingPayment}
-                                                                                className={`rounded-xl bg-[#f0aa0b] px-6 py-3.5 text-sm font-black text-[#1a1a1a] shadow-lg shadow-black/20 transition-all hover:bg-[#d99a08] ${submittingPayment ? 'cursor-not-allowed opacity-70' : ''}`}
+                                                                                disabled={submittingPayment || activeBooking.status === 'Pending'}
+                                                                                className={`rounded-xl bg-[#f0aa0b] px-6 py-3.5 text-sm font-black text-[#1a1a1a] shadow-lg shadow-black/20 transition-all hover:bg-[#d99a08] ${submittingPayment || activeBooking.status === 'Pending' ? 'cursor-not-allowed opacity-70' : ''}`}
                                                                             >
-                                                                                {submittingPayment ? 'Opening Checkout...' : 'Proceed to Checkout'}
+                                                                                {submittingPayment ? 'Opening Checkout...' : activeBooking.status === 'Pending' ? 'Awaiting Approval' : 'Proceed to Checkout'}
                                                                             </button>
                                                                         </div>
                                                                     </div>

@@ -91,6 +91,8 @@ Route::post('/api/food-tasting', [FoodTastingController::class, 'store']);
 
 // Booking availability is public (calendar needs it without auth sometimes)
 Route::get('/api/bookings/availability/{date}', [BookingController::class, 'checkAvailability']);
+// Issue 3: Pre-fetch all blocked dates for the calendar UI
+Route::get('/api/bookings/disabled-dates', [BookingController::class, 'getDisabledDates']);
 
 // ─── Menu API Endpoints (Database-backed) ───
 Route::get('/api/menu', [MenuController::class, 'index']);
@@ -134,9 +136,12 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     Route::put('/api/bookings/{id}/cancel', [BookingController::class, 'cancel']);
     Route::put('/api/bookings/{id}/update', [BookingController::class, 'update']);
     Route::post('/api/bookings/pay', [BookingController::class, 'recordPayment']);
+    Route::delete('/api/bookings/{id}/remove-history', [BookingController::class, 'removeHistory']);
 
     // Food tasting (authenticated)
     Route::get('/api/food-tasting', [FoodTastingController::class, 'index']);
+    Route::put('/api/food-tasting/{id}', [FoodTastingController::class, 'update']);
+    Route::delete('/api/food-tasting/{id}', [FoodTastingController::class, 'destroy']);
 
     // File upload
     Route::post('/api/upload', [FileUploadController::class, 'store']);

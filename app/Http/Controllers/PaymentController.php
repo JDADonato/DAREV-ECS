@@ -146,6 +146,9 @@ class PaymentController extends Controller
             $bookingUpdates['live_status'] = 'Payment Authorized';
             $booking->update($bookingUpdates);
 
+            // Broadcast payment processed event for accounting dashboard
+            broadcast(new \App\Events\PaymentProcessed($payment->fresh()))->toOthers();
+
             return [
                 'booking_id' => $booking->id,
                 'payment_id' => $payment->id,

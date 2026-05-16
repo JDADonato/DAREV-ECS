@@ -19,21 +19,29 @@ These items fix fundamental flaws that could lead to financial loss or operation
 - [ ] **Supabase RLS Audit:**
     - Verify that Row Level Security (RLS) is strictly enforced so Clients cannot access or modify bookings belonging to other users.
 
-## 🔑 2. Authentication & Profile (Phase 1)
+## ✨ 2. Journey & UI Integrity (Completed May 16)
+- [x] **Journey Tracker Synchronization:**
+    - Synced 6-step flow across Homepage and Client Dashboard.
+- [x] **Marketing Approval Workflow:**
+    - Implemented UI-level gates that lock payments until approval is granted.
+- [x] **Premium UI/UX Overhaul:**
+    - Modernized the supplementary details and menu selection modules.
+
+## 🔑 3. Authentication & Profile (Phase 1)
 - [ ] **OTP Email Verification:**
     - Prevent users from accessing the dashboard until they have verified their email via a 6-digit code.
 - [ ] **Functional Profile Management:**
     - Replace the static "Hello, client" text with a real profile dropdown.
     - Enable clients to update their username, password, and contact details.
 
-## 💳 3. Payments & Accounting (Phase 3)
+## 💳 4. Payments & Accounting (Phase 3)
 - [ ] **Production PayMongo Integration:**
     - Replace the current "Simulation Success" route with a real PayMongo Checkout Session.
     - Implement a Webhook handler to listen for `payment.paid` events and update the database status automatically.
 - [ ] **Accounting Audit Log:**
     - Log every manual status change (Approval/Rejection) made by staff members.
 
-## 💬 4. Real-Time Communication (Phase 2)
+## 💬 5. Real-Time Communication (Phase 2)
 - [ ] **Live Notification System:**
     - Make the notification bell functional using Laravel Reverb or Pusher.
     - Alert users when their booking status changes (e.g., Pending -> Approved).
@@ -41,7 +49,7 @@ These items fix fundamental flaws that could lead to financial loss or operation
     - Connect the floating chat bubble on the client side to a real backend messaging module.
     - Create the "Marketing Staff" interface to respond to these inquiries.
 
-## 📦 5. Admin & Operations (Phase 4)
+## 📦 6. Admin & Operations (Phase 4)
 - [ ] **Full Package CRUD:**
     - Allow Admins to create and edit catering packages (names, inclusions, and prices) via the UI instead of manual database entry.
 - [ ] **Detailed Booking View for Marketing:**
@@ -53,3 +61,4 @@ These items fix fundamental flaws that could lead to financial loss or operation
 1. **Start with the Security Fix:** Fix the price calculation logic first.
 2. **Setup Mailtrap:** Configure an SMTP service to test the Email OTP flow.
 3. Review `darevhandoff.md` and `REMAINING_FEATURES.md`: For a deeper dive into the "Simulation vs. Production" gaps and the detailed phased implementation plan.
+

@@ -7,6 +7,9 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
     const [availability, setAvailability] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    // Issue 3: Pre-loaded disabled dates
+    const [disabledDates, setDisabledDates] = useState([]);
+    const [loadingDates, setLoadingDates] = useState(true);
 
     const timeContainerRef = useRef(null);
 
@@ -15,6 +18,24 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
     const [timeM, setTimeM] = useState('');
     const [timeAmPm, setTimeAmPm] = useState('PM');
     const [duration, setDuration] = useState(bookingData.duration || 4);
+
+    // Issue 3: Fetch all disabled dates on mount
+    useEffect(() => {
+        const fetchDisabledDates = async () => {
+            try {
+                const res = await fetch('/api/bookings/disabled-dates');
+                if (res.ok) {
+                    const data = await res.json();
+                    setDisabledDates(data.disabled_dates || []);
+                }
+            } catch (e) {
+                console.error('Failed to load disabled dates:', e);
+            } finally {
+                setLoadingDates(false);
+            }
+        };
+        fetchDisabledDates();
+    }, []);
 
     // Update parent immediately when duration changes for live summary
     useEffect(() => {
@@ -126,8 +147,20 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
         return `${formatAMPM(hours, minutes)} - ${formatAMPM(endHours, minutes)}`;
     };
 
+    // Issue 3: Check if a date is in the disabled list
+    const isDateDisabled = (date) => disabledDates.includes(date);
+
     const handleDateChange = async (e) => {
         const date = e.target.value;
+
+        // Issue 3: Block disabled dates immediately — no per-date API call needed
+        if (isDateDisabled(date)) {
+            setSelectedDate(date);
+            setAvailability(null);
+            setError('Sorry, this date is fully booked or unavailable.');
+            return;
+        }
+
         setSelectedDate(date);
         setAvailability(null);
         setError('');
@@ -139,13 +172,13 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
                 const data = await response.json();
 
                 if (data.isFull) {
-                    setError("Sorry, this date is fully booked.");
+                    setError('Sorry, this date is fully booked.');
                 } else {
                     setAvailability(data);
                 }
             } catch (err) {
-                console.error("Error fetching availability:", err);
-                setError("Failed to check availability. Please try again.");
+                console.error('Error fetching availability:', err);
+                setError('Failed to check availability. Please try again.');
             } finally {
                 setLoading(false);
             }
@@ -210,9 +243,11 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
                             min={getMinDate()}
                             value={selectedDate}
                             onChange={handleDateChange}
-                            className={`w-full p-4 border rounded-lg focus:ring-2 outline-none shadow-sm text-gray-700 font-medium ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:ring-primary-500 focus:border-transparent'}`}
+                            disabled={loadingDates}
+                            className={`w-full p-4 border rounded-lg focus:ring-2 outline-none shadow-sm text-gray-700 font-medium ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:ring-primary-500 focus:border-transparent'} ${loadingDates ? 'opacity-60 cursor-wait' : ''}`}
                         />
-                        {loading && <p className="mt-2 text-xs text-blue-500">Checking availability...</p>}
+                        {loadingDates && <p className="mt-2 text-xs text-gray-400">Loading calendar availability...</p>}
+                        {loading && !loadingDates && <p className="mt-2 text-xs text-blue-500">Checking availability...</p>}
                         {error && <p className="mt-2 text-xs text-red-600 font-bold">{error}</p>}
                         {availability && !error && (
                             <div className="mt-3 text-xs text-green-600 space-y-1">
@@ -224,11 +259,25 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
                                 <p>Remaining Capacity: {availability.remainingPax} pax</p>
                             </div>
                         )}
-                        {!availability && !loading && !error && (
-                            <p className="mt-3 text-xs text-gray-400 flex items-center">
-                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                Dates in red would be unavailable.
-                            </p>
+                        {!availability && !loading && !error && !loadingDates && (
+                            <div className="mt-3 space-y-1">
+                                <p className="text-xs text-gray-400 flex items-center">
+                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Select a date to check availability.
+                                </p>
+                                {disabledDates.length > 0 && (
+                                    <p className="text-[11px] text-red-500 flex items-center gap-1">
+                                        <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="10"/></svg>
+                                        {disabledDates.length} date{disabledDates.length !== 1 ? 's are' : ' is'} fully booked.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                        {/* Issue 3: Clear warning if selected date is disabled */}
+                        {selectedDate && isDateDisabled(selectedDate) && (
+                            <div className="mt-3 p-2 bg-red-100 border border-red-200 rounded-lg">
+                                <p className="text-xs text-red-700 font-semibold">⛔ This date is fully booked. Please choose a different date.</p>
+                            </div>
                         )}
                     </div>
 

@@ -16,6 +16,12 @@ class BookingManagementService
      */
     public function canEditSupplementary(Booking $booking): bool
     {
+        // Grace period: Allow editing within 48 hours of booking creation, regardless of event date proximity.
+        // This ensures Rush 2 clients can still input their supplementary details immediately upon booking.
+        if ($booking->created_at && $booking->created_at->diffInHours(now()) <= 48) {
+            return true;
+        }
+
         $eventDate = Carbon::parse($booking->event_date)->startOfDay();
         $daysUntilEvent = now()->startOfDay()->diffInDays($eventDate, false);
         

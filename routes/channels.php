@@ -48,3 +48,18 @@ Broadcast::channel('conversation.{conversationId}', function ($user, $conversati
 Broadcast::channel('staff.queue', function ($user) {
     return in_array($user->role, ['Marketing', 'Admin']);
 });
+
+/**
+ * Dashboard sync channels
+ */
+Broadcast::channel('ops.dashboard', function ($user) {
+    return in_array($user->role, ['Marketing', 'Admin']);
+});
+
+Broadcast::channel('finance.dashboard', function ($user) {
+    return in_array($user->role, ['Accounting', 'Admin']);
+});
+
+Broadcast::channel('client.{userId}', function ($user, $userId) {
+    return (int) $user->id === (int) $userId;
+});

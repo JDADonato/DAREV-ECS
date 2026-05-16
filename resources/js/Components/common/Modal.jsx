@@ -27,7 +27,7 @@ const Modal = ({ isOpen, onClose, title, message, type = 'info', onConfirm, conf
                             </svg>
                         )}
                     </div>
-                    <h3 className={`text-2xl font-display font-bold ${isSuccess ? 'text-white' : isError ? 'text-red-900' : 'text-blue-900'}`}>{title}</h3>
+                    <h3 className={`text-2xl font-display font-bold ${isSuccess ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
                     <p className={`mt-3 text-sm leading-6 ${isSuccess ? 'text-white/70' : 'text-gray-600'}`}>{message}</p>
                 </div>
                 <div className="p-6 bg-white">

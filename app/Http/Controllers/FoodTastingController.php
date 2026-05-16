@@ -60,4 +60,33 @@ class FoodTastingController extends Controller
 
         return response()->json($tastings);
     }
+
+    public function update(Request $request, $id)
+    {
+        $tasting = FoodTasting::where('id', $id)->where('user_id', Auth::id())->firstOrFail();
+        
+        $request->validate([
+            'guest_name'     => 'nullable|string',
+            'guest_email'    => 'nullable|email',
+            'guest_phone'    => 'nullable|string',
+            'preferred_date' => 'required|date',
+            'preferred_time' => 'required|string',
+            'notes'          => 'nullable|string',
+        ]);
+
+        $tasting->update($request->only([
+            'guest_name', 'guest_email', 'guest_phone', 'preferred_date', 'preferred_time', 'notes'
+        ]));
+
+        return response()->json(['message' => 'Food tasting updated.']);
+    }
+
+    public function destroy($id)
+    {
+        $tasting = FoodTasting::where('id', $id)->where('user_id', Auth::id())->firstOrFail();
+        
+        $tasting->update(['status' => 'Cancelled']);
+
+        return response()->json(['message' => 'Food tasting cancelled.']);
+    }
 }

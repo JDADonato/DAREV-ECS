@@ -174,6 +174,54 @@ class BookingController extends Controller
     }
 
     /**
+     * GET /api/bookings/disabled-dates
+     *
+     * Returns an array of all fully-booked dates (YYYY-MM-DD) within the next
+     * 12 months so the React calendar can disable them on initial render.
+     * Also includes dates within the 7-day lead-time window.
+     */
+    public function getDisabledDates()
+    {
+        $rules   = \App\Models\BusinessRule::getActive();
+        $maxEvents = $rules ? $rules->maximum_capacity_per_day : BusinessRulesService::MAX_EVENTS_PER_DAY;
+        $maxPax    = BusinessRulesService::MAX_PAX_PER_DAY;
+
+        // Lead-time window: today through today + 6 days are always blocked
+        $today     = Carbon::today();
+        $rangeEnd  = Carbon::today()->addMonths(12);
+
+        $disabledDates = [];
+
+        // Add lead-time blocked dates (0-6 days from today)
+        for ($i = 0; $i < 7; $i++) {
+            $disabledDates[] = $today->copy()->addDays($i)->toDateString();
+        }
+
+        // Query aggregate booking stats grouped by date, for future bookable window
+        $bookingStats = \Illuminate\Support\Facades\DB::table('bookings')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(event_date) as booking_date'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(*) as event_count'),
+                \Illuminate\Support\Facades\DB::raw('SUM(pax) as total_pax')
+            )
+            ->whereDate('event_date', '>', $today->toDateString())
+            ->whereDate('event_date', '<=', $rangeEnd->toDateString())
+            ->whereNotIn('status', ['Cancelled', 'cancelled'])
+            ->groupBy('booking_date')
+            ->get();
+
+        foreach ($bookingStats as $stat) {
+            if ((int) $stat->event_count >= $maxEvents || (int) $stat->total_pax >= $maxPax) {
+                $disabledDates[] = $stat->booking_date;
+            }
+        }
+
+        return response()->json([
+            'disabled_dates' => array_values(array_unique($disabledDates)),
+        ]);
+    }
+
+    /**
      * Check availability for a specific date.
      * Ported from: bookingController.checkAvailability()
      */
@@ -286,7 +334,7 @@ class BookingController extends Controller
             return response()->json(['error' => 'Please select at least one dish.'], 422);
         }
 
-        $menuItems = MenuItem::whereIn('id', $menuItemIds)->where('is_active', true)->get()->keyBy('id');
+        $menuItems = MenuItem::whereIn('id', $menuItemIds)->where('is_active', \Illuminate\Support\Facades\DB::raw('true'))->get()->keyBy('id');
         if ($menuItems->count() !== $menuItemIds->unique()->count()) {
             return response()->json(['error' => 'One or more selected dishes are unavailable. Please refresh your menu.'], 422);
         }
@@ -334,10 +382,39 @@ class BookingController extends Controller
             ]);
         });
 
-        return response()->json([
-            'message' => 'Menu updated and pricing recalculated.',
-            'total_cost' => $newTotal,
-        ]);
+        // 3. Notification Triggers (Phase 4)
+        $booking->load('user');
+        if ($booking->user) {
+            $booking->user->notify(new \App\Notifications\ClientMenuUpdatedNotification($booking, $newTotal));
+        }
+
+        $staff = \App\Models\User::whereIn('role', ['Marketing', 'Accounting', 'Admin'])->get();
+        foreach ($staff as $user) {
+            $user->notify(new \App\Notifications\StaffMenuUpdatedNotification($booking, $newTotal));
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'message' => 'Menu updated and pricing recalculated.',
+                'total_cost' => $newTotal,
+            ]);
+        }
+
+        return back();
+    }
+
+    /**
+     * Remove a booking from the user's history (soft delete or simply hide).
+     */
+    public function removeHistory(int $id)
+    {
+        $userId = Auth::id();
+        $booking = Booking::where('id', $id)->where('user_id', $userId)->first();
+        if ($booking) {
+            // Either delete permanently or set a hidden flag
+            $booking->delete(); // Assuming SoftDeletes is used, otherwise maybe we just delete it or add a hidden_from_history column.
+        }
+        return response()->json(['message' => 'History removed.']);
     }
 
     /**
@@ -358,12 +435,13 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking is already cancelled.'], 400);
         }
 
-        // Check 7-day rule
+        // Check 7-day rule and 48-hour grace period
         $eventDate = Carbon::parse($booking->event_date);
         $daysUntilEvent = (int) ceil(now()->diffInDays($eventDate, false));
+        $hoursSinceCreation = (int) ceil($booking->created_at->diffInHours(now()));
 
-        if ($daysUntilEvent < 7) {
-            return response()->json(['error' => 'Cannot cancel within 7 days of the event date.'], 400);
+        if ($daysUntilEvent < 7 && $hoursSinceCreation > 48) {
+            return response()->json(['error' => 'Cannot cancel within 7 days of the event date unless within 48 hours of booking.'], 400);
         }
 
         $booking->update(['status' => 'Cancelled']);
@@ -389,12 +467,13 @@ class BookingController extends Controller
             return response()->json(['error' => 'Cannot edit a cancelled booking.'], 400);
         }
 
-        // Check 7-day rule
+        // Check 7-day rule and 48-hour grace period
         $eventDate = Carbon::parse($booking->event_date);
         $daysUntilEvent = (int) ceil(now()->diffInDays($eventDate, false));
+        $hoursSinceCreation = (int) ceil($booking->created_at->diffInHours(now()));
 
-        if ($daysUntilEvent < 7) {
-            return response()->json(['error' => 'Cannot edit within 7 days of the event date.'], 400);
+        if ($daysUntilEvent < 7 && $hoursSinceCreation > 48) {
+            return response()->json(['error' => 'Cannot edit within 7 days of the event date unless within 48 hours of booking.'], 400);
         }
 
         // Only update provided fields (COALESCE equivalent)

@@ -4,6 +4,13 @@ This document outlines the current state of the **Eloquente Catering System (ECS
 
 ## 🚀 System Status: Production vs. Simulation
 
+### ✅ Recent UI/UX & Workflow Completed (May 16)
+*   **Premium Client Dashboard**: Completely overhauled with high-end typography, consistent brand coloring (`#720101`), and smooth transitions.
+*   **Synchronized Journey Tracker**: Implemented a 6-step journey (Submission -> Menu -> Approval -> Reservation -> Details -> Balance) synced between the Homepage and Dashboard.
+*   **Approval-Locked Workflow**: Implemented visual gates that lock payment and detail modules until a Marketing Executive approves the booking.
+*   **Real-time Menu Estimation**: Integrated a live "Projected Total" calculator into the menu customization interface.
+
+
 ### 1. Payment Processing (SIMULATED)
 *   **Current State:** The `PaymentController` uses a "Secure Checkout" simulation. It generates a temporary signed internal route instead of a real PayMongo Checkout Session.
 *   **Production Requirement:**
