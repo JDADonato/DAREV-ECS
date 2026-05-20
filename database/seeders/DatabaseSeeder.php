@@ -3,10 +3,14 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Models\Booking;
+use App\Models\BookingItem;
 use App\Models\EventType;
 use App\Models\MenuItem;
 use App\Models\Package;
+use App\Models\Payment;
 use App\Models\BusinessRule;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -30,6 +34,9 @@ class DatabaseSeeder extends Seeder
 
         // Seed business rules
         $this->seedBusinessRules();
+
+        // Seed realistic operational data for analytics and dashboards
+        $this->call(AnalyticsDemoSeeder::class);
 
         $this->command->info('✅ Database seeded successfully!');
     }
@@ -197,5 +204,135 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $this->command->info('Seeded business rules');
+    }
+
+    private function seedOperationalDemoData(): void
+    {
+        if (Booking::where('client_email', 'like', '%@demo.eloquente.test')->exists()) {
+            $this->command->info('Operational demo bookings already exist');
+            return;
+        }
+
+        $clients = collect([
+            ['username' => 'maria_santos', 'name' => 'Maria Santos', 'email' => 'maria.santos@demo.eloquente.test', 'phone' => '0917 410 2341'],
+            ['username' => 'james_reyes', 'name' => 'James Reyes', 'email' => 'james.reyes@demo.eloquente.test', 'phone' => '0918 522 1174'],
+            ['username' => 'angela_cruz', 'name' => 'Angela Cruz', 'email' => 'angela.cruz@demo.eloquente.test', 'phone' => '0919 302 8452'],
+            ['username' => 'nina_lim', 'name' => 'Nina Lim', 'email' => 'nina.lim@demo.eloquente.test', 'phone' => '0920 811 3379'],
+            ['username' => 'rafael_tan', 'name' => 'Rafael Tan', 'email' => 'rafael.tan@demo.eloquente.test', 'phone' => '0921 445 9088'],
+            ['username' => 'bea_mendoza', 'name' => 'Bea Mendoza', 'email' => 'bea.mendoza@demo.eloquente.test', 'phone' => '0922 678 1440'],
+        ])->mapWithKeys(function ($client) {
+            $user = User::firstOrCreate(
+                ['username' => $client['username']],
+                [
+                    'password' => 'password123',
+                    'role' => 'Client',
+                    'email' => $client['email'],
+                    'phone' => $client['phone'],
+                ]
+            );
+            return [$client['name'] => $user];
+        });
+
+        $packages = Package::all()->values();
+        $eventTypes = EventType::all()->keyBy('slug');
+        $menuItems = MenuItem::all()->groupBy('category');
+        $cities = ['Tagaytay City', 'Makati City', 'Quezon City', 'Alabang', 'Pasig City', 'Antipolo City'];
+        $statuses = ['Completed', 'Confirmed', 'Confirmed', 'Pending'];
+
+        $events = [
+            ['client' => 'Maria Santos', 'type' => 'formal-wedding', 'date' => -150, 'pax' => 220, 'status' => 'Completed', 'package' => 0],
+            ['client' => 'James Reyes', 'type' => 'corporate-seminar', 'date' => -120, 'pax' => 180, 'status' => 'Completed', 'package' => 1],
+            ['client' => 'Angela Cruz', 'type' => 'debut', 'date' => -90, 'pax' => 160, 'status' => 'Completed', 'package' => 2],
+            ['client' => 'Nina Lim', 'type' => 'anniversary', 'date' => -65, 'pax' => 95, 'status' => 'Completed', 'package' => 2],
+            ['client' => 'Rafael Tan', 'type' => 'formal-wedding', 'date' => -45, 'pax' => 300, 'status' => 'Completed', 'package' => 0],
+            ['client' => 'Bea Mendoza', 'type' => 'casual-birthday', 'date' => -20, 'pax' => 85, 'status' => 'Confirmed', 'package' => 2],
+            ['client' => 'Maria Santos', 'type' => 'family-reunion', 'date' => 12, 'pax' => 120, 'status' => 'Confirmed', 'package' => 2],
+            ['client' => 'James Reyes', 'type' => 'corporate-seminar', 'date' => 28, 'pax' => 260, 'status' => 'Confirmed', 'package' => 1],
+            ['client' => 'Angela Cruz', 'type' => 'formal-wedding', 'date' => 42, 'pax' => 350, 'status' => 'Confirmed', 'package' => 0],
+            ['client' => 'Nina Lim', 'type' => 'graduation', 'date' => 55, 'pax' => 140, 'status' => 'Pending', 'package' => 2],
+            ['client' => 'Rafael Tan', 'type' => 'anniversary', 'date' => 75, 'pax' => 110, 'status' => 'Pending', 'package' => 2],
+            ['client' => 'Bea Mendoza', 'type' => 'debut', 'date' => 110, 'pax' => 180, 'status' => 'Confirmed', 'package' => 0],
+            ['client' => 'Maria Santos', 'type' => 'formal-wedding', 'date' => 180, 'pax' => 280, 'status' => 'Confirmed', 'package' => 0],
+            ['client' => 'James Reyes', 'type' => 'corporate-seminar', 'date' => 205, 'pax' => 220, 'status' => 'Pending', 'package' => 1],
+        ];
+
+        foreach ($events as $index => $event) {
+            $package = $packages[$event['package']] ?? $packages->first();
+            $eventType = $eventTypes[$event['type']] ?? $eventTypes->first();
+            $eventDate = Carbon::now()->addDays($event['date']);
+            $base = (int) ($package->base_price_per_head ?? 650);
+            $transport = in_array($cities[$index % count($cities)], ['Tagaytay City', 'Antipolo City'], true) ? 8500 : 3500;
+            $labor = $event['pax'] >= 220 ? 12000 : 6000;
+            $total = ($base * $event['pax']) + $transport + $labor;
+            $client = $clients[$event['client']];
+
+            $booking = Booking::create([
+                'user_id' => $client->id,
+                'event_date' => $eventDate->toDateString(),
+                'event_time' => '18:00',
+                'pax' => $event['pax'],
+                'budget' => $total,
+                'package_id' => (string) $package->id,
+                'event_type_id' => $eventType?->id,
+                'event_type' => $eventType?->label ?? $event['type'],
+                'client_full_name' => $event['client'],
+                'venue_address_line' => ($index + 12) . ' Grand Hall Avenue',
+                'venue_street' => 'Events District',
+                'venue_city' => $cities[$index % count($cities)],
+                'venue_province' => 'Metro Manila',
+                'venue_zip_code' => '1000',
+                'client_email' => $client->email,
+                'client_phone' => $client->phone,
+                'reservation_time' => '17:00',
+                'serving_time' => '19:00',
+                'event_timeline' => "Ingress 2:00 PM\nGuest arrival 5:30 PM\nDinner service 7:00 PM",
+                'color_motif' => ['burgundy', 'gold', 'ivory'][$index % 3],
+                'total_cost' => $total,
+                'status' => $event['status'],
+                'selected_menu' => json_encode([]),
+                'live_status' => $event['status'] === 'Completed' ? 'Completed' : 'Not Started',
+                'transport_fee' => $transport,
+                'labor_surcharge' => $labor,
+                'created_at' => $eventDate->copy()->subDays(45),
+                'updated_at' => now(),
+            ]);
+
+            $selected = [];
+            foreach (['starter' => 2, 'main' => 3, 'side' => 1, 'dessert' => 1, 'drink' => 1] as $category => $count) {
+                $choices = ($menuItems[$category] ?? collect())->shuffle()->take($count);
+                $selected[$category] = $choices->pluck('name')->all();
+                foreach ($choices as $choice) {
+                    BookingItem::create([
+                        'booking_id' => $booking->id,
+                        'menu_item_id' => $choice->id,
+                        'quantity' => 1,
+                    ]);
+                }
+            }
+            $booking->update(['selected_menu' => json_encode($selected)]);
+
+            $paymentPlan = [
+                ['Reservation', .10, $eventDate->copy()->subDays(45)],
+                ['DownPayment', .70, $eventDate->copy()->subDays(30)],
+                ['Final', .20, $eventDate->copy()->subDays(10)],
+            ];
+
+            foreach ($paymentPlan as [$type, $ratio, $dueDate]) {
+                $settled = in_array($event['status'], ['Completed'], true)
+                    || ($event['status'] === 'Confirmed' && $type !== 'Final' && $dueDate->isPast());
+                Payment::create([
+                    'booking_id' => $booking->id,
+                    'amount' => round($total * $ratio, 2),
+                    'payment_method' => $settled ? 'Bank Transfer' : 'Online Checkout',
+                    'status' => $settled ? 'Verified' : 'Pending',
+                    'payment_type' => $type,
+                    'due_date' => $dueDate->toDateString(),
+                    'verified_by' => $settled ? 'accounting' : null,
+                    'verified_at' => $settled ? $dueDate->copy()->addDay() : null,
+                ]);
+            }
+        }
+
+        $this->command->info('Seeded realistic bookings, payments, and booking menu items');
     }
 }

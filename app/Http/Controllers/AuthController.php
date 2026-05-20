@@ -190,8 +190,8 @@ class AuthController extends Controller
     {
         return match ($role) {
             'Client'     => '/',
-            'Marketing'  => '/dashboard/ops',
-            'Accounting' => '/dashboard/finance',
+            'Marketing'  => '/dashboard/marketing',
+            'Accounting' => '/dashboard/accounting',
             'Admin'      => '/dashboard/admin',
             default      => '/',
         };

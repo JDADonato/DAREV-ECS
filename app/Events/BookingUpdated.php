@@ -34,10 +34,10 @@ class BookingUpdated implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        // Broadcast to ops, finance, and the specific client
+        // Broadcast to marketing, accounting, and the specific client
         return [
-            new PrivateChannel('ops.dashboard'),
-            new PrivateChannel('finance.dashboard'),
+            new PrivateChannel('marketing.dashboard'),
+            new PrivateChannel('accounting.dashboard'),
             new PrivateChannel('client.' . $this->booking->user_id)
         ];
     }

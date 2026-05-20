@@ -19,6 +19,11 @@ class Payment extends Model
         'due_date',
         'verified_by',
         'verified_at',
+        'paymongo_checkout_session_id',
+        'paymongo_payment_id',
+        'paymongo_payment_intent_id',
+        'paymongo_reference_number',
+        'paymongo_event_id',
     ];
 
     protected function casts(): array

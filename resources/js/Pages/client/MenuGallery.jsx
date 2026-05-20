@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Link, usePage, router } from '@inertiajs/react';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import { useToast } from '../../context/ToastContext';
@@ -29,6 +29,7 @@ const MenuGallery = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [showConflictModal, setShowConflictModal] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const menuStartRef = useRef(null);
     const ITEMS_PER_PAGE = 9;
 
     // Package builder state
@@ -244,6 +245,16 @@ const MenuGallery = () => {
     // Reset page when filters change
     useEffect(() => { setCurrentPage(1); }, [activeCategory, priceFilter, sortOrder, searchQuery]);
 
+    const scrollToMenuStart = () => {
+        const top = Math.max((menuStartRef.current?.getBoundingClientRect().top || 0) + window.scrollY - 84, 0);
+        window.scrollTo({ top, behavior: 'smooth' });
+    };
+
+    const changePage = (nextPage) => {
+        setCurrentPage(Math.min(Math.max(nextPage, 1), totalPages));
+        window.requestAnimationFrame(scrollToMenuStart);
+    };
+
     const bestSellers = useMemo(() => {
         return Object.entries(mergedDishes).reduce((acc, [cat, items]) => {
             const sellers = items.filter(d => d.isBestSeller).map(item => ({
@@ -296,7 +307,7 @@ const MenuGallery = () => {
                                     <NotificationBell variant="light" />
                                     <UserDropdown 
                                         user={user} 
-                                        dashLink={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} 
+                                        dashLink={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/marketing' : user.role === 'Accounting' ? '/dashboard/accounting' : '/dashboard/admin'} 
                                     />
                                 </div>
                             ) : (
@@ -348,7 +359,7 @@ const MenuGallery = () => {
                             ))}
                             {user ? (
                                 <>
-                                    <Link href={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
+                                    <Link href={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/marketing' : user.role === 'Accounting' ? '/dashboard/accounting' : '/dashboard/admin'} className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
                                         Dashboard
                                     </Link>
                                     <Link href="/profile" className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
@@ -474,7 +485,7 @@ const MenuGallery = () => {
                 </div>
             )}
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div ref={menuStartRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
                 {/* Best Sellers Section - Always visible */}
                 {bestSellers.length > 0 && (
                     <div className="mb-20">
@@ -674,7 +685,7 @@ const MenuGallery = () => {
                         {totalPages > 1 && (
                             <div className="flex items-center justify-center mt-12 gap-2">
                                 <button
-                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    onClick={() => changePage(currentPage - 1)}
                                     disabled={currentPage === 1}
                                     className="px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-600 hover:bg-gray-200"
                                 >
@@ -683,14 +694,14 @@ const MenuGallery = () => {
                                 {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                                     <button
                                         key={page}
-                                        onClick={() => setCurrentPage(page)}
+                                        onClick={() => changePage(page)}
                                         className={`w-10 h-10 rounded-lg text-sm font-bold transition-all ${currentPage === page ? 'bg-red-900 text-white shadow-md scale-110' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                                     >
                                         {page}
                                     </button>
                                 ))}
                                 <button
-                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    onClick={() => changePage(currentPage + 1)}
                                     disabled={currentPage === totalPages}
                                     className="px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-600 hover:bg-gray-200"
                                 >

@@ -36,8 +36,8 @@
 | Role | Dashboard | Access Level |
 |------|-----------|--------------|
 | **Admin** | Admin Dashboard | Full system access |
-| **Marketing** | Ops Dashboard | Event logistics, tasting coordination |
-| **Accounting** | Finance Dashboard | Payments, pricing overrides |
+| **Marketing** | Marketing Dashboard | Event logistics, tasting coordination |
+| **Accounting** | Accounting Dashboard | Payments, pricing overrides |
 | **Client** | Client Portal | Book events, manage bookings |
 
 ---

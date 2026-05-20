@@ -32,9 +32,9 @@ class PaymentProcessed implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        // Broadcast to Finance and general Ops channels
+        // Broadcast to Accounting and the related booking channel
         return [
-            new PrivateChannel('finance.dashboard'),
+            new PrivateChannel('accounting.dashboard'),
             new PrivateChannel('booking.' . $this->payment->booking_id)
         ];
     }

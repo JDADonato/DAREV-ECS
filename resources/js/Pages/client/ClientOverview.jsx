@@ -1,5 +1,5 @@
 import { router } from '@inertiajs/react';
-import { GALLERY_IMAGES } from '../../data/mockData';
+import { GALLERY_IMAGES } from '../../Data/mockData';
 import { useState, useEffect } from 'react';
 
 const HERO_SLIDES = [

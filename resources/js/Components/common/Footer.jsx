@@ -27,6 +27,7 @@ const Footer = () => {
                         <div className="mt-4 grid gap-3 text-sm font-semibold text-white/60">
                             <Link href="/" className="hover:text-white">Home</Link>
                             <Link href="/about" className="hover:text-white">About Us</Link>
+                            <Link href="/amenities" className="hover:text-white">Amenities</Link>
                             <Link href="/menu" className="hover:text-white">Menu</Link>
                             <Link href="/contact" className="hover:text-white">Contact</Link>
                         </div>

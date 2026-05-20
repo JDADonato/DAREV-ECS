@@ -1,4 +1,5 @@
 import React from 'react';
+import { Download, Printer, CheckCircle, FileText } from 'lucide-react';
 
 const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
     if (!isOpen || !payment || !booking) return null;
@@ -7,72 +8,154 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
         window.print();
     };
 
+    const formatMoney = (value) => {
+        return Number(value || 0).toLocaleString('en-PH', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    };
+
+    const isOnlinePayment = payment.payment_method === 'PayMongo' || !!payment.paymongo_payment_id;
+    const paymentDate = new Date(payment.verified_at || payment.payment_date || payment.created_at).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const totalCost = Number(booking.total_cost || booking.budget);
+    const transportFee = Number(booking.transport_fee || 0);
+    const laborSurcharge = Number(booking.labor_surcharge || 0);
+    const discount = Number(booking.discount_value || 0);
+    const baseBudget = Number(booking.budget || totalCost - transportFee - laborSurcharge + discount);
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
 
                 {/* Print Section */}
-                <div id="receipt-print-area" className="p-8 bg-white overflow-y-auto">
-                    <div className="text-center mb-8 border-b pb-6">
-                        <h2 className="text-2xl font-bold font-display text-primary-900 tracking-tight">ELOQUENTE CATERING</h2>
-                        <p className="text-sm text-gray-500 mt-1">123 Culinary Ave, Metro Manila, Philippines</p>
-                        <p className="text-sm text-gray-500">Contact: +63 917 123 4567 | info@eloquente.com</p>
-
-                        <div className="mt-6 inline-block bg-green-50 text-green-800 px-4 py-2 rounded-full border border-green-200 uppercase tracking-widest font-bold text-sm">
-                            Official Receipt
-                        </div>
-                    </div>
-
-                    <div className="space-y-4 text-sm text-gray-700">
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Receipt No:</span>
-                            <span>#RCPT-{booking.id}-{payment.id}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Date Verified:</span>
-                            <span>{new Date(payment.verified_at || payment.payment_date).toLocaleDateString()}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Client Name:</span>
-                            <span>{booking.client_full_name || booking.username}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Event Date:</span>
-                            <span>{booking.event_date}</span>
-                        </div>
-
-                        <div className="mt-6 border-t pt-4">
-                            <div className="flex justify-between font-bold text-gray-900">
-                                <span>Payment Type:</span>
-                                <span>{payment.payment_type} ({payment.payment_method})</span>
+                <div id="receipt-print-area" className="p-8 md:p-10 bg-white overflow-y-auto custom-scrollbar">
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-8 border-b-2 border-gray-100 pb-6">
+                        <div>
+                            <h2 className="text-3xl font-black text-primary-900 tracking-tight">ELOQUENTE</h2>
+                            <p className="text-xs font-bold tracking-widest text-primary-600 uppercase mt-1">Catering Services</p>
+                            <div className="mt-4 text-xs text-gray-500 space-y-1">
+                                <p>123 Culinary Ave, Metro Manila</p>
+                                <p>+63 917 123 4567 • info@eloquente.com</p>
                             </div>
-                            <div className="flex justify-between text-lg font-bold text-primary-700 mt-2">
-                                <span>Amount Paid:</span>
-                                <span>₱{payment.amount.toLocaleString()}</span>
+                        </div>
+                        <div className="text-right">
+                            <div className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 uppercase tracking-widest font-black text-xs">
+                                <CheckCircle className="w-4 h-4" />
+                                Official Receipt
+                            </div>
+                            <div className="mt-4 text-sm text-gray-600">
+                                <p><span className="font-bold text-gray-400 uppercase text-xs">Receipt No.</span></p>
+                                <p className="font-mono font-bold text-gray-900">#RCPT-{booking.id}-{payment.id}</p>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-600">
+                                <p><span className="font-bold text-gray-400 uppercase text-xs">Date</span></p>
+                                <p className="font-medium text-gray-900">{paymentDate}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="mt-10 text-center text-xs text-gray-400 border-t pt-4">
-                        <p>This is a computer-generated receipt.</p>
-                        <p>Thank you for choosing Eloquente Catering!</p>
+                    {/* Client Info */}
+                    <div className="grid grid-cols-2 gap-8 mb-8 bg-gray-50 p-6 rounded-xl border border-gray-100">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Billed To</p>
+                            <p className="font-bold text-gray-900 text-lg">{booking.client_full_name || booking.username}</p>
+                            <p className="text-sm text-gray-600 mt-1">{booking.client_email}</p>
+                            <p className="text-sm text-gray-600">{booking.client_phone}</p>
+                        </div>
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Event Details</p>
+                            <p className="font-bold text-gray-900">{booking.event_type || 'Catering Event'}</p>
+                            <p className="text-sm text-gray-600 mt-1">Date: <span className="font-medium">{new Date(booking.event_date).toLocaleDateString('en-US', { dateStyle: 'medium' })}</span></p>
+                            <p className="text-sm text-gray-600">Guests: <span className="font-medium">{booking.pax} pax</span></p>
+                        </div>
+                    </div>
+
+                    {/* Cost Breakdown */}
+                    <div className="mb-8">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 border-b pb-2">Event Cost Breakdown</p>
+                        <div className="space-y-3 text-sm">
+                            <div className="flex justify-between text-gray-600">
+                                <span>Base Package Contract</span>
+                                <span>₱{formatMoney(baseBudget)}</span>
+                            </div>
+                            {transportFee > 0 && (
+                                <div className="flex justify-between text-gray-600">
+                                    <span>Logistics & Transport</span>
+                                    <span>₱{formatMoney(transportFee)}</span>
+                                </div>
+                            )}
+                            {laborSurcharge > 0 && (
+                                <div className="flex justify-between text-gray-600">
+                                    <span>Labor Surcharge</span>
+                                    <span>₱{formatMoney(laborSurcharge)}</span>
+                                </div>
+                            )}
+                            {discount > 0 && (
+                                <div className="flex justify-between text-green-600">
+                                    <span>Discount Applied</span>
+                                    <span>-₱{formatMoney(discount)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between font-bold text-gray-900 pt-3 border-t">
+                                <span>Total Event Cost</span>
+                                <span>₱{formatMoney(totalCost)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Payment Information */}
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 border-b pb-2">Payment Transaction</p>
+                        <div className="bg-primary-50/50 p-5 rounded-xl border border-primary-100">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <p className="text-xs font-medium text-gray-500">Payment Type</p>
+                                    <p className="font-bold text-gray-900">{payment.payment_type}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs font-medium text-gray-500">Method</p>
+                                    <p className="font-bold text-gray-900">{payment.payment_method}</p>
+                                </div>
+                            </div>
+                            
+                            {isOnlinePayment && payment.paymongo_reference_number && (
+                                <div className="mb-4 pt-4 border-t border-primary-100/50">
+                                    <p className="text-xs font-medium text-gray-500">Reference Number</p>
+                                    <p className="font-mono text-sm font-bold text-primary-700">{payment.paymongo_reference_number || payment.paymongo_payment_id}</p>
+                                </div>
+                            )}
+
+                            <div className="flex justify-between items-end pt-4 border-t border-primary-100/50">
+                                <span className="font-bold text-gray-700 uppercase tracking-widest text-sm">Amount Paid</span>
+                                <span className="text-3xl font-black text-primary-700">₱{formatMoney(payment.amount)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-12 text-center text-xs text-gray-400 border-t pt-6">
+                        <p className="font-medium">This is a computer-generated receipt. No signature required.</p>
+                        <p className="mt-1">Thank you for trusting Eloquente Catering with your special event!</p>
                     </div>
                 </div>
 
                 {/* Actions (Not Printed) */}
-                <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t print:hidden">
+                <div className="bg-gray-50 px-6 py-5 flex justify-end gap-3 border-t print:hidden">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                        className="px-6 py-2.5 text-sm font-bold text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
                     >
                         Close
                     </button>
                     <button
                         onClick={handlePrint}
-                        className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-sm"
+                        className="px-6 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-lg shadow-primary-600/20"
                     >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                        Print PDF
+                        <Printer className="w-4 h-4" />
+                        Print / Save PDF
                     </button>
                 </div>
             </div>
@@ -94,7 +177,7 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
                         padding: 20px;
                         background: white;
                     }
-                    .print\\:hidden { // Hack to hide buttons in print mode if needed
+                    .print\\:hidden {
                         display: none !important;
                     }
                 }

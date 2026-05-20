@@ -7,17 +7,16 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 /**
- * Ported from: server/controllers/opsController.js
- * Operations/Marketing dashboard — booking management and live status tracking.
+ * Marketing dashboard - booking management and live status tracking.
  */
-class OpsController extends Controller
+class MarketingController extends Controller
 {
     /**
-     * Show the Ops dashboard page.
+     * Show the Marketing dashboard page.
      */
     public function index()
     {
-        return Inertia::render('Ops/DashboardOps', [
+        return Inertia::render('DashboardMarketing', [
             // Phase 2: Inertia.js Payload Optimization
             // Lazy Evaluation: Only queries the database if the 'bookings' prop is explicitly requested via partial reloads.
             'bookings' => Inertia::lazy(function () {
@@ -30,7 +29,7 @@ class OpsController extends Controller
 
     /**
      * Get all bookings with user details.
-     * Ported from: opsController.getAllBookings()
+     * Ported from: marketing bookings list
      */
     public function getAllBookings()
     {
@@ -49,7 +48,7 @@ class OpsController extends Controller
 
     /**
      * Update booking status.
-     * Ported from: opsController.updateBookingStatus()
+     * Ported from: marketing booking status update
      */
     public function updateStatus(Request $request, int $id)
     {
@@ -80,7 +79,7 @@ class OpsController extends Controller
 
     /**
      * Update booking live status (real-time tracking).
-     * Ported from: opsController.updateBookingLiveStatus()
+     * Ported from: marketing booking live status update
      */
     public function updateLiveStatus(Request $request, int $id)
     {
@@ -103,7 +102,7 @@ class OpsController extends Controller
 
     /**
      * Get detailed booking info.
-     * Ported from: opsController.getBookingDetails()
+     * Ported from: marketing booking details
      */
     public function show(int $id)
     {
@@ -120,3 +119,4 @@ class OpsController extends Controller
         return response()->json($data);
     }
 }
+

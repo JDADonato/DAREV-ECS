@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import useSmartRefresh from '../../hooks/useSmartRefresh';
 
 /**
  * Phase 2: Client Chat Bubble — WebSocket-powered.
@@ -77,9 +78,14 @@ const ChatBubble = ({ user }) => {
     useEffect(() => {
         if (!user) return;
         fetchUnreadCount();
-        const i = setInterval(fetchUnreadCount, 10000);
-        return () => clearInterval(i);
     }, [user, fetchUnreadCount]);
+
+    useSmartRefresh({
+        enabled: Boolean(user),
+        interval: isOpen ? 15000 : 30000,
+        idleAfter: 180000,
+        refresh: fetchUnreadCount,
+    });
 
     // ─── Echo: Subscribe When Conversation Exists ───
 
@@ -275,12 +281,12 @@ const ChatBubble = ({ user }) => {
             {isOpen && (
                 <div className="fixed bottom-6 right-6 w-[calc(100%-2rem)] max-w-[390px] h-[540px] bg-white rounded-3xl shadow-2xl flex flex-col z-50 overflow-hidden border border-gray-200" style={{ animation: 'fadeIn .25s ease' }}>
                     {/* Header */}
-                    <div className="bg-gradient-to-r from-[#720101] to-[#3a0101] text-white px-4 py-4 flex items-center justify-between flex-shrink-0">
+                    <div className="px-4 py-4 flex items-center justify-between flex-shrink-0 text-white border-b border-[#5a0101]" style={{ background: 'linear-gradient(90deg, #720101 0%, #3a0101 100%)' }}>
                         <div className="flex items-center gap-2">
                             <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                             <div>
-                                <h3 className="text-sm font-bold text-white">Eloquente Support</h3>
-                                <p className="text-[10px] text-white/60">
+                                <h3 className="text-sm font-bold" style={{ color: '#ffffff' }}>Eloquente Support</h3>
+                                <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.72)' }}>
                                     {conversation?.staff_name
                                         ? `Chatting with ${conversation.staff_name}`
                                         : (conversation ? 'Waiting for staff...' : 'Send a message to get started')}

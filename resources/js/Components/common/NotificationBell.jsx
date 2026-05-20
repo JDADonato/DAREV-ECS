@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import useSmartRefresh from '../../hooks/useSmartRefresh';
 
 /**
  * NotificationBell — displays a bell icon with an unread badge.
- * Polls /api/notifications/unread-count every 15 seconds.
+ * Refreshes unread count only while the page is visible and active.
  * Clicking opens a dropdown panel with recent notifications.
  *
  * Props:
@@ -26,13 +27,6 @@ const NotificationBell = ({ variant = 'light' }) => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Poll unread count
-    useEffect(() => {
-        fetchUnreadCount();
-        const interval = setInterval(fetchUnreadCount, 15000);
-        return () => clearInterval(interval);
-    }, []);
-
     const fetchUnreadCount = async () => {
         try {
             const res = await fetch('/api/notifications/unread-count');
@@ -44,6 +38,17 @@ const NotificationBell = ({ variant = 'light' }) => {
             // silently fail
         }
     };
+
+    useEffect(() => {
+        fetchUnreadCount();
+    }, []);
+
+    useSmartRefresh({
+        enabled: true,
+        interval: 30000,
+        idleAfter: 180000,
+        refresh: fetchUnreadCount,
+    });
 
     const fetchNotifications = async () => {
         setLoading(true);

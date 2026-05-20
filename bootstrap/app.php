@@ -14,17 +14,20 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             \App\Http\Middleware\SetPostgresSessionContext::class,
+            \App\Http\Middleware\RecordStaffAuditLog::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
         $middleware->alias([
             'role' => \App\Http\Middleware\EnsureRole::class,
+            'cache.headers' => \Illuminate\Http\Middleware\SetCacheHeaders::class,
         ]);
 
         // Exclude /api/* from CSRF verification — original React components
         // use fetch() for API calls without CSRF tokens.
         $middleware->validateCsrfTokens(except: [
             'api/*',
+            'webhook/paymongo',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

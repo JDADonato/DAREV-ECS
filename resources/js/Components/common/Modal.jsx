@@ -9,7 +9,10 @@ const Modal = ({ isOpen, onClose, title, message, type = 'info', onConfirm, conf
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
             <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden transform transition-all scale-100 animate-scaleIn">
-                <div className={`p-7 text-center ${isSuccess ? 'bg-gradient-to-br from-[#720101] to-[#1a1a1a]' : isError ? 'bg-red-50' : 'bg-blue-50'}`}>
+                <div
+                    className={`p-7 text-center ${isError ? 'bg-red-50' : !isSuccess ? 'bg-blue-50' : ''}`}
+                    style={isSuccess ? { background: 'linear-gradient(135deg, #720101 0%, #1a1a1a 100%)' } : undefined}
+                >
                     <div className={`mx-auto flex items-center justify-center h-16 w-16 rounded-2xl mb-4 ${isSuccess ? 'bg-[#f0aa0b]' : isError ? 'bg-red-100' : 'bg-blue-100'}`}>
                         {isSuccess && (
                             <svg className="h-8 w-8 text-[#1a1a1a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -27,8 +30,8 @@ const Modal = ({ isOpen, onClose, title, message, type = 'info', onConfirm, conf
                             </svg>
                         )}
                     </div>
-                    <h3 className={`text-2xl font-display font-bold ${isSuccess ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
-                    <p className={`mt-3 text-sm leading-6 ${isSuccess ? 'text-white/70' : 'text-gray-600'}`}>{message}</p>
+                    <h3 className="text-2xl font-display font-bold" style={{ color: isSuccess ? '#ffffff' : '#111827' }}>{title}</h3>
+                    <p className="mt-3 text-sm leading-6" style={{ color: isSuccess ? 'rgba(255,255,255,0.76)' : '#4b5563' }}>{message}</p>
                 </div>
                 <div className="p-6 bg-white">
                     <button

@@ -52,11 +52,11 @@ Broadcast::channel('staff.queue', function ($user) {
 /**
  * Dashboard sync channels
  */
-Broadcast::channel('ops.dashboard', function ($user) {
+Broadcast::channel('marketing.dashboard', function ($user) {
     return in_array($user->role, ['Marketing', 'Admin']);
 });
 
-Broadcast::channel('finance.dashboard', function ($user) {
+Broadcast::channel('accounting.dashboard', function ($user) {
     return in_array($user->role, ['Accounting', 'Admin']);
 });
 

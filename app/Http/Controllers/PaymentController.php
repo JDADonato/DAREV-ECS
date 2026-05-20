@@ -2,210 +2,382 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\PaymentProcessed;
 use App\Models\Booking;
 use App\Models\Payment;
+use App\Services\PaymentCalculationService;
+use App\Services\PayMongoService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
+use RuntimeException;
 
 class PaymentController extends Controller
 {
-    public function initializeCheckout(Request $request)
+    private const MILESTONE_LABELS = [
+        'Reservation' => 'Reservation Payment',
+        'DownPayment' => 'Progress Payment',
+        'Final' => 'Final Payment',
+    ];
+
+    public function initializeCheckout(Request $request, PayMongoService $payMongo, PaymentCalculationService $paymentCalculation)
     {
         $validated = $request->validate([
             'booking_id' => ['required', 'integer', 'exists:bookings,id'],
-            'payment_id' => ['nullable', 'integer', 'exists:payments,id'],
-            'amount' => ['required', 'numeric', 'min:1'],
+            'payment_id' => ['required', 'integer', 'exists:payments,id'],
         ]);
 
-        $booking = Booking::where('id', $validated['booking_id'])
+        $booking = Booking::with(['user', 'payments'])
+            ->where('id', $validated['booking_id'])
             ->where('user_id', Auth::id())
             ->firstOrFail();
 
-        $payment = $this->resolvePayablePayment(
-            $booking,
-            (float) $validated['amount'],
-            $validated['payment_id'] ?? null
-        );
+        $paymentCalculation->syncPendingTranches($booking);
+        $booking->load(['user', 'payments']);
+
+        $payment = $booking->payments
+            ->firstWhere('id', (int) $validated['payment_id']);
 
         if (!$payment) {
-            return response()->json([
-                'error' => 'No payable tranche was found for this booking and amount.',
-            ], 422);
+            return back()->with('error', 'Payment milestone not found for this booking.');
         }
 
-        // TODO: PAYMONGO INTEGRATION
-        // Replace this internal URL generation with a PayMongo Checkout Session creation request.
-        // The future implementation should send the payable amount, currency, booking reference,
-        // payment tranche identifier, success URL, cancel URL, and client billing details to PayMongo.
-        // The PayMongo response will return a hosted checkout URL; store its checkout/session ID
-        // against the Payment record before returning that hosted URL to the browser.
-        $checkoutUrl = URL::temporarySignedRoute(
-            'checkout.secure',
-            now()->addMinutes(30),
-            [
+        $validationError = $this->validatePayableMilestone($booking, $payment);
+
+        if ($validationError) {
+            return back()->with('error', $validationError);
+        }
+
+        $amount = round((float) $payment->amount, 2);
+        $description = $this->checkoutDescription($booking, $payment);
+        $successUrl = route('checkout.success', [
+            'booking_id' => $booking->id,
+            'payment_id' => $payment->id,
+        ]);
+        $cancelUrl = route('checkout.cancelled');
+
+        try {
+            $checkout = $payMongo->createCheckoutSession(
+                amount: $amount,
+                description: $description,
+                successUrl: $successUrl,
+                cancelUrl: $cancelUrl,
+                metadata: [
+                    'booking_id' => $booking->id,
+                    'payment_id' => $payment->id,
+                    'payment_type' => $payment->payment_type,
+                    'milestone_percentage' => $this->milestonePercentage($booking, $payment),
+                    'reference_number' => $this->referenceNumber($booking, $payment),
+                ],
+                booking: $booking
+            );
+        } catch (RuntimeException $exception) {
+            Log::error('PayMongo checkout initialization failed', [
                 'booking_id' => $booking->id,
                 'payment_id' => $payment->id,
-                'amount' => number_format((float) $payment->amount, 2, '.', ''),
-            ]
-        );
+                'message' => $exception->getMessage(),
+            ]);
 
-        return response()->json([
-            'redirect_url' => $checkoutUrl,
-            'payment' => [
-                'id' => $payment->id,
-                'booking_id' => $booking->id,
-                'payment_type' => $payment->payment_type,
-                'amount' => (float) $payment->amount,
-            ],
+            return back()->with(
+                'error',
+                config('app.debug')
+                    ? $exception->getMessage()
+                    : 'Unable to create PayMongo checkout. Please try again in a moment.'
+            );
+        }
+
+        $payment->forceFill([
+            'amount' => $amount,
+            'payment_method' => 'PayMongo Checkout',
+            'paymongo_checkout_session_id' => $checkout['id'],
+            'paymongo_reference_number' => $this->referenceNumber($booking, $payment),
+        ])->save();
+
+        Log::info('PayMongo checkout session created', [
+            'booking_id' => $booking->id,
+            'payment_id' => $payment->id,
+            'paymongo_checkout_session_id' => $checkout['id'],
+            'amount' => $amount,
         ]);
+
+        return Inertia::location($checkout['checkout_url']);
     }
 
     public function showSecureCheckout(Request $request)
     {
-        $validated = $request->validate([
-            'booking_id' => ['required', 'integer', 'exists:bookings,id'],
-            'payment_id' => ['required', 'integer', 'exists:payments,id'],
-            'amount' => ['required', 'numeric', 'min:1'],
-        ]);
-
-        $booking = Booking::where('id', $validated['booking_id'])
-            ->where('user_id', Auth::id())
-            ->firstOrFail();
-
-        $payment = Payment::where('id', $validated['payment_id'])
-            ->where('booking_id', $booking->id)
-            ->firstOrFail();
-
-        return Inertia::render('client/SecureCheckout', [
-            'checkout' => [
-                'booking_id' => $booking->id,
-                'payment_id' => $payment->id,
-                'payment_type' => $payment->payment_type,
-                'amount' => (float) $payment->amount,
-                'event_date' => optional($booking->event_date)->toDateString(),
-                'client_full_name' => $booking->client_full_name,
-            ],
-        ]);
+        abort(410, 'Local secure checkout has been replaced by PayMongo Checkout.');
     }
 
     public function processPayment(Request $request)
     {
+        return response()->json([
+            'error' => 'Direct checkout processing is disabled. Payments must be completed through PayMongo and confirmed by webhook.',
+        ], 410);
+    }
+
+    public function success(Request $request, PayMongoService $payMongo)
+    {
         $validated = $request->validate([
             'booking_id' => ['required', 'integer', 'exists:bookings,id'],
             'payment_id' => ['required', 'integer', 'exists:payments,id'],
-            'amount' => ['required', 'numeric', 'min:1'],
-            'payment_method' => ['required', 'string', 'max:100'],
-            'authorization_token' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $result = DB::transaction(function () use ($validated) {
-            $booking = Booking::where('id', $validated['booking_id'])
-                ->where('user_id', Auth::id())
-                ->lockForUpdate()
-                ->firstOrFail();
+        $payment = Payment::with('booking.payments')
+            ->whereKey($validated['payment_id'])
+            ->where('booking_id', $validated['booking_id'])
+            ->whereHas('booking', fn ($query) => $query->where('user_id', Auth::id()))
+            ->firstOrFail();
 
-            $payment = Payment::where('id', $validated['payment_id'])
-                ->where('booking_id', $booking->id)
-                ->lockForUpdate()
-                ->firstOrFail();
+        $syncStatus = $payment->status;
+        $syncMessage = 'Payment is still pending PayMongo confirmation.';
 
-            if (abs((float) $payment->amount - (float) $validated['amount']) > 0.01) {
-                abort(422, 'Payment amount does not match the selected tranche.');
-            }
+        if (in_array($payment->status, ['Paid', 'Verified'], true)) {
+            $syncMessage = 'Payment was already confirmed.';
+        } elseif ($payment->paymongo_checkout_session_id) {
+            try {
+                $checkout = $payMongo->retrieveCheckoutSession($payment->paymongo_checkout_session_id);
 
-            // TODO: PAYMONGO INTEGRATION
-            // This temporary endpoint acts as the successful authorization callback for the checkout UI.
-            // Replace this block with a PayMongo Webhook endpoint that verifies the webhook signature,
-            // checks the event type and payment intent status, extracts the Payment ID from metadata,
-            // confirms the gross amount and currency, then marks the matching Payment record as paid.
-            // The real webhook handler must be idempotent because payment providers may retry events.
-            if (!in_array($payment->status, ['Paid', 'Verified'], true)) {
-                $payment->update([
-                    'payment_method' => $validated['payment_method'],
-                    'status' => 'Paid',
-                    'verified_by' => 'Checkout',
-                    'verified_at' => now(),
+                if ($this->checkoutSessionIsPaid($checkout) && $this->checkoutAmountMatches($checkout, $payment)) {
+                    DB::transaction(function () use ($payment, $checkout) {
+                        $payment->refresh();
+                        $payment->loadMissing('booking.payments');
+
+                        $payment->forceFill([
+                            'status' => 'Paid',
+                            'payment_method' => $this->checkoutPaymentMethod($checkout) ?: 'PayMongo',
+                            'verified_by' => 'PayMongo Checkout',
+                            'verified_at' => now(),
+                            'paymongo_payment_id' => $this->checkoutPaymentId($checkout) ?: $payment->paymongo_payment_id,
+                            'paymongo_payment_intent_id' => $this->checkoutPaymentIntentId($checkout) ?: $payment->paymongo_payment_intent_id,
+                        ])->save();
+
+                        if ($payment->booking) {
+                            $this->updateBookingMilestone($payment->booking);
+                        }
+                    });
+
+                    broadcast(new PaymentProcessed($payment->fresh()))->toOthers();
+
+                    $syncStatus = 'Paid';
+                    $syncMessage = 'Payment confirmed through PayMongo.';
+                } elseif (!$this->checkoutAmountMatches($checkout, $payment)) {
+                    $syncMessage = 'PayMongo returned a different amount, so payment was not auto-confirmed.';
+                    Log::warning('PayMongo checkout success amount mismatch.', [
+                        'payment_id' => $payment->id,
+                        'checkout_session_id' => $payment->paymongo_checkout_session_id,
+                        'expected_amount' => (float) $payment->amount,
+                        'received_amount' => $this->checkoutAmount($checkout),
+                    ]);
+                } else {
+                    $syncMessage = 'PayMongo has not marked this checkout as paid yet.';
+                }
+            } catch (RuntimeException $exception) {
+                Log::warning('PayMongo checkout success confirmation failed.', [
+                    'payment_id' => $payment->id,
+                    'checkout_session_id' => $payment->paymongo_checkout_session_id,
+                    'message' => $exception->getMessage(),
                 ]);
+
+                $syncMessage = config('app.debug')
+                    ? $exception->getMessage()
+                    : 'Payment is still pending PayMongo confirmation.';
             }
-
-            $totalPaid = (float) $booking->payments()
-                ->whereIn('status', ['Paid', 'Verified'])
-                ->sum('amount');
-
-            $bookingUpdates = [
-                'milestone_step' => $this->determineMilestoneStep($booking, $totalPaid),
-            ];
-
-            if ($booking->status === 'Pending') {
-                $bookingUpdates['status'] = 'Confirmed';
-            }
-
-            $bookingUpdates['live_status'] = 'Payment Authorized';
-            $booking->update($bookingUpdates);
-
-            // Broadcast payment processed event for accounting dashboard
-            broadcast(new \App\Events\PaymentProcessed($payment->fresh()))->toOthers();
-
-            return [
-                'booking_id' => $booking->id,
-                'payment_id' => $payment->id,
-                'payment_status' => $payment->fresh()->status,
-                'total_paid' => $totalPaid,
-                'balance' => max(((float) $booking->total_cost) - $totalPaid, 0),
-                'milestone_step' => $booking->fresh()->milestone_step,
-            ];
-        });
-
-        return response()->json([
-            'success' => true,
-            'redirect_url' => route('checkout.success', [
-                'booking_id' => $result['booking_id'],
-                'payment_id' => $result['payment_id'],
-            ]),
-            'payment' => $result,
-        ]);
-    }
-
-    private function resolvePayablePayment(Booking $booking, float $amount, ?int $paymentId): ?Payment
-    {
-        $query = $booking->payments()
-            ->whereIn('status', ['Pending', 'Failed', 'Rejected']);
-
-        if ($paymentId) {
-            return (clone $query)
-                ->where('id', $paymentId)
-                ->first();
         }
 
-        return $query
-            ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 ELSE 4 END")
-            ->get()
-            ->first(fn (Payment $payment) => abs((float) $payment->amount - $amount) <= 0.01);
+        return Inertia::render('client/PaymentSuccess', [
+            'paymentStatus' => $syncStatus,
+            'syncMessage' => $syncMessage,
+        ]);
     }
 
-    private function determineMilestoneStep(Booking $booking, float $totalPaid): int
+    private function validatePayableMilestone(Booking $booking, Payment $payment): ?string
     {
-        $currentStep = (int) ($booking->milestone_step ?: 1);
+        if (!in_array($payment->payment_type, ['Reservation', 'DownPayment', 'Final'], true)) {
+            return 'Only configured payment milestones can be paid online.';
+        }
+
+        if (!in_array($payment->status, ['Pending', 'Failed', 'Rejected'], true)) {
+            return 'This payment milestone is not payable.';
+        }
+
+        if ((float) $booking->total_cost <= 0) {
+            return 'Booking total must be greater than zero before checkout can be created.';
+        }
+
+        if ((float) $payment->amount <= 0) {
+            return 'Payment amount must be greater than zero before checkout can be created.';
+        }
+
+        $nextPayment = $booking->payments
+            ->whereIn('status', ['Pending', 'Failed', 'Rejected'])
+            ->sortBy(fn (Payment $candidate) => $this->milestoneOrder($candidate->payment_type))
+            ->first();
+
+        if ($nextPayment && $nextPayment->id !== $payment->id) {
+            return 'Payments must be completed in the required 10%, 70%, then 20% order.';
+        }
+
+        return null;
+    }
+
+    private function checkoutDescription(Booking $booking, Payment $payment): string
+    {
+        $eventName = $booking->event_type ?: 'Event';
+        $percentage = $this->milestonePercentage($booking, $payment);
+        $label = trim($percentage . '% ' . self::MILESTONE_LABELS[$payment->payment_type]);
+
+        return sprintf(
+            '%s for %s Booking #%d',
+            $label,
+            $eventName,
+            $booking->id
+        );
+    }
+
+    private function milestonePercentage(Booking $booking, Payment $payment): string
+    {
         $totalCost = (float) $booking->total_cost;
 
         if ($totalCost <= 0) {
-            return max($currentStep, 1);
+            return '0';
         }
 
-        $paidRatio = $totalPaid / $totalCost;
-        $nextStep = 1;
+        $percentage = ((float) $payment->amount / $totalCost) * 100;
 
-        if ($paidRatio >= 0.10) {
-            $nextStep = 3;
+        return rtrim(rtrim(number_format($percentage, 2, '.', ''), '0'), '.');
+    }
+
+    private function milestoneOrder(string $paymentType): int
+    {
+        return match ($paymentType) {
+            'Reservation' => 1,
+            'DownPayment' => 2,
+            'Final' => 3,
+            default => 99,
+        };
+    }
+
+    private function referenceNumber(Booking $booking, Payment $payment): string
+    {
+        return sprintf('ECS-%d-P%d', $booking->id, $payment->id);
+    }
+
+    private function checkoutSessionIsPaid(array $checkout): bool
+    {
+        $statuses = [
+            Arr::get($checkout, 'data.attributes.status'),
+            Arr::get($checkout, 'data.attributes.payment_intent.attributes.status'),
+            Arr::get($checkout, 'data.attributes.payment_intent.status'),
+            Arr::get($checkout, 'data.attributes.payments.0.attributes.status'),
+            Arr::get($checkout, 'data.attributes.payment.attributes.status'),
+        ];
+
+        return collect($statuses)
+            ->filter()
+            ->map(fn ($status) => strtolower((string) $status))
+            ->contains(fn ($status) => in_array($status, ['paid', 'succeeded', 'success', 'completed'], true));
+    }
+
+    private function checkoutAmountMatches(array $checkout, Payment $payment): bool
+    {
+        $amount = $this->checkoutAmount($checkout);
+
+        if ($amount === null) {
+            return true;
+        }
+
+        return (int) $amount === (int) round(((float) $payment->amount) * 100);
+    }
+
+    private function checkoutAmount(array $checkout): ?int
+    {
+        return Arr::get($checkout, 'data.attributes.amount_total')
+            ?? Arr::get($checkout, 'data.attributes.total_amount')
+            ?? Arr::get($checkout, 'data.attributes.payments.0.attributes.amount')
+            ?? Arr::get($checkout, 'data.attributes.payment.attributes.amount')
+            ?? Arr::get($checkout, 'data.attributes.line_items.0.amount');
+    }
+
+    private function checkoutPaymentId(array $checkout): ?string
+    {
+        return Arr::get($checkout, 'data.attributes.payments.0.id')
+            ?? Arr::get($checkout, 'data.attributes.payment.id')
+            ?? Arr::get($checkout, 'data.attributes.payment_id');
+    }
+
+    private function checkoutPaymentIntentId(array $checkout): ?string
+    {
+        return Arr::get($checkout, 'data.attributes.payment_intent.id')
+            ?? Arr::get($checkout, 'data.attributes.payment_intent_id');
+    }
+
+    private function checkoutPaymentMethod(array $checkout): ?string
+    {
+        return Arr::get($checkout, 'data.attributes.payments.0.attributes.source.type')
+            ?? Arr::get($checkout, 'data.attributes.payment.attributes.source.type')
+            ?? Arr::get($checkout, 'data.attributes.payment_method_used')
+            ?? 'PayMongo';
+    }
+
+    private function updateBookingMilestone(Booking $booking): void
+    {
+        $booking->load('payments');
+
+        $totalPaid = (float) $booking->payments
+            ->whereIn('status', ['Paid', 'Verified'])
+            ->sum(fn (Payment $payment) => (float) $payment->amount);
+
+        $totalCost = (float) $booking->total_cost;
+        $paidRatio = $totalCost > 0 ? $totalPaid / $totalCost : 0;
+
+        $updates = [
+            'milestone_step' => $this->milestoneStep($paidRatio),
+            'live_status' => $this->bookingLiveStatus($paidRatio),
+        ];
+
+        if ($paidRatio >= 1) {
+            $updates['status'] = 'Completed';
+        } elseif ($paidRatio >= 0.10) {
+            $updates['status'] = 'Reserved';
+        }
+
+        $booking->update($updates);
+    }
+
+    private function milestoneStep(float $paidRatio): int
+    {
+        if ($paidRatio >= 1) {
+            return 5;
         }
 
         if ($paidRatio >= 0.80) {
-            $nextStep = 4;
+            return 4;
         }
 
-        return max($currentStep, $nextStep);
+        if ($paidRatio >= 0.10) {
+            return 3;
+        }
+
+        return 1;
+    }
+
+    private function bookingLiveStatus(float $paidRatio): string
+    {
+        if ($paidRatio >= 1) {
+            return 'Payment Complete';
+        }
+
+        if ($paidRatio >= 0.80) {
+            return 'Progress Payment Paid';
+        }
+
+        if ($paidRatio >= 0.10) {
+            return 'Reserved';
+        }
+
+        return 'Payment Pending';
     }
 }

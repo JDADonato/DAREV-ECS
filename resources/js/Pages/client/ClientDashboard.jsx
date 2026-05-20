@@ -4,6 +4,7 @@ import { router } from '@inertiajs/react';
 import ChatBubble from '../../Components/common/ChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import ReceiptModal from '../../Components/common/ReceiptModal';
 
 const peso = (value) => `₱${Number(value || 0).toLocaleString()}`;
 const settledStatuses = ['Paid', 'Verified'];
@@ -15,6 +16,27 @@ const menuCategories = [
     { id: 'dessert', label: 'Desserts' },
     { id: 'drink', label: 'Refreshments' },
 ];
+const dashboardSections = ['details', 'menu', 'tastings', 'payments', 'history'];
+
+const readStoredDashboardValue = (key, fallback = null) => {
+    if (typeof window === 'undefined') return fallback;
+
+    try {
+        return localStorage.getItem(key) || fallback;
+    } catch (e) {
+        return fallback;
+    }
+};
+
+const writeStoredDashboardValue = (key, value) => {
+    if (typeof window === 'undefined' || value === null || value === undefined) return;
+
+    try {
+        localStorage.setItem(key, String(value));
+    } catch (e) {
+        // Ignore storage errors so dashboard navigation still works normally.
+    }
+};
 
 const buildJourneySteps = (booking, payments) => {
     const bookingPayments = payments.filter((payment) => payment.booking_id === booking.id);
@@ -22,7 +44,7 @@ const buildJourneySteps = (booking, payments) => {
     const paid = bookingPayments
         .filter((payment) => isSettledPaymentStatus(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const isApproved = booking.status === 'Confirmed';
+    const isApproved = ['Confirmed', 'Reserved', 'Completed'].includes(booking.status);
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettledPaymentStatus(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const menuDone = Boolean(booking.selected_menu);
@@ -90,10 +112,19 @@ const HistoryPanel = ({ bookings, onRemove }) => (
 
 const ClientDashboard = () => {
     const { user, logout } = useAuth();
+    const dashboardStoragePrefix = `ecs_client_dashboard_${user?.id || 'guest'}`;
+    const activeBookingStorageKey = `${dashboardStoragePrefix}_active_booking_id`;
+    const activeSectionStorageKey = `${dashboardStoragePrefix}_active_section`;
     const [data, setData] = useState({ bookings: [], historyBookings: [], tastings: [], payments: [] });
     const [loading, setLoading] = useState(true);
-    const [activeBookingId, setActiveBookingId] = useState(null);
-    const [activeSection, setActiveSection] = useState('details'); // details, menu, payments
+    const [activeBookingId, setActiveBookingId] = useState(() => {
+        const stored = readStoredDashboardValue(activeBookingStorageKey);
+        return stored ? Number(stored) : null;
+    });
+    const [activeSection, setActiveSection] = useState(() => {
+        const stored = readStoredDashboardValue(activeSectionStorageKey, 'details');
+        return dashboardSections.includes(stored) ? stored : 'details';
+    });
     const [toast, setToast] = useState(null);
     const [detailsForm, setDetailsForm] = useState({});
     const [savingDetails, setSavingDetails] = useState(false);
@@ -111,6 +142,7 @@ const ClientDashboard = () => {
     // Modal states
     const [editCoreModalOpen, setEditCoreModalOpen] = useState(false);
     const [cancelModalOpen, setCancelModalOpen] = useState(false);
+    const [receiptModal, setReceiptModal] = useState({ isOpen: false, payment: null, booking: null });
 
     const isSettledPayment = (payment) => isSettledPaymentStatus(payment.status);
 
@@ -126,12 +158,22 @@ const ClientDashboard = () => {
 
     useEffect(() => {
         const tab = new URLSearchParams(window.location.search).get('tab');
-        if (['details', 'menu', 'tastings', 'payments', 'history'].includes(tab)) {
+        if (dashboardSections.includes(tab)) {
             setActiveSection(tab);
         }
         fetchData();
         fetchMenuItemsFromAPI().then(setMenuCatalog);
     }, []);
+
+    useEffect(() => {
+        if (activeBookingId) {
+            writeStoredDashboardValue(activeBookingStorageKey, activeBookingId);
+        }
+    }, [activeBookingId, activeBookingStorageKey]);
+
+    useEffect(() => {
+        writeStoredDashboardValue(activeSectionStorageKey, activeSection);
+    }, [activeSection, activeSectionStorageKey]);
 
     useEffect(() => {
         const booking = data.bookings.find(b => b.id === activeBookingId);
@@ -184,7 +226,10 @@ const ClientDashboard = () => {
                     payments: result.payments || [],
                 });
                 const activeBookings = result.bookings || [];
-                if (activeBookings.length > 0 && (!activeBookingId || !activeBookings.some((booking) => booking.id === activeBookingId))) {
+                const storedBookingId = Number(readStoredDashboardValue(activeBookingStorageKey));
+                const preferredBookingId = activeBookingId || storedBookingId || null;
+
+                if (activeBookings.length > 0 && (!preferredBookingId || !activeBookings.some((booking) => booking.id === preferredBookingId))) {
                     // Default to the event with the closest upcoming date
                     const now = new Date();
                     const sorted = [...activeBookings].sort((a, b) => {
@@ -193,6 +238,8 @@ const ClientDashboard = () => {
                         return da - db;
                     });
                     setActiveBookingId(sorted[0].id);
+                } else if (preferredBookingId) {
+                    setActiveBookingId(preferredBookingId);
                 } else if (activeBookings.length === 0) {
                     setActiveBookingId(null);
                 }
@@ -206,36 +253,31 @@ const ClientDashboard = () => {
 
     const handlePaymentSubmit = async (e, nextPayment) => {
         e.preventDefault();
+
+        if (!nextPayment?.id || !activeBookingId) {
+            setToast({ message: 'No payable milestone is available for this booking.', type: 'error' });
+            return;
+        }
+
         setSubmittingPayment(true);
         setToast({ message: 'Opening checkout...', type: 'success' });
 
-        try {
-            // TODO: PAYMONGO INTEGRATION
-            // This initializes the internal checkout page now. Later this will redirect
-            // to the hosted provider checkout URL returned by the backend.
-            const res = await fetch('/checkout/initialize', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-                },
-                body: JSON.stringify({
-                    booking_id: activeBookingId,
-                    payment_id: nextPayment.id,
-                    amount: nextPayment.amount
-                })
-            });
-            const result = await res.json();
-            if (res.ok && result.redirect_url) {
-                router.visit(result.redirect_url);
-            } else {
-                setToast({ message: result.error || 'Unable to open checkout.', type: 'error' });
+        router.post('/checkout/initialize', {
+            booking_id: activeBookingId,
+            payment_id: nextPayment.id,
+        }, {
+            preserveScroll: true,
+            onError: () => {
+                setToast({ message: 'Unable to open PayMongo checkout. Please try again.', type: 'error' });
                 setSubmittingPayment(false);
-            }
-        } catch (err) {
-            setToast({ message: 'Unable to connect to checkout.', type: 'error' });
-            setSubmittingPayment(false);
-        }
+            },
+            onCancel: () => {
+                setSubmittingPayment(false);
+            },
+            onFinish: () => {
+                setSubmittingPayment(false);
+            },
+        });
     };
 
     if (loading) {
@@ -1040,9 +1082,21 @@ const ClientDashboard = () => {
                                                                                 </div>
                                                                                 <div className="text-left sm:text-right">
                                                                                     <p className="text-sm font-bold text-white">{peso(payment.amount)}</p>
-                                                                                    <p className={`mt-1 text-xs font-bold uppercase tracking-widest ${isSettledPayment(payment) ? 'text-green-300' : overdue ? 'text-red-300' : 'text-[#f0aa0b]'}`}>
-                                                                                        {isSettledPayment(payment) ? 'Paid' : overdue ? 'Overdue - slot may be cancelled' : 'Pending'}
-                                                                                    </p>
+                                                                                    <div className="flex flex-col sm:items-end mt-1 gap-1.5">
+                                                                                        <p className={`text-xs font-bold uppercase tracking-widest ${isSettledPayment(payment) ? 'text-green-300' : overdue ? 'text-red-300' : 'text-[#f0aa0b]'}`}>
+                                                                                            {isSettledPayment(payment) ? 'Paid' : overdue ? 'Overdue - slot may be cancelled' : 'Pending'}
+                                                                                        </p>
+                                                                                        {isSettledPayment(payment) && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => setReceiptModal({ isOpen: true, payment: payment, booking: activeBooking })}
+                                                                                                className="text-[10px] font-black uppercase tracking-widest text-green-100 hover:text-white bg-green-900/40 hover:bg-green-800/60 px-3 py-1.5 rounded-full transition-colors inline-flex items-center gap-1.5"
+                                                                                            >
+                                                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                                                                View Receipt
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -1248,6 +1302,13 @@ const ClientDashboard = () => {
             )}
 
             {user && <ChatBubble user={user} />}
+
+            <ReceiptModal
+                isOpen={receiptModal.isOpen}
+                onClose={() => setReceiptModal({ isOpen: false, payment: null, booking: null })}
+                payment={receiptModal.payment}
+                booking={receiptModal.booking}
+            />
         </div>
     );
 };

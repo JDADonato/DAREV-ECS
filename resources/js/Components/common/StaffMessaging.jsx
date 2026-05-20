@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import useSmartRefresh from '../../hooks/useSmartRefresh';
 
 /**
  * Phase 2: Staff Messaging — WebSocket-powered Ticket/Claiming System.
@@ -71,16 +72,19 @@ const StaffMessaging = () => {
                 });
         }
 
-        // Also poll as fallback (every 8s) in case Echo isn't connected
-        const pollInterval = setInterval(fetchConversations, 8000);
-
         return () => {
-            clearInterval(pollInterval);
             if (window.Echo) {
                 window.Echo.leave('staff.queue');
             }
         };
     }, [fetchConversations]);
+
+    useSmartRefresh({
+        enabled: true,
+        interval: 15000,
+        idleAfter: 180000,
+        refresh: fetchConversations,
+    });
 
     // ─── Subscribe to Conversation Channel When Selected ───
 

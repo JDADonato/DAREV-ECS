@@ -6,15 +6,17 @@ use App\Models\Booking;
 use App\Models\MenuItem;
 use App\Models\Payment;
 use App\Models\User;
-use App\Notifications\BookingConfirmedNotification;
+use App\Mail\BookingContinuationReminder;
 use App\Notifications\NewBookingNotification;
 use App\Services\BookingValidationService;
 use App\Services\BusinessRulesService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 
 /**
@@ -153,13 +155,7 @@ class BookingController extends Controller
 
         // ─── Send Notifications ───
         try {
-            // Notify client of booking confirmation
-            $client = User::find($request->user_id);
-            if ($client) {
-                $client->notify(new BookingConfirmedNotification($booking));
-            }
-
-            // Notify admins/ops of new booking
+            // Notify admins/marketing of new booking
             $admins = User::whereIn('role', ['Admin', 'Marketing'])->get();
             Notification::send($admins, new NewBookingNotification($booking));
         } catch (\Exception $e) {
@@ -171,6 +167,61 @@ class BookingController extends Controller
             'message'   => 'Booking created successfully!',
             'bookingId' => $booking->id,
         ], 201);
+    }
+
+    /**
+     * Send a gentle continuation email when a logged-in client leaves a meaningful booking draft.
+     */
+    public function sendAbandonedReminder(Request $request)
+    {
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        $data = $request->validate([
+            'step' => 'required|integer|min:2|max:6',
+            'event_date' => 'nullable|date',
+            'event_time' => 'nullable|string|max:20',
+            'event_type' => 'nullable|string|max:120',
+            'pax' => 'nullable|integer|min:1|max:5000',
+            'client_email' => 'nullable|email|max:255',
+            'client_full_name' => 'nullable|string|max:255',
+            'total_cost' => 'nullable|numeric|min:0',
+        ]);
+
+        $email = $data['client_email'] ?? $user->email;
+        if (!$email) {
+            return response()->json(['message' => 'No customer email available.'], 202);
+        }
+
+        $draftSignature = sha1(implode('|', [
+            $user->id,
+            $data['step'],
+            $data['event_date'] ?? '',
+            $data['event_type'] ?? '',
+            $data['pax'] ?? '',
+        ]));
+        $cacheKey = "booking.abandoned_reminder.{$draftSignature}";
+
+        if (Cache::has($cacheKey)) {
+            return response()->json(['message' => 'Reminder already sent for this draft.']);
+        }
+
+        try {
+            Mail::to($email)->send(new BookingContinuationReminder($user, $data));
+            Cache::put($cacheKey, true, now()->addHours(6));
+        } catch (\Throwable $e) {
+            Log::warning('Booking continuation reminder failed.', [
+                'user_id' => $user->id,
+                'email' => $email,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Reminder could not be sent right now.'], 202);
+        }
+
+        return response()->json(['message' => 'Continuation reminder sent.']);
     }
 
     /**

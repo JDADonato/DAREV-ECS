@@ -3,10 +3,12 @@ import { Head, router } from '@inertiajs/react';
 import { ArrowRight, Check, FileCheck2, LockKeyhole, ReceiptText } from 'lucide-react';
 import logoImg from '../../../images/ECS_LOGO.png';
 
-const PaymentSuccess = () => {
+const PaymentSuccess = ({ paymentStatus = 'Pending', syncMessage = 'Payment is still pending PayMongo confirmation.' }) => {
+    const isConfirmed = ['Paid', 'Verified'].includes(paymentStatus);
+
     return (
         <>
-            <Head title="Payment Authorized" />
+            <Head title={isConfirmed ? 'Payment Confirmed' : 'Payment Pending'} />
             <main className="min-h-screen bg-white text-slate-950">
                 <section className="mx-auto flex min-h-screen max-w-5xl flex-col px-5 py-8 sm:px-8">
                     <header className="flex items-center justify-between">
@@ -25,12 +27,14 @@ const PaymentSuccess = () => {
                                 </div>
                             </div>
 
-                            <p className="mb-3 text-sm font-black uppercase tracking-widest text-emerald-600">Authorization complete</p>
+                            <p className={`mb-3 text-sm font-black uppercase tracking-widest ${isConfirmed ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                {isConfirmed ? 'Authorization complete' : 'Awaiting confirmation'}
+                            </p>
                             <h1 className="text-3xl font-black tracking-normal text-slate-950 sm:text-5xl">
-                                Payment Authorized Successfully.
+                                {isConfirmed ? 'Payment Authorized Successfully.' : 'Payment Authorization Received.'}
                             </h1>
                             <p className="mx-auto mt-5 max-w-xl text-base font-medium leading-7 text-slate-600">
-                                We have received your payment and confirmed your booking.
+                                {syncMessage}
                             </p>
 
                             <div className="mx-auto mt-10 grid max-w-xl gap-3 sm:grid-cols-3">
@@ -47,7 +51,7 @@ const PaymentSuccess = () => {
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                                     <LockKeyhole className="mx-auto mb-3 h-6 w-6 text-[#720101]" />
                                     <p className="text-xs font-black uppercase tracking-widest text-slate-500">Status</p>
-                                    <p className="mt-1 text-sm font-bold text-slate-950">Updated</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-950">{isConfirmed ? 'Updated' : 'Pending'}</p>
                                 </div>
                             </div>
 

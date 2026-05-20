@@ -36,7 +36,7 @@ class NewBookingNotification extends Notification implements ShouldQueue
             ->line("Venue: {$booking->venue_address_line}, {$booking->venue_city}")
             ->line("Total Cost: ₱" . number_format($booking->total_cost, 2))
             ->line("Status: {$booking->status}")
-            ->action('Review Booking', route('dashboard.ops'))
+            ->action('Review Booking', route('dashboard.marketing'))
             ->line('Please review this booking and update its status accordingly.');
     }
 

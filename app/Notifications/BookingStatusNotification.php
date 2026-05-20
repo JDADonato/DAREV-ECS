@@ -4,6 +4,7 @@ namespace App\Notifications;
 
 use App\Models\Booking;
 use Illuminate\Bus\Queueable;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 /**
@@ -20,7 +21,27 @@ class BookingStatusNotification extends Notification
 
     public function via(object $notifiable): array
     {
-        return ['database'];
+        return $this->newStatus === 'Confirmed'
+            ? ['mail', 'database']
+            : ['database'];
+    }
+
+    public function toMail(object $notifiable): MailMessage
+    {
+        $eventDate = \Carbon\Carbon::parse($this->booking->event_date)->format('F j, Y');
+        $reference = str_pad($this->booking->id, 5, '0', STR_PAD_LEFT);
+        $total = (float) ($this->booking->total_cost ?? $this->booking->budget ?? 0);
+
+        return (new MailMessage)
+            ->subject('Booking Approved - Eloquente Catering')
+            ->greeting("Hello {$notifiable->username}!")
+            ->line('Great news! Your catering booking has been approved.')
+            ->line("Event Date: {$eventDate}")
+            ->line("Number of Guests: {$this->booking->pax}")
+            ->line("Booking Reference: #{$reference}")
+            ->line('Total Amount: PHP ' . number_format($total, 2))
+            ->action('View Booking Details', route('dashboard.client'))
+            ->line('You can now proceed with the required payment steps from your dashboard.');
     }
 
     public function toDatabase(object $notifiable): array

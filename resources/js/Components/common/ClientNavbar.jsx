@@ -10,11 +10,12 @@ const ClientNavbar = ({ user, logout, activePath }) => {
     const links = [
         { n: 'Home', p: '/' },
         { n: 'About', p: '/about' },
+        { n: 'Amenities', p: '/amenities' },
         { n: 'Menu', p: '/menu' },
         { n: 'Book Now', p: '/book' },
         { n: 'Contact', p: '/contact' },
     ];
-    const dash = () => !user ? '/' : ({ Client: '/dashboard/client', Marketing: '/dashboard/ops', Accounting: '/dashboard/finance', Admin: '/dashboard/admin' }[user.role] || '/');
+    const dash = () => !user ? '/' : ({ Client: '/dashboard/client', Marketing: '/dashboard/marketing', Accounting: '/dashboard/accounting', Admin: '/dashboard/admin' }[user.role] || '/');
 
     return (
         <nav className="fixed top-0 z-50 w-full border-b border-white/10 bg-[#720101]/95 shadow-lg shadow-black/10 backdrop-blur">

@@ -1,17 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, ScatterChart, Scatter, ZAxis } from 'recharts';
+import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
+import useSmartRefresh from '../hooks/useSmartRefresh';
 
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
-    const [activeTab, setActiveTab] = useState('overview');
+    const [activeTab, setActiveTab] = useState('dashboard');
 
     // ==========================================
     // EMPLOYEE MANAGEMENT STATE
     // ==========================================
     const [employees, setEmployees] = useState([]);
+    const [customers, setCustomers] = useState([]);
     const [empLoading, setEmpLoading] = useState(false);
+    const [customerLoading, setCustomerLoading] = useState(false);
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
     const [empForm, setEmpForm] = useState({ username: '', password: '', role: 'Marketing', email: '', phone: '' });
     const [empFormLoading, setEmpFormLoading] = useState(false);
@@ -22,6 +26,20 @@ const DashboardAdmin = () => {
     const [pricingOverrides, setPricingOverrides] = useState({});
     const [pricingLoading, setPricingLoading] = useState(false);
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
+    const [activeConfigTab, setActiveConfigTab] = useState('packages');
+    const [packages, setPackages] = useState([]);
+    const [eventTypes, setEventTypes] = useState([]);
+    const [eventTypeForm, setEventTypeForm] = useState({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+    const [editingEventTypeId, setEditingEventTypeId] = useState(null);
+    const [packageForm, setPackageForm] = useState({
+        name: '',
+        type: '',
+        base_price_per_head: '',
+        minimum_pax: 50,
+        description: '',
+        inclusions: '',
+    });
+    const [packageSaving, setPackageSaving] = useState(false);
 
     // ==========================================
     // CUSTOM MENU ITEMS STATE
@@ -39,11 +57,19 @@ const DashboardAdmin = () => {
     // ==========================================
     const [bookings, setBookings] = useState([]);
     const [bookingsLoading, setBookingsLoading] = useState(false);
+    const [bookingSearch, setBookingSearch] = useState('');
+    const [bookingStatusFilter, setBookingStatusFilter] = useState('All');
+    const [bookingSort, setBookingSort] = useState('latest');
+    const [approvingBookingId, setApprovingBookingId] = useState(null);
     const [discountModal, setDiscountModal] = useState({ open: false, data: null });
     const [discountForm, setDiscountForm] = useState({ discount_type: 'fixed', discount_value: 0 });
     const [discountLoading, setDiscountLoading] = useState(false);
+    const [refundQueue, setRefundQueue] = useState([]);
+    const [refundLoading, setRefundLoading] = useState(false);
+    const [processingRefundId, setProcessingRefundId] = useState(null);
 
     const [eventDetailsModal, setEventDetailsModal] = useState({ open: false, data: null });
+    const [editPaymentModal, setEditPaymentModal] = useState({ isOpen: false, payment: null, booking: null });
 
     // ==========================================
     // ANALYTICS STATE
@@ -51,49 +77,30 @@ const DashboardAdmin = () => {
     const [analytics, setAnalytics] = useState(null);
     const [analyticsLoading, setAnalyticsLoading] = useState(false);
     const [activeAnalyticsCategory, setActiveAnalyticsCategory] = useState('All');
+    const [audits, setAudits] = useState([]);
+    const [auditLoading, setAuditLoading] = useState(false);
+    const [auditSearch, setAuditSearch] = useState('');
+    const [auditRoleFilter, setAuditRoleFilter] = useState('All');
 
-    // Mock data for analytics
-    const salesFrequencyData = {
-        'All': [
-            { name: 'Grand Wedding', sales: 45 },
-            { name: 'Corporate Gala', sales: 38 },
-            { name: 'Classic Debut', sales: 25 },
-            { name: 'Premium Add-ons', sales: 60 }
-        ],
-        'starters': [
-            { name: 'Beef Salpicao', sales: 50 },
-            { name: 'Mushroom Soup', sales: 30 }
-        ],
-        'mains': [
-            { name: 'Roast Beef', sales: 85 },
-            { name: 'Shrimp Aglio Olio', sales: 40 }
-        ],
-        'desserts': [
-            { name: 'Creamy Buko Lychee', sales: 60 },
-            { name: 'Chocolate Mousse', sales: 45 }
-        ]
-    };
-
-    const revenueForecastData = [
-        { month: 'Jul', actual: 400000, forecast: 420000 },
-        { month: 'Aug', actual: 450000, forecast: 460000 },
-        { month: 'Sep', actual: 300000, forecast: 350000 },
-        { month: 'Oct', actual: null, forecast: 500000 },
-        { month: 'Nov', actual: null, forecast: 650000 },
-        { month: 'Dec', actual: null, forecast: 850000 }
-    ];
-
-    const projectedPaxDemand = [
-        { date: 'Oct 1', pax: 150 },
-        { date: 'Oct 8', pax: 300 },
-        { date: 'Oct 15', pax: 100 },
-        { date: 'Oct 22', pax: 500 },
-        { date: 'Nov 5', pax: 250 },
-        { date: 'Nov 12', pax: 800 }
-    ];
+    const analyticsSummary = analytics?.summary || {};
+    const revenueTrendData = analytics?.revenueTrends || [];
+    const revenueForecastData = analytics?.revenueForecast || [];
+    const projectedPaxDemand = analytics?.projectedPaxDemand || [];
+    const salesFrequencyData = analytics?.salesFrequency || { All: [] };
+    const topSellerData = analytics?.topSellers || [];
+    const peakSeasonData = analytics?.peakSeasons || [];
 
     // Toast notification
     const [toast, setToast] = useState(null);
+    const requestCache = useRef(new Map());
+    const [packagePage, setPackagePage] = useState(1);
+    const [eventTypePage, setEventTypePage] = useState(1);
+    const [menuItemPage, setMenuItemPage] = useState(1);
+    const [employeePage, setEmployeePage] = useState(1);
+    const [customerPage, setCustomerPage] = useState(1);
+    const [bookingPage, setBookingPage] = useState(1);
+    const [auditPage, setAuditPage] = useState(1);
+    const rowsPerPage = 8;
 
     const handleLogout = () => {
         router.post('/logout');
@@ -104,54 +111,388 @@ const DashboardAdmin = () => {
         setTimeout(() => setToast(null), 3000);
     };
 
+    const fetchCachedJson = async (url, ttl = 45000) => {
+        const cached = requestCache.current.get(url);
+        const now = Date.now();
+        if (cached && now - cached.time < ttl) {
+            return cached.data;
+        }
+
+        const res = await fetch(url, { headers: {} });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw data;
+        }
+
+        requestCache.current.set(url, { data, time: now });
+        return data;
+    };
+
+    const bustAdminCache = (...urls) => {
+        urls.forEach(url => requestCache.current.delete(url));
+        requestCache.current.delete('/api/admin/audits?per_page=100');
+    };
+
+    const refreshCurrentTab = ({ silent = false } = {}) => {
+        if (activeTab === 'users') {
+            bustAdminCache('/api/admin/employees', '/api/admin/customers');
+            fetchEmployees({ silent });
+            fetchCustomers({ silent });
+        } else if (activeTab === 'configuration') {
+            bustAdminCache('/api/pricing', '/api/menu-items', '/api/packages?per_page=100', '/api/event-types?per_page=100');
+            fetchPricingOverrides({ silent });
+            fetchCustomMenuItems();
+            fetchPackages();
+        } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
+            bustAdminCache('/api/admin/analytics');
+            fetchAnalytics({ silent });
+        } else if (activeTab === 'bookings') {
+            bustAdminCache('/api/admin/bookings');
+            fetchBookings({ silent });
+        } else if (activeTab === 'refunds') {
+            bustAdminCache('/api/admin/refunds/queue');
+            fetchRefundQueue({ silent });
+        } else if (activeTab === 'audits') {
+            bustAdminCache('/api/admin/audits?per_page=100');
+            fetchAudits({ silent });
+        }
+    };
+
+    const formatDate = (value) => {
+        if (!value) return 'N/A';
+        return new Date(value).toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        });
+    };
+    const formatDateTime = (value) => {
+        if (!value) return 'N/A';
+        return new Date(value).toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+        });
+    };
+    const formatTime = (value) => {
+        if (!value) return 'Time TBD';
+        const text = String(value).trim();
+        const match = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+        if (match) {
+            const date = new Date();
+            date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+            return date.toLocaleTimeString(undefined, {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+            });
+        }
+        return text.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (_, hour, minute) => {
+            const date = new Date();
+            date.setHours(Number(hour), Number(minute), 0, 0);
+            return date.toLocaleTimeString(undefined, {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+            });
+        });
+    };
+
+    const getErrorMessage = (error, fallback) => {
+        if (error?.error) return error.error;
+        if (error?.message) return error.message;
+        const validationErrors = error?.errors ? Object.values(error.errors).flat() : [];
+        return validationErrors[0] || fallback;
+    };
+
+    const getBookingTotal = (booking) => Number(booking?.totalCost ?? booking?.total_cost ?? booking?.budget ?? 0);
+    const formatCurrency = (value) => `PHP ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatBookingRef = (id) => `#BK-${String(id).padStart(4, '0')}`;
+    const paginate = (items, page, perPage = rowsPerPage) => {
+        const total = Array.isArray(items) ? items.length : 0;
+        const totalPages = Math.max(1, Math.ceil(total / perPage));
+        const safePage = Math.min(Math.max(page, 1), totalPages);
+        const start = (safePage - 1) * perPage;
+
+        return {
+            items: (items || []).slice(start, start + perPage),
+            page: safePage,
+            totalPages,
+            total,
+            start: total === 0 ? 0 : start + 1,
+            end: Math.min(start + perPage, total),
+        };
+    };
+    const normalizeStatus = (status) => String(status || '').toLowerCase();
+    const bookingStatusStyles = {
+        pending: 'bg-amber-100 text-amber-800 border-amber-200',
+        confirmed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    };
+    const pageMeta = {
+        dashboard: {
+            eyebrow: 'Command overview',
+            title: 'Service Operations',
+            description: 'Revenue, demand, and booking movement from live records.',
+        },
+        analytics: {
+            eyebrow: 'Decision support',
+            title: 'Business Intelligence',
+            description: 'Forecast demand, inspect sales velocity, and spot peak capacity windows.',
+        },
+        configuration: {
+            eyebrow: 'Catalog control',
+            title: 'Menu & Pricing Studio',
+            description: 'Maintain packages, event types, and menu pricing without touching code.',
+        },
+        reports: {
+            eyebrow: 'Governance',
+            title: 'Reports Center',
+            description: 'Operational exports and management snapshots.',
+        },
+        users: {
+            eyebrow: 'Access & clients',
+            title: 'People Directory',
+            description: 'Staff credentials, client accounts, and booking activity.',
+        },
+        bookings: {
+            eyebrow: 'Booking desk',
+            title: 'Event Pipeline',
+            description: 'Approve requests, review payment exposure, and manage adjustments.',
+        },
+        refunds: {
+            eyebrow: 'Finance control',
+            title: 'Refund Queue',
+            description: 'Process cancelled booking refunds while retaining reservation fees.',
+        },
+        audits: {
+            eyebrow: 'Control history',
+            title: 'Audit Trail',
+            description: 'Monitor staff and admin activity across Eloquente operations.',
+        },
+    };
+    const currentPage = pageMeta[activeTab] || pageMeta.dashboard;
+    const formatFullAddress = (booking) => {
+        if (!booking) return 'Not specified';
+        const parts = [
+            booking.venue_address_line,
+            booking.venue_street,
+            booking.venue_city,
+            booking.venue_province,
+            booking.venue_zip_code,
+        ].filter(Boolean);
+        return parts.length > 0 ? parts.join(', ') : 'Not specified';
+    };
+    const getSelectedDishes = (booking) => {
+        if (!booking?.selected_menu) return [];
+        try {
+            const menu = typeof booking.selected_menu === 'string'
+                ? JSON.parse(booking.selected_menu)
+                : booking.selected_menu;
+
+            return Object.entries(menu || {}).flatMap(([category, items]) => {
+                if (!Array.isArray(items)) return [];
+                return items.map((item) => ({
+                    category,
+                    name: typeof item === 'object' && item !== null ? (item.name || item.label || item.id) : item,
+                })).filter((item) => item.name);
+            });
+        } catch (error) {
+            console.error('Unable to parse selected menu', error);
+            return [];
+        }
+    };
+
+    const bookingStats = useMemo(() => {
+        const activeBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'confirmed');
+        const pendingBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'pending');
+
+        return {
+            total: bookings.length,
+            pending: pendingBookings.length,
+            active: activeBookings.length,
+            value: bookings.reduce((sum, booking) => sum + getBookingTotal(booking), 0),
+        };
+    }, [bookings]);
+
+    const refundStats = useMemo(() => {
+        return refundQueue.reduce((stats, item) => {
+            const totalPaid = Number(item.total_paid || 0);
+            const fee = totalPaid * 0.1;
+            stats.count += 1;
+            stats.paid += totalPaid;
+            stats.fees += fee;
+            stats.refundable += Math.max(totalPaid - fee, 0);
+            return stats;
+        }, { count: 0, paid: 0, fees: 0, refundable: 0 });
+    }, [refundQueue]);
+
+    const visibleBookings = useMemo(() => {
+        const query = bookingSearch.trim().toLowerCase();
+
+        return bookings
+            .filter((booking) => {
+                const status = normalizeStatus(booking.status);
+                if (bookingStatusFilter === 'Pending' && status !== 'pending') return false;
+                if (bookingStatusFilter === 'Active' && status !== 'confirmed') return false;
+
+                if (!query) return true;
+
+                const searchable = [
+                    formatBookingRef(booking.id),
+                    booking.client_full_name,
+                    booking.client_name,
+                    booking.client_email,
+                    booking.client_phone,
+                    booking.event_type,
+                    booking.username,
+                    booking.user_email,
+                    booking.user_phone,
+                ].filter(Boolean).join(' ').toLowerCase();
+
+                return searchable.includes(query);
+            })
+            .sort((a, b) => {
+                if (bookingSort === 'az' || bookingSort === 'za') {
+                    const left = String(a.client_full_name || a.client_name || a.username || '').toLowerCase();
+                    const right = String(b.client_full_name || b.client_name || b.username || '').toLowerCase();
+                    return bookingSort === 'az' ? left.localeCompare(right) : right.localeCompare(left);
+                }
+
+                const leftDate = new Date(a.created_at || a.event_date || 0).getTime();
+                const rightDate = new Date(b.created_at || b.event_date || 0).getTime();
+                return bookingSort === 'oldest' ? leftDate - rightDate : rightDate - leftDate;
+            });
+    }, [bookings, bookingSearch, bookingStatusFilter, bookingSort]);
+
+    const visibleAudits = useMemo(() => {
+        const query = auditSearch.trim().toLowerCase();
+
+        return audits.filter((audit) => {
+            if (auditRoleFilter !== 'All' && audit.role !== auditRoleFilter) return false;
+            if (!query) return true;
+
+            return [
+                audit.username,
+                audit.role,
+                audit.action,
+                audit.path,
+                audit.method,
+            ].filter(Boolean).join(' ').toLowerCase().includes(query);
+        });
+    }, [audits, auditSearch, auditRoleFilter]);
+
+    const paginatedPackages = paginate(packages, packagePage);
+    const paginatedEventTypes = paginate(eventTypes, eventTypePage);
+    const paginatedMenuItems = paginate(getMergedDishes(activeMenuCategory), menuItemPage);
+    const paginatedEmployees = paginate(employees, employeePage);
+    const paginatedCustomers = paginate(customers, customerPage);
+    const paginatedBookings = paginate(visibleBookings, bookingPage);
+    const paginatedAudits = paginate(visibleAudits, auditPage, 12);
+
+    const PaginationControls = ({ pageInfo, onPageChange }) => (
+        <div className="admin-pagination">
+            <span>
+                Showing <strong>{pageInfo.start}</strong>-<strong>{pageInfo.end}</strong> of <strong>{pageInfo.total}</strong>
+            </span>
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    disabled={pageInfo.page <= 1}
+                    onClick={() => onPageChange(pageInfo.page - 1)}
+                    className="admin-page-btn"
+                >
+                    Prev
+                </button>
+                <span className="text-xs font-black text-slate-500">Page {pageInfo.page} / {pageInfo.totalPages}</span>
+                <button
+                    type="button"
+                    disabled={pageInfo.page >= pageInfo.totalPages}
+                    onClick={() => onPageChange(pageInfo.page + 1)}
+                    className="admin-page-btn"
+                >
+                    Next
+                </button>
+            </div>
+        </div>
+    );
+
     useEffect(() => {
         if (activeTab === 'users') {
             fetchEmployees();
+            fetchCustomers();
         } else if (activeTab === 'configuration') {
             fetchPricingOverrides();
             fetchCustomMenuItems();
+            fetchPackages();
         } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
             fetchAnalytics();
         } else if (activeTab === 'bookings') {
             fetchBookings();
+        } else if (activeTab === 'refunds') {
+            fetchRefundQueue();
+        } else if (activeTab === 'audits') {
+            fetchAudits();
         }
     }, [activeTab]);
 
-    const fetchEmployees = async () => {
-        setEmpLoading(true);
+    useSmartRefresh({
+        enabled: ['dashboard', 'analytics', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
+        interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 45000 : 30000,
+        idleAfter: 180000,
+        refresh: refreshCurrentTab,
+    });
+
+    useEffect(() => {
+        setMenuItemPage(1);
+    }, [activeMenuCategory]);
+
+    useEffect(() => {
+        setBookingPage(1);
+    }, [bookingSearch, bookingStatusFilter, bookingSort]);
+
+    useEffect(() => {
+        setAuditPage(1);
+    }, [auditSearch, auditRoleFilter]);
+
+    const fetchEmployees = async ({ silent = false } = {}) => {
+        if (!silent) setEmpLoading(true);
         try {
-            // Session auth - no token needed
-            const res = await fetch('/api/admin/employees', {
-                headers: { }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setEmployees(data);
-            }
+            const data = await fetchCachedJson('/api/admin/employees', 60000);
+            setEmployees(data);
         } catch (error) {
             console.error(error);
             showToast("Failed to fetch employees", 'error');
         } finally {
-            setEmpLoading(false);
+            if (!silent) setEmpLoading(false);
         }
     };
 
-    const fetchPricingOverrides = async () => {
-        setPricingLoading(true);
+    const fetchCustomers = async ({ silent = false } = {}) => {
+        if (!silent) setCustomerLoading(true);
         try {
-            // Session auth - no token needed
-            const res = await fetch('/api/pricing', {
-                headers: { }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setPricingOverrides(data.overrides || {});
-            }
+            const data = await fetchCachedJson('/api/admin/customers', 60000);
+            setCustomers(data);
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to fetch customers", 'error');
+        } finally {
+            if (!silent) setCustomerLoading(false);
+        }
+    };
+
+    const fetchPricingOverrides = async ({ silent = false } = {}) => {
+        if (!silent) setPricingLoading(true);
+        try {
+            const data = await fetchCachedJson('/api/pricing', 60000);
+            setPricingOverrides(data.overrides || {});
         } catch (error) {
             console.error(error);
             showToast("Failed to fetch pricing", 'error');
         } finally {
-            setPricingLoading(false);
+            if (!silent) setPricingLoading(false);
         }
     };
 
@@ -176,6 +517,7 @@ const DashboardAdmin = () => {
 
             if (res.ok) {
                 showToast("Price updated successfully");
+                bustAdminCache('/api/pricing');
                 fetchPricingOverrides();
             } else {
                 showToast("Failed to update price", 'error');
@@ -186,17 +528,119 @@ const DashboardAdmin = () => {
         }
     };
 
+    const fetchPackages = async () => {
+        try {
+            const [packageData, eventData] = await Promise.all([
+                fetchCachedJson('/api/packages?per_page=100', 60000),
+                fetchCachedJson('/api/event-types?per_page=100', 60000),
+            ]);
+            setPackages(packageData.data || packageData);
+            const types = eventData.data || eventData;
+            setEventTypes(types);
+            setPackageForm(prev => ({ ...prev, type: prev.type || types[0]?.slug || '' }));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handlePackageSubmit = async (e) => {
+        e.preventDefault();
+        setPackageSaving(true);
+        try {
+            const res = await fetch('/api/admin/packages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(packageForm),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast('Package preset created');
+                setPackageForm({ name: '', type: eventTypes[0]?.slug || '', base_price_per_head: '', minimum_pax: 50, description: '', inclusions: '' });
+                bustAdminCache('/api/packages?per_page=100');
+                fetchPackages();
+            } else {
+                showToast(getErrorMessage(data, 'Failed to create package'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Network error', 'error');
+        } finally {
+            setPackageSaving(false);
+        }
+    };
+
+    const resetEventTypeForm = () => {
+        setEditingEventTypeId(null);
+        setEventTypeForm({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+    };
+
+    const handleEventTypeSubmit = async (e) => {
+        e.preventDefault();
+        setPackageSaving(true);
+        try {
+            const url = editingEventTypeId ? `/api/admin/event-types/${editingEventTypeId}` : '/api/admin/event-types';
+            const res = await fetch(url, {
+                method: editingEventTypeId ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(eventTypeForm),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast(editingEventTypeId ? 'Event type updated' : 'Event type created');
+                resetEventTypeForm();
+                bustAdminCache('/api/event-types?per_page=100', '/api/packages?per_page=100');
+                fetchPackages();
+            } else {
+                showToast(getErrorMessage(data, 'Failed to save event type'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Network error', 'error');
+        } finally {
+            setPackageSaving(false);
+        }
+    };
+
+    const startEditingEventType = (eventType) => {
+        setEditingEventTypeId(eventType.id);
+        setEventTypeForm({
+            label: eventType.label || '',
+            slug: eventType.slug || '',
+            icon: eventType.icon || 'sparkles',
+            description: eventType.description || '',
+            image: eventType.image || '',
+        });
+    };
+
+    const handleDeleteEventType = async (eventType) => {
+        if (!confirm(`Delete ${eventType.label}? Packages using this type will move to Other.`)) return;
+        setPackageSaving(true);
+        try {
+            const res = await fetch(`/api/admin/event-types/${eventType.id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Event type deleted');
+                bustAdminCache('/api/event-types?per_page=100', '/api/packages?per_page=100');
+                fetchPackages();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                showToast(getErrorMessage(data, 'Failed to delete event type'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Network error', 'error');
+        } finally {
+            setPackageSaving(false);
+        }
+    };
+
     // ==========================================
     // CUSTOM MENU ITEMS HANDLERS
     // ==========================================
 
     const fetchCustomMenuItems = async () => {
         try {
-            const res = await fetch('/api/menu-items');
-            if (res.ok) {
-                const data = await res.json();
-                setCustomMenuItems(data);
-            }
+            const data = await fetchCachedJson('/api/menu-items', 60000);
+            setCustomMenuItems(data);
         } catch (error) {
             console.error(error);
         }
@@ -210,27 +654,50 @@ const DashboardAdmin = () => {
         setMenuItemModal({ open: true, mode: 'add', data: null });
     };
 
+    const openEditMenuItemModal = (item) => {
+        setMenuItemForm({
+            name: item.name || '',
+            category: item.category || activeMenuCategory,
+            cost_per_head: item.costPerHead ?? '',
+            price_adj: item.priceAdj ?? '0',
+            image: item.image || '',
+            description: item.description || '',
+            is_best_seller: Boolean(item.isBestSeller),
+        });
+        setMenuItemModal({ open: true, mode: 'edit', data: item });
+    };
+
     const handleMenuItemSubmit = async (e) => {
         e.preventDefault();
         setMenuItemFormLoading(true);
+        const isEditing = menuItemModal.mode === 'edit';
+        const menuItemId = menuItemModal.data?._dbId;
+
+        if (isEditing && !menuItemId) {
+            setMenuItemFormLoading(false);
+            return showToast('Unable to find menu item to edit', 'error');
+        }
+
         try {
-            const res = await fetch('/api/admin/menu-items', {
-                method: 'POST',
+            const res = await fetch(isEditing ? `/api/admin/menu-items/${menuItemId}` : '/api/admin/menu-items', {
+                method: isEditing ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...menuItemForm,
                     cost_per_head: parseFloat(menuItemForm.cost_per_head) || 0,
                     price_adj: parseFloat(menuItemForm.price_adj) || 0,
+                    image: menuItemForm.image || null,
                 })
             });
 
             if (res.ok) {
-                showToast('Menu item added successfully');
+                showToast(isEditing ? 'Menu item updated successfully' : 'Menu item added successfully');
                 setMenuItemModal({ open: false, mode: 'add', data: null });
+                bustAdminCache('/api/menu-items', '/api/admin/analytics');
                 fetchCustomMenuItems();
             } else {
                 const err = await res.json();
-                showToast(err.message || 'Failed to add menu item', 'error');
+                showToast(err.message || (isEditing ? 'Failed to update menu item' : 'Failed to add menu item'), 'error');
             }
         } catch (error) {
             console.error(error);
@@ -246,6 +713,7 @@ const DashboardAdmin = () => {
             const res = await fetch(`/api/admin/menu-items/${id}`, { method: 'DELETE' });
             if (res.ok) {
                 showToast('Menu item deleted');
+                bustAdminCache('/api/menu-items', '/api/admin/analytics');
                 fetchCustomMenuItems();
             } else {
                 showToast('Failed to delete menu item', 'error');
@@ -259,13 +727,14 @@ const DashboardAdmin = () => {
     // All menu items now come from the database
     const MENU_CATEGORIES = ['starter', 'main', 'side', 'dessert', 'drink'];
 
-    const getMergedDishes = (category) => {
+    function getMergedDishes(category) {
         return customMenuItems
             .filter(item => item.category === category)
             .map(item => ({
                 id: item.dish_id,
                 _dbId: item.id,
                 name: item.name,
+                category: item.category,
                 costPerHead: parseFloat(item.cost_per_head),
                 priceAdj: parseFloat(item.price_adj),
                 image: item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400',
@@ -273,42 +742,83 @@ const DashboardAdmin = () => {
                 description: item.description || '',
                 _isCustom: true,
             }));
-    };
+    }
 
-    const fetchAnalytics = async () => {
-        setAnalyticsLoading(true);
+    const fetchAnalytics = async ({ silent = false } = {}) => {
+        if (!silent) setAnalyticsLoading(true);
         try {
-            // Session auth - no token needed
-            const res = await fetch('/api/admin/analytics', {
-                headers: { }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setAnalytics(data);
-            }
+            const data = await fetchCachedJson('/api/admin/analytics', 30000);
+            setAnalytics(data);
         } catch (error) {
             console.error(error);
         } finally {
-            setAnalyticsLoading(false);
+            if (!silent) setAnalyticsLoading(false);
         }
     };
 
-    const fetchBookings = async () => {
-        setBookingsLoading(true);
+    const fetchAudits = async ({ silent = false } = {}) => {
+        if (!silent) setAuditLoading(true);
         try {
-            // Session auth - no token needed
-            const res = await fetch('/api/finance/bookings', { // Fetching from finance to get full booking data + total costs easily
-                headers: { }
+            const data = await fetchCachedJson('/api/admin/audits?per_page=100', 15000);
+            setAudits(data.data || []);
+        } catch (error) {
+            console.error(error);
+            showToast(getErrorMessage(error, 'Failed to fetch audit logs'), 'error');
+        } finally {
+            if (!silent) setAuditLoading(false);
+        }
+    };
+
+    const fetchBookings = async ({ silent = false } = {}) => {
+        if (!silent) setBookingsLoading(true);
+        try {
+            const data = await fetchCachedJson('/api/admin/bookings', 30000);
+            setBookings(Array.isArray(data) ? data : (data.bookings || []));
+        } catch (error) {
+            console.error(error);
+            showToast(getErrorMessage(error, "Failed to fetch bookings"), 'error');
+        } finally {
+            if (!silent) setBookingsLoading(false);
+        }
+    };
+
+    const fetchRefundQueue = async ({ silent = false } = {}) => {
+        if (!silent) setRefundLoading(true);
+        try {
+            const data = await fetchCachedJson('/api/admin/refunds/queue', 15000);
+            setRefundQueue(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error(error);
+            showToast(getErrorMessage(error, 'Failed to fetch refund queue'), 'error');
+        } finally {
+            if (!silent) setRefundLoading(false);
+        }
+    };
+
+    const handleApproveBooking = async (booking) => {
+        if (!booking || normalizeStatus(booking.status) !== 'pending') return;
+        setApprovingBookingId(booking.id);
+
+        try {
+            const res = await fetch(`/api/admin/bookings/${booking.id}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'Confirmed' }),
             });
+
             if (res.ok) {
-                const data = await res.json();
-                setBookings(Array.isArray(data) ? data : (data.bookings || []));
+                showToast("Booking approved and customer notified");
+                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
+                fetchBookings();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                showToast(getErrorMessage(err, "Failed to approve booking"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Failed to fetch bookings", 'error');
+            showToast("Network error", 'error');
         } finally {
-            setBookingsLoading(false);
+            setApprovingBookingId(null);
         }
     };
 
@@ -328,6 +838,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast("Discount applied successfully");
                 setDiscountModal({ open: false, data: null });
+                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
                 fetchBookings();
             } else {
                 showToast("Failed to apply discount", 'error');
@@ -340,20 +851,55 @@ const DashboardAdmin = () => {
         }
     };
 
+    const handleProcessRefund = async (bookingId) => {
+        if (!window.confirm(`Process refund for booking #${bookingId}? The 10% reservation fee will be retained.`)) {
+            return;
+        }
+
+        setProcessingRefundId(bookingId);
+        try {
+            const res = await fetch(`/api/admin/refund/${bookingId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+                showToast(data.message || 'Refund processed successfully');
+                bustAdminCache('/api/admin/refunds/queue', '/api/admin/analytics');
+                fetchRefundQueue();
+                if (bookings.length > 0) fetchBookings({ silent: true });
+            } else {
+                const message = data?.details?.[0] || getErrorMessage(data, 'Failed to process refund');
+                showToast(message, 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Network error while processing refund', 'error');
+        } finally {
+            setProcessingRefundId(null);
+        }
+    };
+
     const handleEmpSubmit = async (e) => {
         e.preventDefault();
         setEmpFormLoading(true);
         try {
-            // Session auth - no token needed
+            const isCustomerEdit = empModal.mode === 'edit' && empModal.data?.role === 'Client';
             const url = empModal.mode === 'add'
                 ? '/api/admin/employees'
-                : `/api/admin/employees/${empModal.data.id}`;
+                : isCustomerEdit
+                    ? `/api/admin/customers/${empModal.data.id}`
+                    : `/api/admin/employees/${empModal.data.id}`;
             const method = empModal.mode === 'add' ? 'POST' : 'PUT';
 
             // Only send password if provided (for edits)
             const payload = { ...empForm };
             if (empModal.mode === 'edit' && !payload.password) {
                 delete payload.password;
+            }
+            if (isCustomerEdit) {
+                delete payload.role;
             }
 
             const res = await fetch(url, {
@@ -365,12 +911,14 @@ const DashboardAdmin = () => {
             });
 
             if (res.ok) {
-                showToast(`Employee ${empModal.mode === 'add' ? 'created' : 'updated'} successfully`);
+                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully`);
                 setEmpModal({ open: false, mode: 'add', data: null });
+                bustAdminCache('/api/admin/employees', '/api/admin/customers');
                 fetchEmployees();
+                fetchCustomers();
             } else {
-                const err = await res.json();
-                showToast(err.error || "Failed to save employee", 'error');
+                const err = await res.json().catch(() => ({}));
+                showToast(getErrorMessage(err, "Failed to save account"), 'error');
             }
         } catch (error) {
             console.error(error);
@@ -390,9 +938,31 @@ const DashboardAdmin = () => {
             });
             if (res.ok) {
                 showToast("Employee deleted successfully");
+                bustAdminCache('/api/admin/employees');
                 fetchEmployees();
             } else {
                 showToast("Failed to delete employee", 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast("Network error", 'error');
+        }
+    };
+
+    const handleDeleteCustomer = async (id) => {
+        if (!window.confirm("Delete this customer account? This will also remove records tied to the account, including bookings.")) return;
+        try {
+            const res = await fetch(`/api/admin/customers/${id}`, {
+                method: 'DELETE',
+                headers: { }
+            });
+            if (res.ok) {
+                showToast("Customer deleted successfully");
+                bustAdminCache('/api/admin/customers', '/api/admin/bookings', '/api/admin/analytics');
+                fetchCustomers();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                showToast(getErrorMessage(err, "Failed to delete customer"), 'error');
             }
         } catch (error) {
             console.error(error);
@@ -415,33 +985,49 @@ const DashboardAdmin = () => {
         setEmpModal({ open: true, mode, data: employee });
     };
 
+    const openCustomerModal = (customer) => {
+        setEmpForm({
+            username: customer.username,
+            password: '',
+            role: 'Client',
+            email: customer.email || '',
+            phone: customer.phone || ''
+        });
+        setEmpModal({ open: true, mode: 'edit', data: customer });
+    };
+
 
     return (
-        <div className="min-h-screen bg-gray-50 flex overflow-hidden">
+        <div className="admin-page min-h-screen overflow-hidden">
             {/* Sidebar Navigation */}
-            <aside className="w-64 bg-slate-900 text-white flex flex-col flex-shrink-0">
-                <div className="p-6">
-                    <div className="flex items-center gap-3 mb-8">
-                        <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">
-                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+            <aside className="fixed inset-y-0 left-0 z-30 flex w-72 admin-sidebar flex-col">
+                <div className="p-5 pb-3">
+                    <div className="admin-brand-mark flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#720101] flex items-center justify-center">
+                            <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
                         </div>
-                        <h1 className="text-xl font-bold font-display tracking-wide">Eloquente Admin</h1>
+                        <div>
+                            <h1 className="text-xl font-bold font-display tracking-wide text-[#241612]">Eloquente</h1>
+                            <p className="text-xs font-bold uppercase text-[#720101]/55">Service Control</p>
+                        </div>
                     </div>
+                </div>
 
-                    <nav className="space-y-2 flex-grow">
+                <nav className="absolute left-0 right-0 top-[4.75rem] bottom-[9.75rem] space-y-1.5 overflow-y-auto px-4 py-3">
                         {[
                             { id: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Dashboard' },
                             { id: 'analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'Analytics' },
                             { id: 'configuration', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM12 15a3 3 0 100-6 3 3 0 000 6z', label: 'Configuration' },
-                            { id: 'settings', icon: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4', label: 'Settings' },
                             { id: 'reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', label: 'Reports' },
                             { id: 'users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', label: 'Users' },
                             { id: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Bookings' },
+                            { id: 'refunds', icon: 'M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 12H6L5 9zm7 4v4m-3-2h6', label: 'Refunds' },
+                            { id: 'audits', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z', label: 'Audits' },
                         ].map(item => (
                             <button
                                 key={item.id}
                                 onClick={() => setActiveTab(item.id)}
-                                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === item.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                                className={`admin-nav-item w-full flex items-center gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
                             >
                                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
@@ -449,20 +1035,19 @@ const DashboardAdmin = () => {
                                 <span className="font-medium text-sm">{item.label}</span>
                             </button>
                         ))}
-                    </nav>
-                </div>
+                </nav>
 
-                <div className="p-6 mt-auto border-t border-slate-800">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 font-bold">
+                <div className="absolute inset-x-0 bottom-0 border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-[#720101] flex items-center justify-center text-[#f0aa0b] font-bold">
                             {user?.username?.charAt(0).toUpperCase() || 'A'}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-white truncate">{user?.username}</p>
-                            <p className="text-xs text-slate-400 truncate">Top Admin</p>
+                            <p className="text-sm font-bold text-[#241612] truncate">{user?.username}</p>
+                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Top Admin</p>
                         </div>
                     </div>
-                    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm font-medium">
+                    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#720101] hover:bg-[#5f0101] text-white rounded-lg transition-colors text-sm font-bold">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                         Logout
                     </button>
@@ -470,104 +1055,131 @@ const DashboardAdmin = () => {
             </aside>
 
             {/* Main Content Area */}
-            <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-50 relative">
-                <header className="bg-white shadow-sm border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-20">
-                    <h2 className="text-2xl font-bold text-gray-800 capitalize">{activeTab === 'dashboard' ? 'Overview Dashboard' : activeTab}</h2>
+            <main className="ml-72 flex h-screen flex-col min-w-0 overflow-y-auto admin-main relative">
+                <header className="admin-header px-8 py-5 flex items-center justify-between sticky top-0 z-20">
+                    <div>
+                        <p className="admin-kicker">{currentPage.eyebrow}</p>
+                        <h2 className="text-2xl font-bold text-[#1a1a1a]">{currentPage.title}</h2>
+                        <p className="mt-1 text-sm font-medium text-slate-500">{currentPage.description}</p>
+                    </div>
+                    <div className="hidden items-center gap-3 rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-bold text-[#720101] shadow-sm md:flex">
+                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+                        Live records
+                    </div>
                 </header>
 
                 <div className="p-8">
                     {activeTab === 'dashboard' && (
                         <div className="animate-fadeIn">
 
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                                <div className="bg-white overflow-hidden shadow rounded-xl border border-gray-100">
-                                    <div className="px-5 py-6">
-                                        <dt className="text-sm font-medium text-gray-500 truncate flex items-center gap-2">
+                            <section className="admin-hero rounded-2xl p-6 text-white">
+                                <div className="max-w-3xl">
+                                    <p className="text-xs font-black uppercase text-[#f0aa0b]">Today’s operating picture</p>
+                                    <h3 className="mt-2 text-3xl font-black">Keep service decisions tied to actual bookings.</h3>
+                                    <p className="mt-2 max-w-2xl text-sm font-medium text-white/72">Revenue, menu movement, demand intensity, and payment exposure are calculated from the database, then cached briefly for fast dashboard revisits.</p>
+                                </div>
+                            </section>
+
+                            <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+                                <div className="admin-metric-card overflow-hidden">
+                                    <div className="px-5 py-5">
+                                        <dt className="text-sm font-bold text-slate-500 truncate flex items-center gap-2">
                                             <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                             Total Revenue
                                         </dt>
-                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">₱450k</dd>
+                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">{formatCurrency(analyticsSummary.totalRevenue)}</dd>
+                                        <p className="mt-2 text-xs font-semibold text-emerald-700">Settled: {formatCurrency(analyticsSummary.settledRevenue)}</p>
                                     </div>
                                 </div>
-                                <div className="bg-white overflow-hidden shadow rounded-xl border border-gray-100">
-                                    <div className="px-5 py-6">
-                                        <dt className="text-sm font-medium text-gray-500 truncate flex items-center gap-2">
+                                <div className="admin-metric-card overflow-hidden">
+                                    <div className="px-5 py-5">
+                                        <dt className="text-sm font-bold text-slate-500 truncate flex items-center gap-2">
                                             <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                                            Active Inquiries
+                                            Pending Bookings
                                         </dt>
-                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">8</dd>
+                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">{analyticsSummary.pendingBookings || 0}</dd>
+                                        <p className="mt-2 text-xs font-semibold text-amber-700">Needs approval or follow-up</p>
                                     </div>
                                 </div>
-                                <div className="bg-white overflow-hidden shadow rounded-xl border border-gray-100">
-                                    <div className="px-5 py-6">
-                                        <dt className="text-sm font-medium text-gray-500 truncate flex items-center gap-2">
+                                <div className="admin-metric-card overflow-hidden">
+                                    <div className="px-5 py-5">
+                                        <dt className="text-sm font-bold text-slate-500 truncate flex items-center gap-2">
                                             <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                             Confirmed Bookings
                                         </dt>
-                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">12</dd>
+                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">{analyticsSummary.activeBookings || 0}</dd>
+                                        <p className="mt-2 text-xs font-semibold text-[#720101]">Events moving through service</p>
+                                    </div>
+                                </div>
+                                <div className="admin-metric-card overflow-hidden">
+                                    <div className="px-5 py-5">
+                                        <dt className="text-sm font-bold text-slate-500 truncate flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m8-4a4 4 0 10-8 0 4 4 0 008 0z" /></svg>
+                                            Total Pax
+                                        </dt>
+                                        <dd className="mt-2 text-3xl font-extrabold text-gray-900">{Number(analyticsSummary.totalPax || 0).toLocaleString()}</dd>
+                                        <p className="mt-2 text-xs font-semibold text-slate-500">Avg. value: {formatCurrency(analyticsSummary.averageBookingValue)}</p>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 {/* Revenue Trends */}
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                <div className="admin-panel p-6">
                                     <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
                                         Revenue Trends (Last 6 Months)
                                     </h3>
                                     <div className="h-64 flex items-end justify-between gap-2 overflow-hidden">
-                                        {[35, 45, 30, 65, 85, 55].map((val, i) => (
+                                        {(revenueTrendData.length ? revenueTrendData.slice(-6) : []).map((item, i) => {
+                                            const maxRevenue = Math.max(...revenueTrendData.map(row => row.revenue || 0), 1);
+                                            const val = Math.max(8, Math.round(((item.revenue || 0) / maxRevenue) * 100));
+                                            return (
                                             <div key={i} className="w-full h-full flex flex-col items-center justify-end gap-2 group">
-                                                <div className="w-full bg-indigo-100 rounded-t-md relative flex items-end justify-center group-hover:bg-indigo-200 transition-colors" style={{ height: `${val}%` }}>
+                                                <div className="w-full bg-[#f8ead5] rounded-t-md relative flex items-end justify-center group-hover:bg-[#f0d9b4] transition-colors" style={{ height: `${val}%` }}>
                                                     <div className="absolute -top-8 bg-gray-900 text-white text-xs font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                                                        ₱{val}0k
+                                                        {formatCurrency(item.revenue)}
                                                     </div>
-                                                    <div className="w-full bg-indigo-500 rounded-t-md opacity-70" style={{ height: `${val > 50 ? val - 20 : val}%` }}></div>
+                                                    <div className="w-full bg-[#720101] rounded-t-md opacity-80" style={{ height: `${val > 50 ? val - 20 : val}%` }}></div>
                                                 </div>
-                                                <span className="text-xs font-medium text-gray-500">Month {i + 1}</span>
+                                                <span className="text-xs font-medium text-gray-500">{item.label || item.month}</span>
                                             </div>
-                                        ))}
+                                        )})}
                                     </div>
                                 </div>
 
                                 {/* Market Intelligence: Top Sellers */}
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                                <div className="admin-panel p-6">
                                     <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
                                         Market Intelligence (Top Sellers)
                                     </h3>
                                     <div className="space-y-6">
-                                        {[
-                                            { name: 'Grand Wedding Package', count: 12, percent: 85, color: 'bg-green-500' },
-                                            { name: 'Corporate Gala Standard', count: 8, percent: 60, color: 'bg-blue-500' },
-                                            { name: 'Roasted Beef Carving (Add-on)', count: 15, percent: 95, color: 'bg-orange-500' },
-                                            { name: 'Truffle Mushroom Pasta (Add-on)', count: 10, percent: 70, color: 'bg-purple-500' }
-                                        ].map((item, i) => (
+                                        {topSellerData.map((item, i) => {
+                                            const maxCount = Math.max(...topSellerData.map(row => row.count || 0), 1);
+                                            return (
                                             <div key={i}>
                                                 <div className="flex justify-between text-sm mb-2">
                                                     <span className="font-bold text-gray-700">{item.name}</span>
                                                     <span className="text-gray-500 font-bold">{item.count} Bookings</span>
                                                 </div>
                                                 <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                                                    <div className={`${item.color} h-3 rounded-full`} style={{ width: `${item.percent}%` }}></div>
+                                                    <div className="bg-[#720101] h-3 rounded-full" style={{ width: `${Math.max(10, (item.count / maxCount) * 100)}%` }}></div>
                                                 </div>
                                             </div>
-                                        ))}
+                                        )})}
                                     </div>
                                 </div>
 
                                 {/* Peak Season Heatmap Placeholder */}
-                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 lg:col-span-2">
+                                <div className="admin-panel p-6 lg:col-span-2">
                                     <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                         Peak Season Heatmap (Demand Intensity)
                                     </h3>
                                     <div className="grid grid-cols-6 md:grid-cols-12 gap-3 text-center text-xs">
                                         {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, i) => {
-                                            // Mock heatmap logic
-                                            const intensityMap = [2, 3, 5, 4, 8, 9, 6, 7, 5, 8, 10, 10];
-                                            const val = intensityMap[i];
+                                            const val = peakSeasonData.find(item => item.month === month)?.count || 0;
                                             const bgColor = val <= 3 ? 'bg-green-100 text-green-800' : val <= 6 ? 'bg-yellow-200 text-yellow-800' : val <= 8 ? 'bg-orange-300 text-orange-900' : 'bg-red-500 text-white font-bold shadow-sm';
 
                                             return (
@@ -590,16 +1202,15 @@ const DashboardAdmin = () => {
                     )}
                     {activeTab === 'analytics' && (
                         <div className="animate-fadeIn space-y-8">
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-xl font-bold text-gray-900">Business Intelligence & Analytics</h2>
-                                <button className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-colors">
+                            <div className="flex justify-end">
+                                <button className="admin-button-secondary px-4 py-2 text-sm font-bold transition-colors">
                                     Download Full Report
                                 </button>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 {/* Revenue Forecast */}
-                                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <div className="admin-panel p-6">
                                     <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
                                         Revenue Forecast (H2 2026)
@@ -609,17 +1220,17 @@ const DashboardAdmin = () => {
                                             <LineChart data={revenueForecastData}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                                                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
-                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(value) => `₱${value / 1000}k`} dx={-10} />
-                                                <RechartsTooltip formatter={(value) => `₱${value.toLocaleString()}`} cursor={{ fill: '#F3F4F6' }} />
-                                                <Line type="monotone" dataKey="actual" stroke="#4F46E5" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} name="Actual Revenue" />
-                                                <Line type="monotone" dataKey="forecast" stroke="#9CA3AF" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected Revenue" />
+                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(value) => `PHP ${value / 1000}k`} dx={-10} />
+                                                <RechartsTooltip formatter={(value) => formatCurrency(value)} cursor={{ fill: '#F3F4F6' }} />
+                                                <Line type="monotone" dataKey="actual" stroke="#720101" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} name="Actual Revenue" />
+                                                <Line type="monotone" dataKey="forecast" stroke="#f0aa0b" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected Revenue" />
                                             </LineChart>
                                         </ResponsiveContainer>
                                     </div>
                                 </div>
 
                                 {/* Projected Pax Demand - Area Chart */}
-                                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <div className="admin-panel p-6">
                                     <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                                         Projected Pax Demand (Upcoming Events)
@@ -629,15 +1240,15 @@ const DashboardAdmin = () => {
                                             <AreaChart data={projectedPaxDemand}>
                                                 <defs>
                                                     <linearGradient id="colorPax" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                                                        <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                                                        <stop offset="5%" stopColor="#720101" stopOpacity={0.24} />
+                                                        <stop offset="95%" stopColor="#720101" stopOpacity={0} />
                                                     </linearGradient>
                                                 </defs>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                                                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
                                                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dx={-10} />
                                                 <RechartsTooltip cursor={{ fill: '#F3F4F6' }} />
-                                                <Area type="monotone" dataKey="pax" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorPax)" name="Total Guests" />
+                                                <Area type="monotone" dataKey="pax" stroke="#720101" strokeWidth={3} fillOpacity={1} fill="url(#colorPax)" name="Total Guests" />
                                             </AreaChart>
                                         </ResponsiveContainer>
                                     </div>
@@ -645,7 +1256,7 @@ const DashboardAdmin = () => {
                             </div>
 
                             {/* Interactive Sales Frequency Distribution */}
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div className="admin-panel p-6">
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                                     <h3 className="font-bold text-gray-800 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
@@ -654,12 +1265,14 @@ const DashboardAdmin = () => {
                                     <select
                                         value={activeAnalyticsCategory}
                                         onChange={(e) => setActiveAnalyticsCategory(e.target.value)}
-                                        className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2 transition-colors font-medium outline-none"
+                                        className="admin-select block p-2 text-sm font-medium outline-none"
                                     >
                                         <option value="All">All Categories</option>
-                                        <option value="starters">Starters</option>
-                                        <option value="mains">Mains</option>
-                                        <option value="desserts">Desserts</option>
+                                        <option value="starter">Starters</option>
+                                        <option value="main">Mains</option>
+                                        <option value="side">Sides</option>
+                                        <option value="dessert">Desserts</option>
+                                        <option value="drink">Drinks</option>
                                     </select>
                                 </div>
                                 <div className="h-72 w-full">
@@ -669,21 +1282,21 @@ const DashboardAdmin = () => {
                                             <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
                                             <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#374151', fontWeight: 600 }} dx={-10} width={120} />
                                             <RechartsTooltip cursor={{ fill: '#F3F4F6' }} />
-                                            <Bar dataKey="sales" fill="#10B981" radius={[0, 4, 4, 0]} barSize={24} name="Total Orders" />
+                                            <Bar dataKey="sales" fill="#720101" radius={[0, 4, 4, 0]} barSize={24} name="Total Orders" />
                                         </BarChart>
                                     </ResponsiveContainer>
                                 </div>
                             </div>
 
                             {/* Peak Season Heatmap Simulation */}
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                            <div className="admin-panel p-6">
                                 <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                                     <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                     Peak Season Demand Heatmap (Intensity)
                                 </h3>
                                 <div className="grid grid-cols-6 md:grid-cols-12 gap-3 text-center text-xs">
                                     {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, i) => {
-                                        const val = [2, 3, 5, 4, 8, 9, 6, 7, 5, 8, 10, 10][i];
+                                        const val = peakSeasonData.find(item => item.month === month)?.count || 0;
                                         const bgColor = val <= 3 ? 'bg-green-100 text-green-800' : val <= 6 ? 'bg-yellow-200 text-yellow-800' : val <= 8 ? 'bg-orange-300 text-orange-900' : 'bg-red-500 text-white font-bold shadow-sm';
 
                                         return (
@@ -704,26 +1317,230 @@ const DashboardAdmin = () => {
                     )}
                     {activeTab === 'configuration' && (
                         <div className="animate-fadeIn">
-                            <div className="flex justify-end mb-6">
-                                <button
-                                    onClick={openMenuItemModal}
-                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-colors"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                    Add New Menu Option
-                                </button>
-                            </div>
                             <div className="animate-fadeIn">
-                                <div className="mb-6">
-                                    <h2 className="text-xl font-bold text-gray-900">Global Pricing Configuration</h2>
-                                    <p className="text-sm text-gray-500 mt-1">Set permanent price overrides for packages and menu items. This overrides the default catalog prices.</p>
-                                </div>
-
                                 {pricingLoading ? (
                                     <div className="p-8 text-center text-gray-500">Loading pricing configuration...</div>
                                 ) : (
-                                    <div className="space-y-8">
+                                    <>
+                                    <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+                                        <div className="border-b border-gray-100 bg-gray-50 px-6 pt-5">
+                                            <nav className="flex gap-2 overflow-x-auto">
+                                                {[
+                                                    ['packages', 'Packages'],
+                                                    ['eventTypes', 'Event Types'],
+                                                    ['menuItems', 'Menu Items'],
+                                                ].map(([key, label]) => (
+                                                    <button
+                                                        key={key}
+                                                        onClick={() => setActiveConfigTab(key)}
+                                                        className={`whitespace-nowrap rounded-t-lg px-4 py-3 text-sm font-black transition-colors ${activeConfigTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-white/70 hover:text-gray-800'}`}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </nav>
+                                        </div>
+
+                                        {activeConfigTab === 'packages' && (
+                                            <div>
+                                                <form onSubmit={handlePackageSubmit} className="border-b border-gray-100 p-6">
+                                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                                                        <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                            {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                                        </select>
+                                                        <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <button disabled={packageSaving} className="lg:col-span-3 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : 'Create Package'}</button>
+                                                        <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                    </div>
+                                                </form>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm">
+                                                        <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
+                                                            <tr>
+                                                                <th className="px-6 py-4 text-left">Package</th>
+                                                                <th className="px-6 py-4 text-left">Event Type</th>
+                                                                <th className="px-6 py-4 text-right">Price / Head</th>
+                                                                <th className="px-6 py-4 text-right">Min Pax</th>
+                                                                <th className="px-6 py-4 text-left">Description</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-100">
+                                                            {paginatedPackages.items.map(pkg => (
+                                                                <tr key={pkg.id} className="hover:bg-gray-50">
+                                                                    <td className="px-6 py-4 font-bold text-gray-900">{pkg.name}</td>
+                                                                    <td className="px-6 py-4"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black uppercase text-indigo-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
+                                                                    <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</td>
+                                                                    <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
+                                                                    <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <PaginationControls pageInfo={paginatedPackages} onPageChange={setPackagePage} />
+                                            </div>
+                                        )}
+
+                                        {activeConfigTab === 'eventTypes' && (
+                                            <div>
+                                                <form onSubmit={handleEventTypeSubmit} className="border-b border-gray-100 p-6">
+                                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                                                        <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <button disabled={packageSaving} className="lg:col-span-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
+                                                        <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-10 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
+                                                    </div>
+                                                </form>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm">
+                                                        <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
+                                                            <tr>
+                                                                <th className="px-6 py-4 text-left">Event Type</th>
+                                                                <th className="px-6 py-4 text-left">Slug</th>
+                                                                <th className="px-6 py-4 text-left">Icon</th>
+                                                                <th className="px-6 py-4 text-left">Description</th>
+                                                                <th className="px-6 py-4 text-right">Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-100">
+                                                            {paginatedEventTypes.items.map(type => (
+                                                                <tr key={type.id} className="hover:bg-gray-50">
+                                                                    <td className="px-6 py-4 font-bold text-gray-900">{type.label}</td>
+                                                                    <td className="px-6 py-4"><span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black uppercase text-gray-700">{type.slug}</span></td>
+                                                                    <td className="px-6 py-4 text-gray-600">{type.icon}</td>
+                                                                    <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
+                                                                    <td className="px-6 py-4 text-right">
+                                                                        <button onClick={() => startEditingEventType(type)} className="mr-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                                                        <button onClick={() => handleDeleteEventType(type)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <PaginationControls pageInfo={paginatedEventTypes} onPageChange={setEventTypePage} />
+                                            </div>
+                                        )}
+
+                                        {activeConfigTab === 'menuItems' && (
+                                            <div>
+                                                <div className="flex flex-col gap-4 border-b border-gray-100 p-6 lg:flex-row lg:items-center lg:justify-between">
+                                                    <nav className="flex gap-2 overflow-x-auto">
+                                                        {MENU_CATEGORIES.map(category => (
+                                                            <button key={category} onClick={() => setActiveMenuCategory(category)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-bold capitalize transition-colors ${activeMenuCategory === category ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                                                                {category}
+                                                            </button>
+                                                        ))}
+                                                    </nav>
+                                                    <button onClick={openMenuItemModal} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">Add Menu Item</button>
+                                                </div>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm">
+                                                        <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
+                                                            <tr>
+                                                                <th className="px-6 py-4 text-left">Menu Item</th>
+                                                                <th className="px-6 py-4 text-left">Category</th>
+                                                                <th className="px-6 py-4 text-right">Current Price</th>
+                                                                <th className="px-6 py-4 text-right">Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-100">
+                                                            {paginatedMenuItems.items.map(item => {
+                                                                return (
+                                                                    <tr key={item.id} className="hover:bg-gray-50">
+                                                                        <td className="px-6 py-4">
+                                                                            <div className="flex items-center gap-3">
+                                                                                <img src={item.image} alt={item.name} className="h-12 w-12 rounded-lg object-cover ring-1 ring-gray-200" />
+                                                                                <div className="min-w-0">
+                                                                                    <div className="font-bold text-gray-900">{item.name}</div>
+                                                                                    <div className="line-clamp-1 text-xs text-gray-500">{item.description || 'No description'}</div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="px-6 py-4 capitalize text-gray-600">{item.category}</td>
+                                                                        <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(item.costPerHead || 0).toLocaleString()}</td>
+                                                                        <td className="px-6 py-4 text-right">
+                                                                            <button onClick={() => openEditMenuItemModal(item)} className="mr-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">Edit</button>
+                                                                            {item._isCustom && <button onClick={() => handleDeleteMenuItem(item._dbId)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                    {getMergedDishes(activeMenuCategory).length === 0 && <div className="p-8 text-center text-sm text-gray-500">No menu items in this category.</div>}
+                                                </div>
+                                                <PaginationControls pageInfo={paginatedMenuItems} onPageChange={setMenuItemPage} />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="hidden">
                                         {/* Menu Pricing (Custom Pricing) */}
+                                        <div className="bg-white shadow overflow-hidden rounded-xl border border-gray-100">
+                                            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                                                <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Preset Packages by Event Type</h3>
+                                                <p className="text-xs text-gray-500 mt-1">Create reusable package offers for weddings, corporate events, social events, and other inquiries.</p>
+                                            </div>
+                                            <form onSubmit={handlePackageSubmit} className="p-6 grid grid-cols-1 md:grid-cols-6 gap-4">
+                                                <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value })} className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                    {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                                </select>
+                                                <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <button disabled={packageSaving} className="rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : 'Create'}</button>
+                                                <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="md:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="md:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                            </form>
+                                            <div className="px-6 pb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                {packages.map(pkg => (
+                                                    <div key={pkg.id} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                                                        <p className="text-xs font-black uppercase text-indigo-500">{pkg.type}</p>
+                                                        <h4 className="mt-1 font-bold text-gray-900">{pkg.name}</h4>
+                                                        <p className="text-sm text-gray-600">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()} / head · min {pkg.minimum_pax} pax</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-white shadow overflow-hidden rounded-xl border border-gray-100">
+                                            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                                                <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Event Types</h3>
+                                                <p className="text-xs text-gray-500 mt-1">Create, modify, or delete event categories used by package presets.</p>
+                                            </div>
+                                            <form onSubmit={handleEventTypeSubmit} className="p-6 grid grid-cols-1 md:grid-cols-6 gap-4">
+                                                <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="md:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <div className="md:col-span-2 flex gap-2">
+                                                    {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="flex-1 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>}
+                                                    <button disabled={packageSaving} className="flex-1 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
+                                                </div>
+                                            </form>
+                                            <div className="px-6 pb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                {eventTypes.map(type => (
+                                                    <div key={type.id} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                                                        <p className="text-xs font-black uppercase text-indigo-500">{type.slug}</p>
+                                                        <h4 className="mt-1 font-bold text-gray-900">{type.label}</h4>
+                                                        <p className="text-sm text-gray-600 line-clamp-2">{type.description || 'No description'}</p>
+                                                        <div className="mt-3 flex gap-2">
+                                                            <button onClick={() => startEditingEventType(type)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                                            <button onClick={() => handleDeleteEventType(type)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
                                         <div className="bg-white shadow overflow-hidden rounded-xl border border-gray-100">
                                             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
                                                 <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Menu Items (Premium Add-ons)</h3>
@@ -810,94 +1627,54 @@ const DashboardAdmin = () => {
                                             </div>
                                         </div>
                                     </div>
+                                    </>
                                 )}
                             </div>
                         </div>
                     )}
-                    {activeTab === 'settings' && (
-                        <div className="animate-fadeIn">
-                            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-                                <h3 className="text-lg font-bold text-gray-800 mb-6">User Preferences</h3>
-                                <div className="space-y-6 max-w-lg">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h4 className="font-semibold text-gray-800">Email Notifications</h4>
-                                            <p className="text-sm text-gray-500">Receive alerts for new bookings and cancellations</p>
-                                        </div>
-                                        <div className="w-12 h-6 bg-indigo-600 rounded-full relative cursor-pointer">
-                                            <div className="w-4 h-4 bg-white rounded-full absolute right-1 top-1"></div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h4 className="font-semibold text-gray-800">Compact View</h4>
-                                            <p className="text-sm text-gray-500">Reduce spacing in tables and lists</p>
-                                        </div>
-                                        <div className="w-12 h-6 bg-gray-200 rounded-full relative cursor-pointer">
-                                            <div className="w-4 h-4 bg-white rounded-full absolute left-1 top-1 shadow-sm"></div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h4 className="font-semibold text-gray-800">Dark Mode</h4>
-                                            <p className="text-sm text-gray-500">Toggle dark aesthetic for the dashboard layout</p>
-                                        </div>
-                                        <div className="w-12 h-6 bg-gray-200 rounded-full relative cursor-pointer transition-colors hover:bg-gray-300">
-                                            <div className="w-4 h-4 bg-white rounded-full absolute left-1 top-1 shadow-sm transition-transform"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )
-                    }
                     {
                         activeTab === 'reports' && (
                             <div className="animate-fadeIn">
-                                <div className="bg-[#1A1B36] rounded-2xl p-8 border border-[#2b2d4f] shadow-2xl text-white relative overflow-hidden">
-                                    {/* Subtle background glow */}
-                                    <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl rounded-none pointer-events-none mix-blend-screen"></div>
-
-                                    <div className="flex justify-between items-center mb-8 relative z-10">
-                                        <h2 className="text-2xl font-bold tracking-wide">Reports Center</h2>
-                                        <button className="bg-indigo-400/20 hover:bg-indigo-400/30 text-indigo-300 border border-indigo-400/30 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center gap-2 transition-all backdrop-blur-md">
+                                <div className="admin-panel p-6">
+                                    <div className="flex justify-end items-center mb-5">
+                                        <button className="admin-button-secondary px-4 py-2 text-sm font-bold flex items-center gap-2">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                             Generate Snapshot
                                         </button>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 relative z-10">
-                                        <div className="bg-[#24254A] border border-[#2b2d4f] rounded-xl p-5 shadow-inner">
-                                            <p className="text-xs text-indigo-200 font-semibold mb-2">Masterfiles</p>
-                                            <p className="text-3xl font-bold">10</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Masterfiles</p>
+                                            <p className="text-2xl font-black text-gray-950">10</p>
                                         </div>
-                                        <div className="bg-[#24254A] border border-[#2b2d4f] rounded-xl p-5 shadow-inner">
-                                            <p className="text-xs text-indigo-200 font-semibold mb-2">Users</p>
-                                            <p className="text-3xl font-bold">6</p>
+                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Users</p>
+                                            <p className="text-2xl font-black text-gray-950">6</p>
                                         </div>
-                                        <div className="bg-[#24254A] border border-[#2b2d4f] rounded-xl p-5 shadow-inner">
-                                            <p className="text-xs text-indigo-200 font-semibold mb-2">Active Projects</p>
-                                            <p className="text-3xl font-bold">6</p>
+                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Active Projects</p>
+                                            <p className="text-2xl font-black text-gray-950">6</p>
                                         </div>
-                                        <div className="bg-[#24254A] border border-[#2b2d4f] rounded-xl p-5 shadow-inner">
-                                            <p className="text-xs text-indigo-200 font-semibold mb-2">Generated Reports</p>
-                                            <p className="text-3xl font-bold">0</p>
+                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Generated Reports</p>
+                                            <p className="text-2xl font-black text-gray-950">0</p>
                                         </div>
                                     </div>
 
-                                    <div className="relative z-10 border-t border-[#2b2d4f] pt-6 flex flex-col items-start">
-                                        <div className="flex gap-3 mb-10">
-                                            <button className="bg-[#24254A] hover:bg-[#2a2b53] border border-[#2b2d4f] text-indigo-200 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors">
+                                    <div className="border-t border-gray-100 pt-5 flex flex-col items-start">
+                                        <div className="flex flex-wrap gap-3 mb-8">
+                                            <button className="admin-button-secondary px-4 py-2 text-xs font-bold flex items-center gap-2">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                                                 Export Masterfiles CSV
                                             </button>
-                                            <button className="bg-[#24254A] hover:bg-[#2a2b53] border border-[#2b2d4f] text-indigo-200 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors">
+                                            <button className="admin-button-secondary px-4 py-2 text-xs font-bold flex items-center gap-2">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                                                 Export Users CSV
                                             </button>
                                         </div>
 
-                                        <div className="w-full text-center text-indigo-300 text-sm font-medium opacity-70 mb-12">
+                                        <div className="w-full rounded-xl border border-dashed border-gray-200 bg-gray-50 py-8 text-center text-sm font-semibold text-gray-500">
                                             No reports yet. Click Generate Snapshot.
                                         </div>
                                     </div>
@@ -908,72 +1685,149 @@ const DashboardAdmin = () => {
                     {
                         activeTab === 'users' && (
                             <div className="animate-fadeIn">
-                                <div className="animate-fadeIn">
-                                    <div className="flex justify-between items-center mb-6">
-                                        <div>
-                                            <h2 className="text-xl font-bold text-gray-900">Personnel Roster</h2>
-                                            <p className="text-sm text-gray-500 mt-1">Manage Marketing and Accounting staff accounts and sub-role accesses.</p>
+                                <div className="flex justify-end mb-6">
+                                    <button onClick={() => openEmpModal('add')} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-colors self-start">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                        Add Employee
+                                    </button>
+                                </div>
+
+                                <div className="space-y-8">
+                                    <div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Staff Users</h3>
+                                                <p className="text-xs text-gray-500 mt-1">Marketing and Accounting personnel accounts.</p>
+                                            </div>
+                                            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1">{employees.length} staff</span>
                                         </div>
-                                        <button onClick={() => openEmpModal('add')} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-colors">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                            Add Employee
-                                        </button>
+
+                                        <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
+                                            {empLoading ? (
+                                                <div className="p-8 text-center text-gray-500">Loading staff accounts...</div>
+                                            ) : employees.length === 0 ? (
+                                                <div className="p-12 text-center text-gray-500">No employee accounts found.</div>
+                                            ) : (
+                                                <table className="min-w-full divide-y divide-gray-200">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Email</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Role</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Created</th>
+                                                            <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-white divide-y divide-gray-100">
+                                                        {paginatedEmployees.items.map(emp => (
+                                                            <tr key={emp.id} className="hover:bg-gray-50/80 transition-colors">
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="flex items-center">
+                                                                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-indigo-100 to-blue-200 flex items-center justify-center text-indigo-700 font-bold">
+                                                                            {emp.username.charAt(0).toUpperCase()}
+                                                                        </div>
+                                                                        <div className="ml-4">
+                                                                            <div className="text-sm font-bold text-gray-900">{emp.username}</div>
+                                                                            <div className="text-xs text-gray-500">{emp.phone || 'No phone'}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="text-sm text-gray-700">{emp.email || <span className="text-gray-400 italic">No email</span>}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${emp.role === 'Marketing' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-green-100 text-green-800 border border-green-200'}`}>
+                                                                        {emp.role}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                                                                        Active
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="text-sm text-gray-500">{formatDate(emp.created_at)}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                                    <button onClick={() => openEmpModal('edit', emp)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
+                                                                    <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
+                                        {!empLoading && employees.length > 0 && (
+                                            <PaginationControls pageInfo={paginatedEmployees} onPageChange={setEmployeePage} />
+                                        )}
                                     </div>
 
-                                    <div className="bg-white shadow overflow-hidden sm:rounded-xl border border-gray-100">
-                                        {empLoading ? (
-                                            <div className="p-8 text-center text-gray-500">Loading accounts...</div>
-                                        ) : employees.length === 0 ? (
-                                            <div className="p-12 text-center text-gray-500">No employee accounts found.</div>
-                                        ) : (
-                                            <table className="min-w-full divide-y divide-gray-200">
-                                                <thead className="bg-gray-50">
-                                                    <tr>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Email</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Role</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Last Active</th>
-                                                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="bg-white divide-y divide-gray-100">
-                                                    {employees.map(emp => (
-                                                        <tr key={emp.id} className="hover:bg-gray-50/80 transition-colors">
-                                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                                <div className="flex items-center">
-                                                                    <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-indigo-100 to-blue-200 flex items-center justify-center text-indigo-700 font-bold">
-                                                                        {emp.username.charAt(0).toUpperCase()}
-                                                                    </div>
-                                                                    <div className="ml-4">
-                                                                        <div className="text-sm font-bold text-gray-900">{emp.username}</div>
-                                                                    </div>
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                                <div className="text-sm text-gray-700">{emp.email || <span className="text-gray-400 italic">No email</span>}</div>
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${emp.role === 'Marketing' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-green-100 text-green-800 border border-green-200'}`}>
-                                                                    {emp.role}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-                                                                    Active
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                                <div className="text-sm text-gray-500">Just now</div>
-                                                            </td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                                <button onClick={() => openEmpModal('edit', emp)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
-                                                                <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
-                                                            </td>
+                                    <div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Customer Users</h3>
+                                                <p className="text-xs text-gray-500 mt-1">Registered client accounts with contact details and booking activity.</p>
+                                            </div>
+                                            <span className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-100 rounded-full px-3 py-1">{customers.length} customers</span>
+                                        </div>
+
+                                        <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
+                                            {customerLoading ? (
+                                                <div className="p-8 text-center text-gray-500">Loading customer accounts...</div>
+                                            ) : customers.length === 0 ? (
+                                                <div className="p-12 text-center text-gray-500">No customer accounts found.</div>
+                                            ) : (
+                                                <table className="min-w-full divide-y divide-gray-200">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Customer</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Contact</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Bookings</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Registered</th>
+                                                            <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
                                                         </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                                    </thead>
+                                                    <tbody className="bg-white divide-y divide-gray-100">
+                                                        {paginatedCustomers.items.map(customer => (
+                                                            <tr key={customer.id} className="hover:bg-gray-50/80 transition-colors">
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="flex items-center">
+                                                                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 font-bold">
+                                                                            {customer.username.charAt(0).toUpperCase()}
+                                                                        </div>
+                                                                        <div className="ml-4">
+                                                                            <div className="text-sm font-bold text-gray-900">{customer.username}</div>
+                                                                            <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100">
+                                                                                {customer.role}
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <div className="text-sm text-gray-700">{customer.email || <span className="text-gray-400 italic">No email</span>}</div>
+                                                                    <div className="text-xs text-gray-500 mt-1">{customer.phone || 'No phone'}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="text-sm font-bold text-gray-900">{customer.bookings_count || 0}</div>
+                                                                    <div className="text-xs text-gray-500">Latest: {formatDate(customer.bookings_max_event_date)}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <div className="text-sm text-gray-500">{formatDate(customer.created_at)}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                                    <button onClick={() => openCustomerModal(customer)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
+                                                                    <button onClick={() => handleDeleteCustomer(customer.id)} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
+                                        {!customerLoading && customers.length > 0 && (
+                                            <PaginationControls pageInfo={paginatedCustomers} onPageChange={setCustomerPage} />
                                         )}
                                     </div>
                                 </div>
@@ -983,76 +1837,317 @@ const DashboardAdmin = () => {
                     {
                         activeTab === 'bookings' && (
                             <div className="animate-fadeIn">
-                                <div className="mb-6">
-                                    <h2 className="text-xl font-bold text-gray-900">Custom On-The-Fly Discounts</h2>
-                                    <p className="text-sm text-gray-500 mt-1">Apply exclusive percentage or fixed-amount discounts to specific client bookings.</p>
+                                <div className="mb-6 flex justify-end">
+                                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                        {[
+                                            { label: 'Current', value: bookingStats.total },
+                                            { label: 'Pending', value: bookingStats.pending },
+                                            { label: 'Active', value: bookingStats.active },
+                                            { label: 'Expected Value', value: formatCurrency(bookingStats.value) },
+                                        ].map((stat) => (
+                                            <div key={stat.label} className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">{stat.label}</p>
+                                                <p className="mt-1 text-lg font-black text-gray-900">{stat.value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
 
-                                <div className="bg-white shadow overflow-hidden sm:rounded-xl border border-gray-100">
+                                <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                                        <div className="relative flex-1">
+                                            <svg className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                            </svg>
+                                            <input
+                                                type="search"
+                                                value={bookingSearch}
+                                                onChange={(e) => setBookingSearch(e.target.value)}
+                                                placeholder="Search booking ref, client, email, phone, event type..."
+                                                className="w-full rounded-lg border border-gray-200 bg-gray-50 py-3 pl-10 pr-4 text-sm font-medium text-gray-800 outline-none transition-all focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                                            />
+                                        </div>
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+                                                {['All', 'Pending', 'Active'].map((filter) => (
+                                                    <button
+                                                        key={filter}
+                                                        type="button"
+                                                        onClick={() => setBookingStatusFilter(filter)}
+                                                        className={`rounded-md px-4 py-2 text-xs font-black uppercase tracking-wider transition-colors ${bookingStatusFilter === filter ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                                                    >
+                                                        {filter}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <select
+                                                value={bookingSort}
+                                                onChange={(e) => setBookingSort(e.target.value)}
+                                                className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                            >
+                                                <option value="latest">Latest to Oldest</option>
+                                                <option value="oldest">Oldest to Latest</option>
+                                                <option value="az">A-Z</option>
+                                                <option value="za">Z-A</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white shadow-sm overflow-hidden sm:rounded-xl border border-gray-200">
                                     {bookingsLoading ? (
-                                        <div className="p-8 text-center text-gray-500">Loading bookings...</div>
-                                    ) : bookings.length === 0 ? (
-                                        <div className="p-12 text-center text-gray-500">No active bookings found.</div>
+                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading bookings...</div>
+                                    ) : visibleBookings.length === 0 ? (
+                                        <div className="p-12 text-center">
+                                            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
+                                                <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                            </div>
+                                            <h3 className="text-base font-black text-gray-900">No bookings match this view</h3>
+                                            <p className="mt-1 text-sm text-gray-500">Try clearing the search or switching filters.</p>
+                                        </div>
                                     ) : (
                                         <table className="min-w-full divide-y divide-gray-200">
                                             <thead className="bg-gray-50">
                                                 <tr>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Booking Ref.</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Client & Pax</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Total Cost</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Booking</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Client</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Total</th>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Additional Fees</th>
-                                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="bg-white divide-y divide-gray-100">
-                                                {bookings.filter(b => b.status === 'Pending' || b.status === 'Confirmed').map(booking => (
+                                                {paginatedBookings.items.map(booking => {
+                                                    const status = normalizeStatus(booking.status);
+                                                    return (
                                                     <tr key={booking.id} className="hover:bg-gray-50/80 transition-colors cursor-pointer" onClick={() => setEventDetailsModal({ open: true, data: booking })}>
                                                         <td className="px-6 py-4">
-                                                            <div className="text-sm font-bold text-gray-900">#BK-{booking.id.toString().padStart(4, '0')}</div>
-                                                            <div className="text-xs text-gray-500">{booking.event_date}</div>
+                                                            <div className="text-sm font-black text-gray-900">{formatBookingRef(booking.id)}</div>
+                                                            <div className="text-xs font-medium text-gray-500">Submitted {formatDate(booking.created_at)}</div>
                                                         </td>
                                                         <td className="px-6 py-4">
-                                                            <div className="text-sm font-bold text-gray-900">{booking.client_full_name || booking.client_name || booking.username}</div>
-                                                            <div className="text-xs text-gray-500">{booking.pax} Pax</div>
+                                                            <div className="text-sm font-bold text-gray-900">{booking.client_full_name || booking.client_name || booking.username || 'Unnamed client'}</div>
+                                                            <div className="text-xs text-gray-500">{booking.client_email || booking.user_email || 'No email'} / {booking.client_phone || booking.user_phone || 'No phone'}</div>
                                                         </td>
                                                         <td className="px-6 py-4">
-                                                            <div className="text-sm font-bold text-gray-900">₱{booking.total_cost?.toLocaleString()}</div>
-                                                            {(booking.discount_value > 0 || booking.discount_type) && (
-                                                                <div className="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full inline-block mt-1">
+                                                            <div className="text-sm font-bold text-gray-900">{formatDate(booking.event_date)} / {formatTime(booking.event_time)}</div>
+                                                            <div className="text-xs text-gray-500">{booking.event_type || 'Event'} / {booking.pax} pax</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm font-black text-gray-900">{formatCurrency(getBookingTotal(booking))}</div>
+                                                            {Number(booking.discount_value || 0) > 0 && (
+                                                                <div className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-700">
                                                                     Discounted
                                                                 </div>
                                                             )}
                                                         </td>
                                                         <td className="px-6 py-4">
-                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${booking.status === 'Confirmed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                                                                }`}>
-                                                                {booking.status}
+                                                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-black uppercase tracking-wider ${bookingStatusStyles[status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                                                                {status === 'confirmed' ? 'Active' : booking.status}
                                                             </span>
                                                         </td>
-                                                        <td className="px-6 py-4">
-                                                            <div className="text-sm text-gray-900">
-                                                                {booking.transport_fee > 0 || booking.labor_surcharge > 0 ? (
-                                                                    <>
-                                                                        {booking.transport_fee > 0 && <span className="block text-xs text-gray-500">Out-of-town: ₱{booking.transport_fee.toLocaleString()}</span>}
-                                                                        {booking.labor_surcharge > 0 && <span className="block text-xs text-gray-500">High-rise: ₱{booking.labor_surcharge.toLocaleString()}</span>}
-                                                                    </>
-                                                                ) : (
-                                                                    <span className="text-xs text-gray-400">None</span>
+                                                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                                                            <div className="flex justify-end gap-2">
+                                                                {status === 'pending' && (
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleApproveBooking(booking);
+                                                                        }}
+                                                                        disabled={approvingBookingId === booking.id}
+                                                                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                                                                    >
+                                                                        {approvingBookingId === booking.id ? 'Approving...' : 'Approve'}
+                                                                    </button>
                                                                 )}
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setDiscountForm({ discount_type: booking.discount_type || 'fixed', discount_value: booking.discount_value || 0 });
+                                                                        setDiscountModal({ open: true, data: booking });
+                                                                    }}
+                                                                    className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 transition-colors hover:bg-indigo-100"
+                                                                >
+                                                                    Discount
+                                                                </button>
                                                             </div>
                                                         </td>
-                                                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setDiscountForm({ discount_type: booking.discount_type || 'fixed', discount_value: booking.discount_value || 0 });
-                                                                    setDiscountModal({ open: true, data: booking });
-                                                                }}
-                                                                className="text-indigo-600 hover:text-indigo-900 font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors inline-block"
-                                                            >
-                                                                Apply Discount
-                                                            </button>
+                                                    </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                                {!bookingsLoading && visibleBookings.length > 0 && (
+                                    <PaginationControls pageInfo={paginatedBookings} onPageChange={setBookingPage} />
+                                )}
+                            </div>
+                        )
+                    }
+                    {
+                        activeTab === 'refunds' && (
+                            <div className="animate-fadeIn space-y-5">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                                    {[
+                                        { label: 'Queued Cases', value: refundStats.count },
+                                        { label: 'Paid Exposure', value: formatCurrency(refundStats.paid) },
+                                        { label: 'Reservation Fees', value: formatCurrency(refundStats.fees) },
+                                        { label: 'Refundable', value: formatCurrency(refundStats.refundable) },
+                                    ].map((stat) => (
+                                        <div key={stat.label} className="admin-metric-card px-5 py-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                                            <p className="mt-1 text-xl font-black text-gray-950">{stat.value}</p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="admin-panel overflow-hidden">
+                                    <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            <h3 className="text-base font-black text-gray-950">Cancelled bookings with refundable payments</h3>
+                                            <p className="mt-1 text-sm font-medium text-gray-500">Refunds retain the non-refundable 10% reservation fee and update the payment records.</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => { bustAdminCache('/api/admin/refunds/queue'); fetchRefundQueue(); }}
+                                            className="admin-button-secondary px-4 py-2 text-sm font-bold"
+                                        >
+                                            Refresh Queue
+                                        </button>
+                                    </div>
+
+                                    {refundLoading ? (
+                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading refund queue...</div>
+                                    ) : refundQueue.length === 0 ? (
+                                        <div className="p-12 text-center">
+                                            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
+                                                <svg className="h-6 w-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                            <h3 className="text-base font-black text-gray-900">No refunds waiting</h3>
+                                            <p className="mt-1 text-sm text-gray-500">Cancelled bookings with verified payments will appear here.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full divide-y divide-gray-100">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-500">Booking</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-500">Client</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-500">Event Date</th>
+                                                        <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-500">Paid</th>
+                                                        <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-500">Refund</th>
+                                                        <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-500">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {refundQueue.map((item) => {
+                                                        const totalPaid = Number(item.total_paid || 0);
+                                                        const penalty = totalPaid * 0.1;
+                                                        const refundAmount = Math.max(totalPaid - penalty, 0);
+
+                                                        return (
+                                                            <tr key={item.booking_id} className="transition-colors hover:bg-gray-50">
+                                                                <td className="px-6 py-4">
+                                                                    <div className="text-sm font-black text-gray-900">{formatBookingRef(item.booking_id)}</div>
+                                                                    <div className="text-xs font-medium text-gray-500">Cancelled booking</div>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <div className="text-sm font-bold text-gray-900">{item.client_full_name || 'Unnamed client'}</div>
+                                                                    <div className="text-xs text-gray-500">{item.client_email || 'No email'}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-sm font-bold text-gray-700">{formatDate(item.event_date)}</td>
+                                                                <td className="px-6 py-4 text-right text-sm font-black text-gray-900">{formatCurrency(totalPaid)}</td>
+                                                                <td className="px-6 py-4 text-right">
+                                                                    <div className="text-sm font-black text-[#720101]">{formatCurrency(refundAmount)}</div>
+                                                                    <div className="text-xs font-semibold text-gray-400">{formatCurrency(penalty)} retained</div>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-right">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleProcessRefund(item.booking_id)}
+                                                                        disabled={processingRefundId === item.booking_id}
+                                                                        className="rounded-lg bg-[#720101] px-4 py-2 text-xs font-black text-white transition-colors hover:bg-[#5f0101] disabled:opacity-60"
+                                                                    >
+                                                                        {processingRefundId === item.booking_id ? 'Processing...' : 'Process Refund'}
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )
+                    }
+                    {
+                        activeTab === 'audits' && (
+                            <div className="animate-fadeIn space-y-5">
+                                <div className="flex justify-end">
+                                    <button onClick={() => { bustAdminCache('/api/admin/audits?per_page=100'); fetchAudits(); }} className="admin-button-secondary px-4 py-2 text-sm font-bold">
+                                        Refresh Logs
+                                    </button>
+                                </div>
+
+                                <div className="admin-panel p-4">
+                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                                        <div className="relative flex-1">
+                                            <svg className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                            </svg>
+                                            <input value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)} placeholder="Search user, action, route, or method..." className="w-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm font-medium outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
+                                        </div>
+                                        <select value={auditRoleFilter} onChange={(e) => setAuditRoleFilter(e.target.value)} className="admin-select px-4 py-3 text-sm font-bold outline-none">
+                                            <option value="All">All Roles</option>
+                                            <option value="Admin">Admin</option>
+                                            <option value="Marketing">Marketing</option>
+                                            <option value="Accounting">Accounting</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="admin-panel overflow-hidden">
+                                    {auditLoading ? (
+                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading audit trail...</div>
+                                    ) : visibleAudits.length === 0 ? (
+                                        <div className="p-12 text-center">
+                                            <h3 className="text-base font-black text-gray-900">No audit activity yet</h3>
+                                            <p className="mt-1 text-sm text-gray-500">Staff activity will appear here as admins, marketing, and accounting users work in the system.</p>
+                                        </div>
+                                    ) : (
+                                        <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Time</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Staff</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Route</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 bg-white">
+                                                {paginatedAudits.items.map((audit) => (
+                                                    <tr key={audit.id}>
+                                                        <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-700">{formatDateTime(audit.created_at)}</td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-black text-gray-900">{audit.username || 'Unknown'}</div>
+                                                            <div className="text-xs font-bold text-[#720101]">{audit.role || 'Staff'}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-bold text-gray-900">{audit.action}</div>
+                                                            <div className="mt-1 text-xs text-gray-500">{audit.method}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4 max-w-sm">
+                                                            <code className="rounded bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">{audit.path}</code>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${Number(audit.status_code) >= 400 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                                                {audit.status_code || 'OK'}
+                                                            </span>
                                                         </td>
                                                     </tr>
                                                 ))}
@@ -1060,6 +2155,9 @@ const DashboardAdmin = () => {
                                         </table>
                                     )}
                                 </div>
+                                {!auditLoading && visibleAudits.length > 0 && (
+                                    <PaginationControls pageInfo={paginatedAudits} onPageChange={setAuditPage} />
+                                )}
                             </div>
                         )
                     }
@@ -1073,7 +2171,9 @@ const DashboardAdmin = () => {
                         <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={() => setEmpModal({ open: false, mode: 'add', data: null })}></div>
                         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fadeIn overflow-hidden">
                             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-                                <h3 className="text-lg font-bold text-gray-900">{empModal.mode === 'add' ? 'Provision New Account' : 'Modify Credentials'}</h3>
+                                <h3 className="text-lg font-bold text-gray-900">
+                                    {empModal.mode === 'add' ? 'Provision New Account' : empModal.data?.role === 'Client' ? 'Modify Customer Account' : 'Modify Staff Credentials'}
+                                </h3>
                             </div>
                             <form onSubmit={handleEmpSubmit} className="p-6">
                                 <div className="space-y-4">
@@ -1097,16 +2197,22 @@ const DashboardAdmin = () => {
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Privilege Level</label>
-                                        <select value={empForm.role} onChange={e => setEmpForm({ ...empForm, role: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium">
-                                            <option value="Marketing">Marketing / Ops</option>
-                                            <option value="Accounting">Accounting / Finance</option>
-                                        </select>
+                                        {empModal.data?.role === 'Client' ? (
+                                            <div className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-600">
+                                                Client / Customer
+                                            </div>
+                                        ) : (
+                                            <select value={empForm.role} onChange={e => setEmpForm({ ...empForm, role: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium">
+                                                <option value="Marketing">Marketing</option>
+                                                <option value="Accounting">Accounting</option>
+                                            </select>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="mt-8 flex justify-end gap-3">
                                     <button type="button" onClick={() => setEmpModal({ open: false, mode: 'add', data: null })} className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
                                     <button type="submit" disabled={empFormLoading} className="px-5 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors disabled:opacity-50">
-                                        {empFormLoading ? 'Configuring...' : empModal.mode === 'add' ? 'Create Account' : 'Update Credentials'}
+                                        {empFormLoading ? 'Configuring...' : empModal.mode === 'add' ? 'Create Account' : 'Update Account'}
                                     </button>
                                 </div>
                             </form>
@@ -1185,6 +2291,10 @@ const DashboardAdmin = () => {
                             </div>
 
                             <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-8 bg-white">
+                                {(() => {
+                                    const selectedDishes = getSelectedDishes(eventDetailsModal.data);
+                                    return (
+                                        <>
                                 {/* Core Client Logic */}
                                 <div className="grid grid-cols-2 gap-6">
                                     <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100/50">
@@ -1222,7 +2332,7 @@ const DashboardAdmin = () => {
                                             <div className="grid grid-cols-2 gap-2">
                                                 <div>
                                                     <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Start Time</p>
-                                                    <p className="text-sm text-gray-700">{eventDetailsModal.data?.event_time || 'N/A'}</p>
+                                                <p className="text-sm text-gray-700">{formatTime(eventDetailsModal.data?.event_time)}</p>
                                                 </div>
                                             </div>
                                             <div>
@@ -1234,6 +2344,35 @@ const DashboardAdmin = () => {
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* Venue Matrix */}
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Event Venue</h4>
+                                    <div className="bg-rose-50/50 rounded-lg p-4 border border-rose-100">
+                                        <p className="text-xs text-gray-500 font-medium">Venue Address</p>
+                                        <p className="mt-1 text-sm font-bold text-gray-900">{formatFullAddress(eventDetailsModal.data)}</p>
+                                        {eventDetailsModal.data?.venue_building_details && (
+                                            <p className="mt-2 text-xs font-medium text-gray-600">{eventDetailsModal.data.venue_building_details}</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Selected Dishes */}
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Selected Dishes</h4>
+                                    {selectedDishes.length === 0 ? (
+                                        <div className="bg-gray-50 rounded-lg p-4 text-sm font-medium text-gray-500">No dishes selected for this booking.</div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            {selectedDishes.map((dish, index) => (
+                                                <div key={`${dish.category}-${dish.name}-${index}`} className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">{dish.category}</p>
+                                                    <p className="mt-1 text-sm font-bold text-gray-900">{dish.name}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Financial Matrix */}
@@ -1258,6 +2397,47 @@ const DashboardAdmin = () => {
                                         </div>
                                     </div>
                                 </div>
+                                <div>
+                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Payment Tranches</h4>
+                                    <div className="overflow-x-auto rounded-lg border border-gray-100">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-500">Term</th>
+                                                    <th className="px-4 py-3 text-right text-xs font-bold uppercase text-gray-500">Amount</th>
+                                                    <th className="px-4 py-3 text-center text-xs font-bold uppercase text-gray-500">Due Date</th>
+                                                    <th className="px-4 py-3 text-center text-xs font-bold uppercase text-gray-500">Status</th>
+                                                    <th className="px-4 py-3 text-right text-xs font-bold uppercase text-gray-500">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 bg-white">
+                                                {(eventDetailsModal.data?.payments || []).map(payment => (
+                                                    <tr key={payment.id}>
+                                                        <td className="px-4 py-3 font-semibold text-gray-900">{payment.payment_type}</td>
+                                                        <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(payment.amount)}</td>
+                                                        <td className="px-4 py-3 text-center text-gray-600">{formatDate(payment.due_date)}</td>
+                                                        <td className="px-4 py-3 text-center text-gray-600">{payment.status}</td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            {payment.status === 'Pending' || payment.status === 'Rejected' ? (
+                                                                <button onClick={() => setEditPaymentModal({ isOpen: true, payment, booking: eventDetailsModal.data })} className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 transition-colors hover:bg-indigo-100">Edit Term</button>
+                                                            ) : (
+                                                                <span className="text-xs font-semibold text-gray-400">Locked</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {(eventDetailsModal.data?.payments || []).length === 0 && (
+                                                    <tr>
+                                                        <td colSpan="5" className="px-4 py-6 text-center text-sm text-gray-500">No payment tranches found.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
 
                             <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end">
@@ -1270,14 +2450,27 @@ const DashboardAdmin = () => {
                 )
             }
 
+            <PaymentTermEditorModal
+                isOpen={editPaymentModal.isOpen}
+                onClose={() => setEditPaymentModal({ isOpen: false, payment: null, booking: null })}
+                booking={editPaymentModal.booking}
+                payment={editPaymentModal.payment}
+                onSuccess={() => {
+                    setEditPaymentModal({ isOpen: false, payment: null, booking: null });
+                    setEventDetailsModal({ open: false, data: null });
+                    showToast('Payment terms updated');
+                    fetchBookings();
+                }}
+            />
+
             {/* Add New Menu Item Modal */}
             {menuItemModal.open && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn">
                         <div className="flex items-center justify-between p-6 border-b border-gray-100">
                             <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                Add New Menu Item
+                                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={menuItemModal.mode === 'edit' ? 'M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z' : 'M12 4v16m8-8H4'} /></svg>
+                                {menuItemModal.mode === 'edit' ? 'Edit Menu Item' : 'Add New Menu Item'}
                             </h3>
                             <button onClick={() => setMenuItemModal({ open: false, mode: 'add', data: null })} className="text-gray-400 hover:text-gray-600 transition-colors">
                                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1393,7 +2586,7 @@ const DashboardAdmin = () => {
                                     disabled={menuItemFormLoading}
                                     className="px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors shadow-md disabled:opacity-50"
                                 >
-                                    {menuItemFormLoading ? 'Adding...' : 'Add Menu Item'}
+                                    {menuItemFormLoading ? (menuItemModal.mode === 'edit' ? 'Saving...' : 'Adding...') : (menuItemModal.mode === 'edit' ? 'Save Changes' : 'Add Menu Item')}
                                 </button>
                             </div>
                         </form>

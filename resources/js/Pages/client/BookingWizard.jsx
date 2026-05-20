@@ -3,21 +3,22 @@ import { router, Link } from '@inertiajs/react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import CalendarView from '../../components/client/CalendarView';
-import EventIdentity from '../../components/client/EventIdentity';
-import GuestLogistics from '../../components/client/GuestLogistics';
-import MenuBuilder from '../../components/client/MenuBuilder';
-import EventSurcharges from '../../components/client/EventSurcharges';
-import FoodTastingStep from '../../components/client/FoodTastingStep';
-import BlueprintPanel from '../../components/client/BlueprintPanel';
-import Modal from '../../components/common/Modal';
-import UserDropdown from '../../components/common/UserDropdown';
+import CalendarView from '../../Components/client/CalendarView';
+import EventIdentity from '../../Components/client/EventIdentity';
+import GuestLogistics from '../../Components/client/GuestLogistics';
+import MenuBuilder from '../../Components/client/MenuBuilder';
+import EventSurcharges from '../../Components/client/EventSurcharges';
+import FoodTastingStep from '../../Components/client/FoodTastingStep';
+import BlueprintPanel from '../../Components/client/BlueprintPanel';
+import Modal from '../../Components/common/Modal';
+import UserDropdown from '../../Components/common/UserDropdown';
 import NotificationBell from '../../Components/common/NotificationBell';
 import ChatBubble from '../../Components/common/ChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 
 const STORAGE_KEY = 'ecs_booking_draft';
+const REMINDER_KEY = 'ecs_booking_reminder_sent';
 
 const defaultBookingData = {
     date: null, time: '', duration: 4, remainingPax: null,
@@ -103,6 +104,39 @@ const BookingWizard = () => {
 
     // Show toast when navigating away
     useEffect(() => {
+        const sendContinuationReminder = (draft) => {
+            if (!user || !draft?._step || draft._step <= 1) return;
+
+            const signature = [user.id, draft._step, draft.date || '', draft.eventType || '', draft.pax || ''].join('|');
+            try {
+                const previous = JSON.parse(localStorage.getItem(REMINDER_KEY) || '{}');
+                const sentRecently = previous.signature === signature && Date.now() - Number(previous.sentAt || 0) < 6 * 60 * 60 * 1000;
+                if (sentRecently) return;
+                localStorage.setItem(REMINDER_KEY, JSON.stringify({ signature, sentAt: Date.now() }));
+            } catch (e) {}
+
+            const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+            fetch('/api/bookings/abandoned-reminder', {
+                method: 'POST',
+                keepalive: true,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    ...(token ? { 'X-CSRF-TOKEN': token } : {}),
+                },
+                body: JSON.stringify({
+                    step: draft._step,
+                    event_date: draft.date,
+                    event_time: draft.time,
+                    event_type: draft.eventType,
+                    pax: draft.pax,
+                    client_email: draft.client_email || user.email,
+                    client_full_name: draft.client_full_name,
+                    total_cost: draft.totalCost || draft.budget || 0,
+                }),
+            }).catch(() => {});
+        };
+
         const removeStartListener = router.on('start', (event) => {
             // Only show toast if navigating away from the booking process
             const url = event.detail.visit.url;
@@ -116,12 +150,13 @@ const BookingWizard = () => {
                     const d = JSON.parse(saved);
                         if (d._step && d._step > 1) {
                         toast.success('Your booking progress has been saved. You can resume anytime.');
+                        sendContinuationReminder(d);
                     }
                 }
             }
         });
         return () => removeStartListener();
-    }, [toast]);
+    }, [toast, user]);
 
     const clearDraft = () => {
         localStorage.removeItem(STORAGE_KEY);
@@ -388,7 +423,7 @@ const BookingWizard = () => {
                                     <NotificationBell variant="light" />
                                     <UserDropdown 
                                         user={user} 
-                                        dashLink={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} 
+                                        dashLink={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/marketing' : user.role === 'Accounting' ? '/dashboard/accounting' : '/dashboard/admin'} 
                                     />
                                 </div>
                             ) : (
@@ -440,7 +475,7 @@ const BookingWizard = () => {
                             ))}
                             {user ? (
                                 <>
-                                    <Link href={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/ops' : user.role === 'Accounting' ? '/dashboard/finance' : '/dashboard/admin'} className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
+                                    <Link href={user.role === 'Client' ? '/dashboard/client' : user.role === 'Marketing' ? '/dashboard/marketing' : user.role === 'Accounting' ? '/dashboard/accounting' : '/dashboard/admin'} className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>
                                         Dashboard
                                     </Link>
                                     <Link href="/profile" className="block text-white hover:bg-red-700 px-3 py-2 rounded-md text-base font-medium" onClick={() => setIsMobileMenuOpen(false)}>

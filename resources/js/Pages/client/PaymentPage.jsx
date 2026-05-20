@@ -328,7 +328,7 @@ const PaymentPage = () => {
                         </div>
                         <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Submitted!</h2>
                         <p className="text-sm text-gray-500 mb-2">Your payment has been recorded and is pending verification.</p>
-                        <p className="text-xs text-gray-400 mb-8">You'll receive a notification once your payment is verified by our finance team.</p>
+                        <p className="text-xs text-gray-400 mb-8">You'll receive a notification once your payment is verified by our accounting team.</p>
 
                         <div className="bg-gray-50 rounded-xl p-5 mb-8 border border-gray-100 max-w-sm mx-auto">
                             <div className="space-y-2 text-sm">

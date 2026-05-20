@@ -3,6 +3,7 @@ import { Link, router } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import ChatBubble from '../Components/common/ChatBubble';
 import ClientNavbar from '../Components/common/ClientNavbar';
+import Footer from '../Components/common/Footer';
 import logoImg from '../../images/ECS_LOGO.png';
 
 /* ── SVG Icons ── */
@@ -124,6 +125,8 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
     const activeBookings = bookings.filter((booking) => !['Cancelled', 'cancelled', 'Completed'].includes(booking.status));
     const [selectedId, setSelectedId] = useState(null);
     const [open, setOpen] = useState(false);
+    const [isDocked, setIsDocked] = useState(false);
+    const inlineRef = useRef(null);
     const booking = activeBookings.find((item) => item.id === selectedId) || activeBookings[0];
 
     useEffect(() => {
@@ -132,6 +135,18 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
         }
     }, [activeBookings, selectedId]);
 
+    useEffect(() => {
+        const el = inlineRef.current;
+        if (!el) return;
+
+        const observer = new IntersectionObserver(([entry]) => {
+            setIsDocked(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+        }, { threshold: 0, rootMargin: '-80px 0px 0px 0px' });
+
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [booking?.id]);
+
     if (!booking) return null;
 
     const steps = buildFloatingJourneySteps(booking, payments);
@@ -139,22 +154,30 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
     const progress = Math.round((completed / steps.length) * 100);
     const remaining = steps.filter((step) => !step.done);
 
-    if (!open) {
-        return (
-            <button onClick={() => setOpen(true)} className="fixed bottom-5 left-5 z-40 rounded-full border border-white/70 bg-white/95 px-4 py-3 text-left shadow-2xl shadow-black/20 backdrop-blur-md transition-transform hover:-translate-y-0.5">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey</p>
-                <div className="mt-1 flex items-center gap-3">
-                    <div className="h-2 w-24 rounded-full bg-gray-100">
-                        <div className="h-2 rounded-full bg-[#720101]" style={{ width: `${progress}%` }} />
-                    </div>
-                    <span className="text-xs font-bold text-gray-800">{remaining.length} left</span>
+    const Summary = ({ floating = false }) => (
+        <button
+            onClick={() => setOpen(true)}
+            className={`${floating ? 'fixed bottom-5 left-5 z-40 w-[calc(100%-2.5rem)] max-w-sm shadow-xl' : 'w-full'} rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-left transition-all duration-300 hover:border-[#720101]/25`}
+        >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p className="text-[11px] font-black uppercase tracking-widest text-[#720101]">Your Event Journey</p>
+                    <p className="mt-1 text-sm font-bold text-[#1a1a1a]">
+                        {remaining.length === 0 ? 'Everything is complete' : `${remaining.length} next step${remaining.length > 1 ? 's' : ''} to finish`}
+                    </p>
                 </div>
-            </button>
-        );
-    }
+                <div className="flex items-center gap-3">
+                    <div className="h-2 w-28 rounded-full bg-gray-100">
+                        <div className="h-2 rounded-full bg-[#720101] transition-all duration-500" style={{ width: `${progress}%` }} />
+                    </div>
+                    <span className="text-xs font-black text-gray-700">{progress}%</span>
+                </div>
+            </div>
+        </button>
+    );
 
-    return (
-        <div className="fixed bottom-5 left-5 z-40 w-[calc(100%-2.5rem)] max-w-md rounded-2xl border border-white/70 bg-white/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-md">
+    const Panel = ({ floating = false }) => (
+        <div className={`${floating ? 'fixed bottom-5 left-5 z-40 w-[calc(100%-2.5rem)] max-w-md shadow-xl' : 'relative w-full'} rounded-2xl border border-[#720101]/10 bg-white p-4 transition-all duration-300`}>
             <div className="mb-3 flex items-start justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-bold uppercase tracking-widest text-[#720101]">Journey Tracker</p>
@@ -163,10 +186,12 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                     </h2>
                     <p className="mt-1 text-xs font-semibold text-gray-500">Event on {new Date(booking.event_date).toLocaleDateString()}</p>
                 </div>
-                <button onClick={() => router.get('/dashboard/client')} className="shrink-0 rounded-full bg-[#720101] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[#5a0101]">
-                    Open Dashboard
-                </button>
-                <button onClick={() => setOpen(false)} className="rounded-full bg-gray-100 px-3 py-2 text-xs font-bold text-gray-500 hover:bg-gray-200">Hide</button>
+                <div className="flex shrink-0 gap-2">
+                    <button onClick={() => router.get('/dashboard/client')} className="rounded-full bg-[#720101] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[#5a0101]">
+                        Dashboard
+                    </button>
+                    <button onClick={() => setOpen(false)} className="rounded-full bg-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-200">Collapse</button>
+                </div>
             </div>
 
             {activeBookings.length > 1 && (
@@ -193,15 +218,15 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                 {steps.map((step, index) => (
                     <button 
                         key={step.label} 
-                        onClick={() => router.get(`/dashboard/client?tab=${step.tab}`)} 
+                        onClick={() => { if (!step.locked) router.get(`/dashboard/client?tab=${step.tab}`); }} 
                         className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all ${step.locked ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'bg-gray-50/50 hover:bg-[#720101]/5 active:scale-[0.98]'}`}
                         disabled={step.locked}
                     >
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all ${
-                            step.done ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 
+                            step.done ? 'bg-green-600 text-white' : 
                             step.locked ? 'bg-gray-200 text-gray-400' :
-                            step.isPendingGate ? 'bg-[#720101] text-white animate-pulse shadow-lg shadow-red-200' :
-                            'bg-white text-[#720101] ring-2 ring-[#720101]/10 shadow-sm'
+                            step.isPendingGate ? 'bg-[#720101] text-white' :
+                            'bg-white text-[#720101] ring-2 ring-[#720101]/10'
                         }`}>
                             {step.done ? '✓' : step.locked ? (
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
@@ -210,7 +235,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                                 <p className={`truncate text-xs font-black uppercase tracking-wider ${step.done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{step.label}</p>
-                                {step.isPendingGate && <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#720101] animate-ping" />}
+                                {step.isPendingGate && <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#720101]" />}
                             </div>
                             {!step.done && <p className="truncate text-[10px] font-bold text-[#720101]/60 uppercase tracking-widest mt-0.5">{step.locked ? 'Step Locked' : step.action}</p>}
                         </div>
@@ -221,6 +246,17 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                 ))}
             </div>
         </div>
+    );
+
+    return (
+        <>
+            <section ref={inlineRef} className="border-b border-[#720101]/10 bg-[#fffaf3] px-5 py-4 sm:px-8">
+                <div className="mx-auto max-w-7xl">
+                    {open && !isDocked ? <Panel /> : <Summary />}
+                </div>
+            </section>
+            {isDocked && (open ? <Panel floating /> : <Summary floating />)}
+        </>
     );
 };
 
@@ -247,34 +283,34 @@ const LandingPage = () => {
 
             <ClientNavbar user={user} logout={logout} />
 
-            <FloatingJourneyTracker bookings={journeyData.bookings} payments={journeyData.payments} />
-
             {/* HERO */}
-            <section className="relative flex items-center overflow-hidden" style={{minHeight:'100vh',paddingTop: 68}}>
-                <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=85&w=1800" alt="Elegant catered reception service" className="absolute inset-0 w-full h-full object-cover scale-105" style={{animation:'slowZoom 20s ease-in-out infinite alternate'}}/>
-                <div className="absolute inset-0" style={{background:'linear-gradient(90deg, rgba(12,10,8,.88) 0%, rgba(55,11,9,.62) 48%, rgba(12,10,8,.32) 100%)'}}/>
-                <div className="relative z-10 w-full max-w-7xl mx-auto px-5 sm:px-8 py-20 flex flex-col lg:flex-row items-center gap-12">
-                    <div className="flex-1 text-center lg:text-left">
-                        <div className="shimmer-line mb-6 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .6s .3s forwards'}}/>
-                        <h1 className="font-display text-white leading-[1.1] mb-5" style={{fontSize:'clamp(2.4rem,5.5vw,4rem)',opacity:0,animation:'fadeUp .7s .4s forwards'}}>
-                            Eloquente Catering<br/><span style={{color:'#f0aa0b'}}>for events with taste.</span>
+            <section className="relative flex items-center overflow-hidden bg-[#15110f]" style={{minHeight:'100vh',paddingTop: 68}}>
+                <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=85&w=1800" alt="Elegant catered reception service" className="absolute inset-0 w-full h-full object-cover opacity-55"/>
+                <div className="absolute inset-0 bg-gradient-to-r from-[#15110f] via-[#15110f]/88 to-[#720101]/42"/>
+                <div className="relative z-10 w-full max-w-7xl mx-auto grid gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[1.05fr_0.72fr] lg:items-end">
+                    <div className="text-center lg:text-left">
+                        <p className="mb-5 text-xs font-black uppercase tracking-[0.24em] text-[#f0aa0b]" style={{opacity:0,animation:'fadeUp .6s .25s forwards'}}>Eloquente Catering Services</p>
+                        <h1 className="font-display text-white leading-[1.08] mb-5" style={{fontSize:'clamp(2.6rem,6vw,5.75rem)',opacity:0,animation:'fadeUp .7s .4s forwards'}}>
+                            Catering that makes the whole event feel considered.
                         </h1>
-                        <p className="text-white/85 text-base md:text-lg leading-relaxed max-w-lg mb-8 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .7s .55s forwards'}}>
+                        <p className="hidden">
                             Premium catering for weddings, corporate events, and private celebrations — crafted with precision, served with heart.
                         </p>
+                        <p className="text-white/85 text-base md:text-lg leading-relaxed max-w-xl mb-8 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .7s .55s forwards'}}>
+                            Premium menus, polished setup, transparent planning, and service teams prepared for weddings, company events, and private milestones.
+                        </p>
                         <div className="flex flex-col items-center gap-3 sm:flex-row lg:items-start" style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
-                            <button onClick={()=>router.get('/book')} className="glow-gold bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-all shadow-lg hover:shadow-xl">
+                            <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
                                 Book Eloquente Now →
                             </button>
-                            <button onClick={()=>router.get('/food-tasting')} className="rounded-full border border-white/25 bg-white/10 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white backdrop-blur transition-all hover:bg-white hover:text-[#720101]">
+                            <button onClick={()=>router.get('/food-tasting')} className="rounded-full border border-white/25 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:border-[#f0aa0b] hover:text-[#f0aa0b]">
                                 Book Tasting
                             </button>
                         </div>
                     </div>
-                    <div className="hidden lg:block flex-1 max-w-md" style={{opacity:0,animation:'fadeUp .8s .6s forwards'}}>
-                        <div className="relative float-anim">
-                            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/10">
-                                <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-4">Service Proof</p>
+                    <div className="hidden lg:block" style={{opacity:0,animation:'fadeUp .8s .6s forwards'}}>
+                        <div className="rounded-2xl border border-white/10 bg-[#15110f]/90 p-8 shadow-2xl shadow-black/20">
+                                <p className="text-[#f0aa0b] text-xs font-black uppercase tracking-widest mb-4">Service Proof</p>
                                 <div className="space-y-5">
                                     {[{n:'Events Catered',v:500,s:'+'},{n:'Happy Clients',v:420,s:'+'},{n:'Years of Excellence',v:15,s:''}].map((s,i)=>(
                                         <div key={i} className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -283,7 +319,6 @@ const LandingPage = () => {
                                         </div>
                                     ))}
                                 </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -293,15 +328,21 @@ const LandingPage = () => {
                 `}</style>
             </section>
 
+            <FloatingJourneyTracker bookings={journeyData.bookings} payments={journeyData.payments} />
+
             {/* TRUST BAR (marquee) */}
-            <div className="overflow-hidden border-y border-[#f0aa0b]/15" style={{background:'linear-gradient(90deg, #720101, #5a0101, #720101)'}}>
-                <div className="marquee-track flex items-center whitespace-nowrap py-3.5" style={{width:'max-content'}}>
+            <div className="relative overflow-hidden border-y border-[#720101]/10 bg-[#fffaf3]">
+                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-[#fffaf3] to-transparent" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-[#fffaf3] to-transparent" />
+                <div className="marquee-track flex items-center whitespace-nowrap py-4" style={{width:'max-content'}}>
                     {[...Array(2)].map((_,r)=>(
                         <React.Fragment key={r}>
                             {['500+ Events Catered','Weddings & Corporate','Custom Menus','Transparent Pricing','Online Booking','Budget Optimization','15 Years Experience','Metro Manila & Provinces'].map((t,i)=>(
                                 <React.Fragment key={i}>
-                                    <span className="text-white/70 text-[11px] font-semibold uppercase tracking-[.2em] mx-5">{t}</span>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-[#f0aa0b]/40 mx-1 inline-block" />
+                                    <span className="mx-2 inline-flex items-center gap-3 rounded-full border border-[#720101]/10 bg-white px-5 py-2.5 text-[11px] font-black uppercase tracking-[.18em] text-[#720101] shadow-sm">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-[#f0aa0b]" />
+                                        {t}
+                                    </span>
                                 </React.Fragment>
                             ))}
                         </React.Fragment>
@@ -311,13 +352,50 @@ const LandingPage = () => {
 
             {/* USP - Alternating layout */}
             <section className="py-24 bg-white overflow-hidden">
-                <div className="max-w-6xl mx-auto px-5 sm:px-8">
-                    <Rv><div className="text-center mb-20">
-                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-[.2em] mb-3">Why Eloquente</p>
-                        <h2 className="font-display text-[#1a1a1a] text-3xl md:text-4xl">Built Around Smarter Catering</h2>
+                <div className="max-w-7xl mx-auto px-5 sm:px-8">
+                    <Rv><div className="mb-14 grid gap-8 lg:grid-cols-[0.75fr_1fr] lg:items-end">
+                        <div>
+                            <p className="text-[#720101] text-xs font-black uppercase tracking-[.22em] mb-3">Why Eloquente</p>
+                            <h2 className="font-display text-[#1a1a1a] text-3xl md:text-5xl leading-tight">Built Around Smarter Catering</h2>
+                        </div>
+                        <p className="max-w-2xl text-sm font-medium leading-7 text-gray-600">
+                            ECS combines full-service catering polish with planning tools that help you understand availability, pricing, menu fit, and payment timing before you commit.
+                        </p>
                     </div></Rv>
 
-                    <div className="space-y-20">
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        {[
+                            {title:'Budget-aware planning',text:'Set a practical range and see how menu choices, guest count, and package decisions affect the event total.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=900'},
+                            {title:'Menus shaped around the event',text:'Build a selection that reflects the occasion, service style, and guest needs without losing pricing clarity.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=900'},
+                        ].map((item,i)=>(
+                            <Rv key={item.title} d={`rv-d${i+1}`}>
+                                <article className="overflow-hidden rounded-3xl border border-gray-100 bg-[#faf7f2] shadow-sm">
+                                    <img src={item.img} alt={item.title} className="h-72 w-full object-cover"/>
+                                    <div className="p-7">
+                                        <h3 className="font-display text-2xl font-bold text-[#1a1a1a]">{item.title}</h3>
+                                        <p className="mt-3 text-sm font-medium leading-7 text-gray-600">{item.text}</p>
+                                    </div>
+                                </article>
+                            </Rv>
+                        ))}
+                    </div>
+
+                    <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                        {[
+                            ['Decision support', 'Availability, estimates, payment schedules, and booking status stay visible so planning does not depend on guesswork.'],
+                            ['Operational safeguards', 'Dietary notes, venue details, schedule changes, and sourcing timelines are handled in the workflow before event day.'],
+                        ].map(([title,text],i)=>(
+                            <Rv key={title} d={`rv-d${i+3}`}>
+                                <div className="rounded-2xl border border-[#720101]/10 bg-white p-6 shadow-sm">
+                                    <p className="text-xs font-black uppercase tracking-[.2em] text-[#f0aa0b]">Planning Advantage</p>
+                                    <h3 className="mt-3 font-display text-xl font-bold text-[#720101]">{title}</h3>
+                                    <p className="mt-2 text-sm font-medium leading-6 text-gray-600">{text}</p>
+                                </div>
+                            </Rv>
+                        ))}
+                    </div>
+
+                    <div className="hidden">
                         {[
                             {icon:<IcoBudget c="#f0aa0b"/>,title:'Smart Budget Maximizer',text:'Our system stretches every peso — matching the best dishes to your budget without cutting corners. You set the limit, we maximize the feast.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=500'},
                             {icon:<IcoMenu c="#f0aa0b"/>,title:'Dynamic Menu Generation',text:'Menus automatically adapt to your event type, headcount, and dietary needs. Every plate feels curated, never cookie-cutter.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=500'},
@@ -380,6 +458,43 @@ const LandingPage = () => {
                             Browse Full Menu <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
                         </Link>
                     </div></Rv>
+                </div>
+            </section>
+
+            {/* AMENITIES */}
+            <section className="bg-white py-24">
+                <div className="mx-auto grid max-w-7xl gap-10 px-5 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                    <Rv>
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[.22em] text-[#720101]">Amenities & Setup</p>
+                            <h2 className="mt-4 font-display text-3xl font-bold leading-tight text-[#1a1a1a] md:text-5xl">
+                                The event experience is more than the menu.
+                            </h2>
+                            <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-gray-600">
+                                See what is prepared around the food: service flow, table arrangements, buffet presentation, staffing expectations, and venue-ready details that help the day feel organized from arrival to cleanup.
+                            </p>
+                            <button onClick={() => router.get('/amenities')} className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#720101] px-8 py-3.5 text-sm font-black uppercase tracking-wider text-white transition-colors hover:bg-[#5a0101]">
+                                View Amenities
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+                            </button>
+                        </div>
+                    </Rv>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        {[
+                            ['Buffet Presentation', 'Coordinated stations, serving flow, and polished table styling.'],
+                            ['Service Crew', 'Assigned staff prepared for guest volume, timing, and venue needs.'],
+                            ['Venue Details', 'Setup notes for access, high-rise logistics, serving windows, and cleanup.'],
+                            ['Guest Comfort', 'Practical expectations for lines, pacing, utensils, and event movement.'],
+                        ].map(([title, text], index) => (
+                            <Rv key={title} d={`rv-d${index + 1}`}>
+                                <div className="h-full rounded-2xl border border-[#720101]/10 bg-[#faf7f2] p-6">
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f0aa0b]/20 text-sm font-black text-[#720101]">{index + 1}</span>
+                                    <h3 className="mt-5 font-display text-xl font-bold text-[#1a1a1a]">{title}</h3>
+                                    <p className="mt-3 text-sm font-medium leading-6 text-gray-600">{text}</p>
+                                </div>
+                            </Rv>
+                        ))}
+                    </div>
                 </div>
             </section>
 
@@ -500,26 +615,43 @@ const LandingPage = () => {
             </section>
 
             {/* TESTIMONIALS */}
-            <section className="py-24 bg-white">
-                <div className="max-w-5xl mx-auto px-5 sm:px-8">
-                    <Rv><div className="text-center mb-14">
-                        <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-[.2em] mb-3">Social Proof</p>
-                        <h2 className="font-display text-[#1a1a1a] text-3xl md:text-4xl">Trusted by Hundreds</h2>
-                    </div></Rv>
-                    <div className="grid md:grid-cols-3 gap-6">
+            <section className="bg-[#faf7f2] py-24">
+                <div className="max-w-7xl mx-auto grid gap-10 px-5 sm:px-8 lg:grid-cols-[0.82fr_1.18fr]">
+                    <Rv>
+                        <div className="self-start">
+                            <p className="text-[#720101] text-xs font-black uppercase tracking-[.22em] mb-3">Social Proof</p>
+                            <h2 className="font-display text-[#1a1a1a] text-3xl md:text-5xl leading-tight">Trusted by families, planners, and teams.</h2>
+                            <p className="mt-5 text-sm font-medium leading-7 text-gray-600">
+                                Clients choose Eloquente for polished service, clear planning, and the confidence that event details are handled before the day begins.
+                            </p>
+                            <div className="mt-8 grid grid-cols-3 gap-1 overflow-hidden rounded-2xl border border-[#720101]/10 bg-[#720101]/10">
+                                {[['500+','events'],['420+','clients'],['15','years']].map(([value,label])=>(
+                                    <div key={label} className="bg-white p-5">
+                                        <p className="font-display text-3xl font-bold text-[#720101]">{value}</p>
+                                        <p className="mt-1 text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </Rv>
+                    <div className="grid gap-5">
                         {[
                             {name:'Maria Santos',role:'Bride · Dec 2025',text:'Eloquente made our wedding reception flawless. 350 guests served on time, every dish was incredible. Our families still talk about the lechon.'},
                             {name:'James Reyes',role:'HR Director · Accenture PH',text:"We've used them for three annual company dinners. Consistent quality, transparent pricing, and the booking system is genuinely useful."},
                             {name:'Angela Cruz',role:'Event Planner',text:"As a planner, I need reliable caterers. Eloquente's budget tool helped my client get premium food within a tight budget. Highly recommended."},
                         ].map((t,i)=>(
                             <Rv key={i} d={`rv-d${i+1}`}>
-                                <div className="group relative rounded-2xl border border-gray-100 p-7 h-full flex flex-col hover:border-[#f0aa0b]/30 transition-colors duration-500">
-                                    <div className="absolute top-6 right-6 text-5xl text-[#f0aa0b]/10 font-serif leading-none">"</div>
-                                    <div className="flex gap-0.5 mb-4">{[1,2,3,4,5].map(j=><svg key={j} className="w-4 h-4 text-[#f0aa0b]" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}</div>
-                                    <p className="text-[#1a1a1a]/55 text-sm leading-relaxed flex-1 relative z-10">"{t.text}"</p>
-                                    <div className="mt-6 pt-4 border-t border-gray-50 flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-full bg-[#720101]/10 flex items-center justify-center text-[#720101] font-bold text-sm">{t.name[0]}</div>
-                                        <div><p className="text-[#1a1a1a] text-sm font-semibold">{t.name}</p><p className="text-[#1a1a1a]/35 text-xs">{t.role}</p></div>
+                                <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                                    <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                                        <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#720101]/8 text-[#720101] font-bold">{t.name[0]}</div>
+                                        <div>
+                                            <div className="flex gap-0.5 mb-3">{[1,2,3,4,5].map(j=><svg key={j} className="w-4 h-4 text-[#f0aa0b]" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>)}</div>
+                                            <p className="text-sm font-medium leading-7 text-gray-600">"{t.text}"</p>
+                                            <div className="mt-4">
+                                                <p className="text-sm font-bold text-[#1a1a1a]">{t.name}</p>
+                                                <p className="text-xs font-semibold text-gray-400">{t.role}</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </Rv>
@@ -529,14 +661,15 @@ const LandingPage = () => {
             </section>
 
             {/* FINAL CTA */}
-            <section className="relative py-28 overflow-hidden" style={{background:'linear-gradient(135deg,#720101 0%,#4a0000 50%,#1a1a1a 100%)'}}>
-                <div className="absolute inset-x-0 top-0 h-1 bg-[#f0aa0b]/70"/>
-                <div className="relative z-10 max-w-xl mx-auto px-5 text-center">
+            <section className="hidden">
+                <img src="https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=85&w=1800" alt="Formal celebration table setup" className="absolute inset-0 h-full w-full object-cover opacity-24"/>
+                <div className="absolute inset-0 bg-[#15110f]/82"/>
+                <div className="relative z-10 max-w-7xl mx-auto px-5 sm:px-8">
                     <Rv>
-                        <div className="shimmer-line mx-auto mb-8"/>
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">Ready when you are</p>
                         <h2 className="font-display text-white text-3xl md:text-4xl lg:text-5xl leading-tight mb-5">Let's make your next event unforgettable.</h2>
                         <p className="text-white/40 mb-10 max-w-sm mx-auto">From planning to cleanup — we handle every detail so you enjoy the moment.</p>
-                        <button onClick={()=>router.get('/book')} className="glow-gold bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-12 rounded-full text-sm uppercase tracking-wider transition-all shadow-lg hover:shadow-xl">
+                        <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
                             Book Eloquente Now →
                         </button>
                     </Rv>
@@ -544,7 +677,7 @@ const LandingPage = () => {
             </section>
 
             {/* FOOTER */}
-            <footer className="bg-[#15110f] text-white py-12">
+            <footer className="hidden">
                 <div className="max-w-6xl mx-auto px-5 sm:px-8 flex flex-col md:flex-row items-center justify-between gap-8">
                     <img src={logoImg} alt="Eloquente" className="h-10 w-auto opacity-80"/>
                     <div className="flex flex-wrap gap-6 text-sm font-semibold text-white/45">
@@ -555,6 +688,8 @@ const LandingPage = () => {
                     <p className="text-white/20 text-xs">© 2026 Eloquente Catering Services</p>
                 </div>
             </footer>
+
+            <Footer />
 
             {/* Chat Bubble */}
             {user && <ChatBubble user={user} />}

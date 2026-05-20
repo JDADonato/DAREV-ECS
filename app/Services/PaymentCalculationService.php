@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Booking;
+use App\Models\BusinessRule;
+use App\Models\Payment;
 use Carbon\Carbon;
 
 class PaymentCalculationService
@@ -20,6 +22,13 @@ class PaymentCalculationService
         
         $daysUntilEvent = $createdAt->diffInDays($eventDate, false);
         $totalCost = (float) $booking->total_cost;
+        $rules = BusinessRule::getActive();
+        $reservationPct = (float) ($rules->reservation_fee_percentage ?? 10);
+        $downPaymentPct = (float) ($rules->downpayment_percentage ?? 70);
+        $finalPct = (float) ($rules->final_payment_percentage ?? 20);
+        $reservationHours = (int) ($rules->reservation_validity_hours ?? 24);
+        $downPaymentDueDays = (int) ($rules->downpayment_due_days ?? 30);
+        $finalDueDays = (int) ($rules->final_payment_due_days ?? 10);
 
         // Rush 2: Event is less than 10 days away
         if ($daysUntilEvent <= 10) {
@@ -28,28 +37,29 @@ class PaymentCalculationService
                     'name' => 'Final',
                     'percentage' => 100,
                     'amount' => $totalCost,
-                    'due_date' => now()->addHours(24)->toIso8601String(), // Due within 24 hours
+                    'due_date' => now()->addHours($reservationHours)->toIso8601String(),
                     'description' => '100% Full Payment required immediately for rush events.',
                 ]
             ];
         }
 
         // Rush 1: Event is less than 1 month, but > 10 days away
-        if ($daysUntilEvent <= 30) {
+        if ($daysUntilEvent <= $downPaymentDueDays) {
+            $rushPct = $reservationPct + $downPaymentPct;
             return [
                 [
                     'name' => 'DownPayment',
-                    'percentage' => 80,
-                    'amount' => $totalCost * 0.80,
-                    'due_date' => now()->addHours(24)->toIso8601String(),
-                    'description' => 'Because your event is less than a month away, the 10% Reservation Fee and 70% Down Payment are combined into a single 80% payment required immediately to secure the date.',
+                    'percentage' => $rushPct,
+                    'amount' => $totalCost * ($rushPct / 100),
+                    'due_date' => now()->addHours($reservationHours)->toIso8601String(),
+                    'description' => "Because your event is within {$downPaymentDueDays} days, the reservation fee and down payment are combined into a single {$rushPct}% payment required immediately to secure the date.",
                 ],
                 [
                     'name' => 'Final',
-                    'percentage' => 20,
-                    'amount' => $totalCost * 0.20,
-                    'due_date' => $eventDate->copy()->subDays(10)->toIso8601String(),
-                    'description' => '20% Final Balance due 10 days before the event.',
+                    'percentage' => $finalPct,
+                    'amount' => $totalCost * ($finalPct / 100),
+                    'due_date' => $eventDate->copy()->subDays($finalDueDays)->toIso8601String(),
+                    'description' => "{$finalPct}% Final Balance due {$finalDueDays} days before the event.",
                 ]
             ];
         }
@@ -58,26 +68,88 @@ class PaymentCalculationService
         return [
             [
                 'name' => 'Reservation',
-                'percentage' => 10,
-                'amount' => $totalCost * 0.10,
-                'due_date' => now()->addHours(24)->toIso8601String(),
-                'description' => '10% Reservation Fee to lock in your date.',
+                'percentage' => $reservationPct,
+                'amount' => $totalCost * ($reservationPct / 100),
+                'due_date' => now()->addHours($reservationHours)->toIso8601String(),
+                'description' => "{$reservationPct}% Reservation Fee to lock in your date.",
             ],
             [
                 'name' => 'DownPayment',
-                'percentage' => 70,
-                'amount' => $totalCost * 0.70,
-                'due_date' => $eventDate->copy()->subMonth()->toIso8601String(),
-                'description' => '70% Down Payment due 1 month before the event.',
+                'percentage' => $downPaymentPct,
+                'amount' => $totalCost * ($downPaymentPct / 100),
+                'due_date' => $eventDate->copy()->subDays($downPaymentDueDays)->toIso8601String(),
+                'description' => "{$downPaymentPct}% Down Payment due {$downPaymentDueDays} days before the event.",
             ],
             [
                 'name' => 'Final',
-                'percentage' => 20,
-                'amount' => $totalCost * 0.20,
-                'due_date' => $eventDate->copy()->subDays(10)->toIso8601String(),
-                'description' => '20% Final Balance due 10 days before the event.',
+                'percentage' => $finalPct,
+                'amount' => $totalCost * ($finalPct / 100),
+                'due_date' => $eventDate->copy()->subDays($finalDueDays)->toIso8601String(),
+                'description' => "{$finalPct}% Final Balance due {$finalDueDays} days before the event.",
             ]
         ];
+    }
+
+    /**
+     * Bring unpaid payment rows back in line with the current rush/standard schedule.
+     * This fixes older rush bookings that were saved as 70/20 or 20 instead of 80/20 or 100.
+     */
+    public function syncPendingTranches(Booking $booking): void
+    {
+        $tranches = collect($this->calculateTranches($booking));
+
+        if ($tranches->isEmpty() || (float) $booking->total_cost <= 0) {
+            return;
+        }
+
+        $booking->loadMissing('payments');
+        $payments = $booking->payments;
+        $lockedStatuses = ['Paid', 'Verified', 'Refunded'];
+        $pendingStatuses = ['Pending', 'Failed', 'Rejected'];
+        $hasLockedPayments = $payments->contains(fn (Payment $payment) => in_array($payment->status, $lockedStatuses, true));
+
+        // Only remove obsolete rows when nothing has been paid yet. Once money moved, preserve the audit trail.
+        if (!$hasLockedPayments) {
+            $expectedTypes = $tranches->pluck('name')->all();
+            $booking->payments()
+                ->whereNotIn('payment_type', $expectedTypes)
+                ->whereIn('status', $pendingStatuses)
+                ->delete();
+        }
+
+        foreach ($tranches as $tranche) {
+            $payment = $booking->payments()
+                ->where('payment_type', $tranche['name'])
+                ->whereIn('status', $pendingStatuses)
+                ->orderBy('id')
+                ->first();
+
+            if (!$payment) {
+                if ($hasLockedPayments) {
+                    continue;
+                }
+
+                $booking->payments()->create([
+                    'amount' => round((float) $tranche['amount'], 2),
+                    'payment_method' => 'Pending',
+                    'status' => 'Pending',
+                    'payment_type' => $tranche['name'],
+                    'due_date' => Carbon::parse($tranche['due_date'])->toDateString(),
+                ]);
+
+                continue;
+            }
+
+            $expectedAmount = round((float) $tranche['amount'], 2);
+            $currentAmount = round((float) $payment->amount, 2);
+            if ($currentAmount !== $expectedAmount) {
+                $payment->forceFill([
+                    'amount' => $expectedAmount,
+                ])->save();
+            }
+        }
+
+        $booking->unsetRelation('payments');
     }
 
     /**
@@ -104,6 +176,8 @@ class PaymentCalculationService
      */
     public function getNextPaymentDue(Booking $booking): ?array
     {
+        $this->syncPendingTranches($booking);
+
         // Since tranches are generated dynamically at reservation time (Standard, Rush 1, Rush 2)
         // we can simply find the earliest pending payment from the database.
         $nextPayment = $booking->payments()
