@@ -93,7 +93,7 @@ const AuthShell = ({
 
     if (simple) {
         return (
-            <div className={`auth-page auth-page-${mode} auth-page-simple h-screen font-sans text-slate-950`}>
+            <div className={`auth-page auth-page-${mode} auth-page-simple h-screen overflow-hidden font-sans text-slate-950`}>
                 <img
                     src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=85&w=1800"
                     alt=""
@@ -102,7 +102,7 @@ const AuthShell = ({
                 <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,.96),rgba(255,250,243,.9)_46%,rgba(114,1,1,.22))]" />
                 <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-white via-white/82 to-transparent" />
 
-                <header className="absolute inset-x-0 top-0 z-10 mx-auto flex max-w-6xl items-center justify-between px-5 py-5 sm:px-8">
+                <header className="absolute inset-x-0 top-0 z-30 mx-auto flex max-w-6xl items-center justify-between px-5 py-5 sm:px-8">
                     <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/75 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm backdrop-blur transition hover:border-red-200 hover:text-red-900">
                         <ArrowLeft className="h-4 w-4" />
                         Home
@@ -110,7 +110,7 @@ const AuthShell = ({
                     <img src={logoImg} alt="Eloquente Catering" className="h-11 w-auto drop-shadow-sm" />
                 </header>
 
-                <main className="relative z-10 flex h-screen items-center justify-center overflow-hidden px-4 pb-5 pt-20 sm:px-6 sm:pb-6 sm:pt-20 lg:px-10">
+                <main className="relative z-20 flex h-screen items-center justify-center overflow-hidden px-4 pb-6 pt-20 sm:px-6 sm:pb-7 sm:pt-20 lg:px-10">
                     <div className="w-full max-w-[460px]">
                         <div className="auth-simple-intro auth-heading mb-3 text-center">
                             <p className="text-xs font-black uppercase tracking-[0.22em] text-amber-700">Eloquente Catering</p>

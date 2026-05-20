@@ -23,10 +23,9 @@ export default defineConfig({
         rollupOptions: {
             output: {
                 manualChunks: {
-                    // Split vendor libraries into their own heavily-cached chunks
-                    vendor: ['react', 'react-dom'],
                     inertia: ['@inertiajs/react'],
-                    ui: ['@headlessui/react', 'lucide-react', 'recharts']
+                    ui: ['@headlessui/react', 'lucide-react'],
+                    charts: ['recharts'],
                 }
             }
         }

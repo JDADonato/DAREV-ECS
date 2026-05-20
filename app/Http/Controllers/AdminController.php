@@ -176,7 +176,30 @@ class AdminController extends Controller
 
     public function getBookings()
     {
-        $bookings = Booking::with([
+        $bookings = Booking::query()
+            ->select([
+                'id',
+                'user_id',
+                'event_date',
+                'event_time',
+                'pax',
+                'budget',
+                'package_id',
+                'event_type',
+                'client_full_name',
+                'client_email',
+                'client_phone',
+                'venue_address_line',
+                'venue_street',
+                'venue_city',
+                'venue_province',
+                'venue_zip_code',
+                'total_cost',
+                'status',
+                'live_status',
+                'created_at',
+            ])
+            ->with([
                 'user:id,username,email,phone,role',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])

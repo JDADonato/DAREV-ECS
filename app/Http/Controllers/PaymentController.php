@@ -118,7 +118,7 @@ class PaymentController extends Controller
         ], 410);
     }
 
-    public function success(Request $request, PayMongoService $payMongo)
+    public function success(Request $request, PayMongoService $payMongo, PaymentCalculationService $paymentCalculation)
     {
         $validated = $request->validate([
             'booking_id' => ['required', 'integer', 'exists:bookings,id'],
@@ -155,7 +155,7 @@ class PaymentController extends Controller
                         ])->save();
 
                         if ($payment->booking) {
-                            $this->updateBookingMilestone($payment->booking);
+                            $paymentCalculation->updateBookingMilestone($payment->booking);
                         }
                     });
 
@@ -217,7 +217,7 @@ class PaymentController extends Controller
             ->first();
 
         if ($nextPayment && $nextPayment->id !== $payment->id) {
-            return 'Payments must be completed in the required 10%, 70%, then 20% order.';
+            return 'Payments must be completed in the required milestone order.';
         }
 
         return null;
@@ -322,62 +322,4 @@ class PaymentController extends Controller
             ?? 'PayMongo';
     }
 
-    private function updateBookingMilestone(Booking $booking): void
-    {
-        $booking->load('payments');
-
-        $totalPaid = (float) $booking->payments
-            ->whereIn('status', ['Paid', 'Verified'])
-            ->sum(fn (Payment $payment) => (float) $payment->amount);
-
-        $totalCost = (float) $booking->total_cost;
-        $paidRatio = $totalCost > 0 ? $totalPaid / $totalCost : 0;
-
-        $updates = [
-            'milestone_step' => $this->milestoneStep($paidRatio),
-            'live_status' => $this->bookingLiveStatus($paidRatio),
-        ];
-
-        if ($paidRatio >= 1) {
-            $updates['status'] = 'Completed';
-        } elseif ($paidRatio >= 0.10) {
-            $updates['status'] = 'Reserved';
-        }
-
-        $booking->update($updates);
-    }
-
-    private function milestoneStep(float $paidRatio): int
-    {
-        if ($paidRatio >= 1) {
-            return 5;
-        }
-
-        if ($paidRatio >= 0.80) {
-            return 4;
-        }
-
-        if ($paidRatio >= 0.10) {
-            return 3;
-        }
-
-        return 1;
-    }
-
-    private function bookingLiveStatus(float $paidRatio): string
-    {
-        if ($paidRatio >= 1) {
-            return 'Payment Complete';
-        }
-
-        if ($paidRatio >= 0.80) {
-            return 'Progress Payment Paid';
-        }
-
-        if ($paidRatio >= 0.10) {
-            return 'Reserved';
-        }
-
-        return 'Payment Pending';
-    }
 }

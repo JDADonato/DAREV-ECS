@@ -38,6 +38,7 @@ const Login = () => {
     return (
         <AuthShell
             mode="login"
+            compact
             simple
             brandTitle="Welcome back."
             brandCopy="Continue managing your event details, messages, and payments."

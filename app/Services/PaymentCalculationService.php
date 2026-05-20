@@ -207,4 +207,63 @@ class PaymentCalculationService
             'description' => $description,
         ];
     }
+
+    public function updateBookingMilestone(Booking $booking): void
+    {
+        $booking->load('payments');
+
+        $totalPaid = (float) $booking->payments
+            ->whereIn('status', ['Paid', 'Verified'])
+            ->sum(fn (Payment $payment) => (float) $payment->amount);
+
+        $totalCost = (float) $booking->total_cost;
+        $paidRatio = $totalCost > 0 ? $totalPaid / $totalCost : 0;
+
+        $updates = [
+            'milestone_step' => $this->milestoneStep($paidRatio),
+            'live_status' => $this->bookingLiveStatus($paidRatio),
+        ];
+
+        if ($paidRatio >= 1) {
+            $updates['status'] = 'Completed';
+        } elseif ($paidRatio >= 0.10) {
+            $updates['status'] = 'Reserved';
+        }
+
+        $booking->update($updates);
+    }
+
+    private function milestoneStep(float $paidRatio): int
+    {
+        if ($paidRatio >= 1) {
+            return 5;
+        }
+
+        if ($paidRatio >= 0.80) {
+            return 4;
+        }
+
+        if ($paidRatio >= 0.10) {
+            return 3;
+        }
+
+        return 1;
+    }
+
+    private function bookingLiveStatus(float $paidRatio): string
+    {
+        if ($paidRatio >= 1) {
+            return 'Payment Complete';
+        }
+
+        if ($paidRatio >= 0.80) {
+            return 'Progress Payment Paid';
+        }
+
+        if ($paidRatio >= 0.10) {
+            return 'Reserved';
+        }
+
+        return 'Payment Pending';
+    }
 }

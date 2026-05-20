@@ -32,19 +32,74 @@ class AccountingController extends Controller
      * Get all bookings with their payment schedules.
      * Ported from: accountingController.getBookingsWithPayments()
      */
-    public function getBookingsWithPayments()
+    public function getBookingsWithPayments(Request $request)
     {
-        $bookings = Booking::with(['user:id,username', 'payments' => function ($q) {
-                $q->whereNotNull('payment_type')
+        $query = Booking::query()
+            ->select([
+                'id',
+                'user_id',
+                'event_date',
+                'pax',
+                'budget',
+                'total_cost',
+                'status',
+                'client_full_name',
+                'client_email',
+                'client_phone',
+                'created_at',
+            ])
+            ->with(['user:id,username', 'payments' => function ($q) {
+                $q->select([
+                    'id',
+                    'booking_id',
+                    'amount',
+                    'payment_method',
+                    'status',
+                    'payment_type',
+                    'due_date',
+                    'verified_by',
+                    'verified_at',
+                    'paymongo_checkout_session_id',
+                    'paymongo_payment_id',
+                    'paymongo_reference_number',
+                ])
+                  ->whereNotNull('payment_type')
                   ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 ELSE 4 END")
                   ->orderBy('due_date')
                   ->orderBy('id');
             }])
             ->where('status', '!=', 'Cancelled')
-            ->where('status', '!=', 'Pending') // Do not show pending (unapproved) bookings
-            ->orderBy('event_date', 'asc')
-            ->get()
-            ->map(function ($b) {
+            ->where('status', '!=', 'Pending'); // Do not show pending (unapproved) bookings
+
+        if ($request->filled('search')) {
+            $search = trim((string) $request->query('search'));
+            $query->where(function ($inner) use ($search) {
+                $inner->where('client_full_name', 'like', "%{$search}%")
+                    ->orWhereHas('user', fn ($userQuery) => $userQuery->where('username', 'like', "%{$search}%"));
+                if (ctype_digit($search)) {
+                    $inner->orWhere('id', (int) $search);
+                }
+            });
+        }
+
+        if ($request->query('payment_status') === 'pending') {
+            $query->whereHas('payments', fn ($paymentQuery) => $paymentQuery->whereNotIn('status', ['Paid', 'Verified']));
+        } elseif ($request->query('payment_status') === 'complete') {
+            $query->whereHas('payments')
+                ->whereDoesntHave('payments', fn ($paymentQuery) => $paymentQuery->whereNotIn('status', ['Paid', 'Verified']));
+        }
+
+        match ($request->query('sort', 'eventDateSoonest')) {
+            'eventDateLatest' => $query->orderBy('event_date', 'desc'),
+            'bookingNewest' => $query->orderBy('created_at', 'desc'),
+            'bookingOldest' => $query->orderBy('created_at', 'asc'),
+            'clientAZ' => $query->orderBy('client_full_name', 'asc'),
+            'clientZA' => $query->orderBy('client_full_name', 'desc'),
+            default => $query->orderBy('event_date', 'asc'),
+        };
+
+        $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
+        $bookings = $query->paginate($perPage)->through(function ($b) {
                 return array_merge($b->toArray(), [
                     'totalCost' => $b->total_cost ?? $b->budget ?? 0,
                     'username'  => $b->user->username ?? null,
@@ -260,7 +315,20 @@ class AccountingController extends Controller
      */
     public function getLedger(Request $request)
     {
-        $query = Payment::with(['booking:id,event_date,client_full_name,package_id,user_id', 'booking.user:id,username'])
+        $query = Payment::query()
+            ->select([
+                'id',
+                'booking_id',
+                'amount',
+                'payment_method',
+                'status',
+                'payment_type',
+                'due_date',
+                'verified_by',
+                'verified_at',
+                'created_at',
+            ])
+            ->with(['booking:id,event_date,client_full_name,package_id,user_id', 'booking.user:id,username'])
             ->whereHas('booking', function ($q) {
                 $q->whereNotIn('status', ['Pending', 'Cancelled']); // Hide ledger entries for unapproved/cancelled bookings
             });

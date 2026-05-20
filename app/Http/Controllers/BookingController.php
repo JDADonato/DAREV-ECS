@@ -255,8 +255,8 @@ class BookingController extends Controller
                 \Illuminate\Support\Facades\DB::raw('COUNT(*) as event_count'),
                 \Illuminate\Support\Facades\DB::raw('SUM(pax) as total_pax')
             )
-            ->whereDate('event_date', '>', $today->toDateString())
-            ->whereDate('event_date', '<=', $rangeEnd->toDateString())
+            ->where('event_date', '>', $today->toDateString())
+            ->where('event_date', '<=', $rangeEnd->toDateString())
             ->whereNotIn('status', ['Cancelled', 'cancelled'])
             ->groupBy('booking_date')
             ->get();
@@ -280,11 +280,16 @@ class BookingController extends Controller
     {
         $rules = \App\Models\BusinessRule::getActive();
 
-        $eventCount = Booking::whereDate('event_date', $date)
+        $start = Carbon::parse($date)->toDateString();
+        $end = Carbon::parse($date)->addDay()->toDateString();
+
+        $eventCount = Booking::where('event_date', '>=', $start)
+            ->where('event_date', '<', $end)
             ->whereNotIn('status', ['Cancelled', 'cancelled'])
             ->count();
 
-        $totalPax = Booking::whereDate('event_date', $date)
+        $totalPax = Booking::where('event_date', '>=', $start)
+            ->where('event_date', '<', $end)
             ->whereNotIn('status', ['Cancelled', 'cancelled'])
             ->sum('pax') ?? 0;
 

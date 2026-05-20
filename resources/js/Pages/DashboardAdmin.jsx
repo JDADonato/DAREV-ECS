@@ -1,9 +1,23 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, ScatterChart, Scatter, ZAxis } from 'recharts';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
+import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import {
+    formatBookingRef,
+    formatCurrency,
+    formatDate,
+    formatDateTime,
+    formatFullAddress,
+    formatTime,
+    getBookingTotal,
+    getErrorMessage,
+    getSelectedDishes,
+    normalizeStatus,
+    paginate,
+} from '../utils/dashboardUtils';
 
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
@@ -92,7 +106,7 @@ const DashboardAdmin = () => {
 
     // Toast notification
     const [toast, setToast] = useState(null);
-    const requestCache = useRef(new Map());
+    const { bustCache: bustAdminCache, fetchCachedJson } = useCachedJson(['/api/admin/audits?per_page=100']);
     const [packagePage, setPackagePage] = useState(1);
     const [eventTypePage, setEventTypePage] = useState(1);
     const [menuItemPage, setMenuItemPage] = useState(1);
@@ -109,28 +123,6 @@ const DashboardAdmin = () => {
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
-    };
-
-    const fetchCachedJson = async (url, ttl = 45000) => {
-        const cached = requestCache.current.get(url);
-        const now = Date.now();
-        if (cached && now - cached.time < ttl) {
-            return cached.data;
-        }
-
-        const res = await fetch(url, { headers: {} });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            throw data;
-        }
-
-        requestCache.current.set(url, { data, time: now });
-        return data;
-    };
-
-    const bustAdminCache = (...urls) => {
-        urls.forEach(url => requestCache.current.delete(url));
-        requestCache.current.delete('/api/admin/audits?per_page=100');
     };
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
@@ -158,75 +150,6 @@ const DashboardAdmin = () => {
         }
     };
 
-    const formatDate = (value) => {
-        if (!value) return 'N/A';
-        return new Date(value).toLocaleDateString(undefined, {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
-    };
-    const formatDateTime = (value) => {
-        if (!value) return 'N/A';
-        return new Date(value).toLocaleString(undefined, {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-        });
-    };
-    const formatTime = (value) => {
-        if (!value) return 'Time TBD';
-        const text = String(value).trim();
-        const match = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
-        if (match) {
-            const date = new Date();
-            date.setHours(Number(match[1]), Number(match[2]), 0, 0);
-            return date.toLocaleTimeString(undefined, {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true,
-            });
-        }
-        return text.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (_, hour, minute) => {
-            const date = new Date();
-            date.setHours(Number(hour), Number(minute), 0, 0);
-            return date.toLocaleTimeString(undefined, {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true,
-            });
-        });
-    };
-
-    const getErrorMessage = (error, fallback) => {
-        if (error?.error) return error.error;
-        if (error?.message) return error.message;
-        const validationErrors = error?.errors ? Object.values(error.errors).flat() : [];
-        return validationErrors[0] || fallback;
-    };
-
-    const getBookingTotal = (booking) => Number(booking?.totalCost ?? booking?.total_cost ?? booking?.budget ?? 0);
-    const formatCurrency = (value) => `PHP ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const formatBookingRef = (id) => `#BK-${String(id).padStart(4, '0')}`;
-    const paginate = (items, page, perPage = rowsPerPage) => {
-        const total = Array.isArray(items) ? items.length : 0;
-        const totalPages = Math.max(1, Math.ceil(total / perPage));
-        const safePage = Math.min(Math.max(page, 1), totalPages);
-        const start = (safePage - 1) * perPage;
-
-        return {
-            items: (items || []).slice(start, start + perPage),
-            page: safePage,
-            totalPages,
-            total,
-            start: total === 0 ? 0 : start + 1,
-            end: Math.min(start + perPage, total),
-        };
-    };
-    const normalizeStatus = (status) => String(status || '').toLowerCase();
     const bookingStatusStyles = {
         pending: 'bg-amber-100 text-amber-800 border-amber-200',
         confirmed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -274,37 +197,6 @@ const DashboardAdmin = () => {
         },
     };
     const currentPage = pageMeta[activeTab] || pageMeta.dashboard;
-    const formatFullAddress = (booking) => {
-        if (!booking) return 'Not specified';
-        const parts = [
-            booking.venue_address_line,
-            booking.venue_street,
-            booking.venue_city,
-            booking.venue_province,
-            booking.venue_zip_code,
-        ].filter(Boolean);
-        return parts.length > 0 ? parts.join(', ') : 'Not specified';
-    };
-    const getSelectedDishes = (booking) => {
-        if (!booking?.selected_menu) return [];
-        try {
-            const menu = typeof booking.selected_menu === 'string'
-                ? JSON.parse(booking.selected_menu)
-                : booking.selected_menu;
-
-            return Object.entries(menu || {}).flatMap(([category, items]) => {
-                if (!Array.isArray(items)) return [];
-                return items.map((item) => ({
-                    category,
-                    name: typeof item === 'object' && item !== null ? (item.name || item.label || item.id) : item,
-                })).filter((item) => item.name);
-            });
-        } catch (error) {
-            console.error('Unable to parse selected menu', error);
-            return [];
-        }
-    };
-
     const bookingStats = useMemo(() => {
         const activeBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'confirmed');
         const pendingBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'pending');
@@ -384,12 +276,12 @@ const DashboardAdmin = () => {
         });
     }, [audits, auditSearch, auditRoleFilter]);
 
-    const paginatedPackages = paginate(packages, packagePage);
-    const paginatedEventTypes = paginate(eventTypes, eventTypePage);
-    const paginatedMenuItems = paginate(getMergedDishes(activeMenuCategory), menuItemPage);
-    const paginatedEmployees = paginate(employees, employeePage);
-    const paginatedCustomers = paginate(customers, customerPage);
-    const paginatedBookings = paginate(visibleBookings, bookingPage);
+    const paginatedPackages = paginate(packages, packagePage, rowsPerPage);
+    const paginatedEventTypes = paginate(eventTypes, eventTypePage, rowsPerPage);
+    const paginatedMenuItems = paginate(getMergedDishes(activeMenuCategory), menuItemPage, rowsPerPage);
+    const paginatedEmployees = paginate(employees, employeePage, rowsPerPage);
+    const paginatedCustomers = paginate(customers, customerPage, rowsPerPage);
+    const paginatedBookings = paginate(visibleBookings, bookingPage, rowsPerPage);
     const paginatedAudits = paginate(visibleAudits, auditPage, 12);
 
     const PaginationControls = ({ pageInfo, onPageChange }) => (
@@ -440,7 +332,7 @@ const DashboardAdmin = () => {
 
     useSmartRefresh({
         enabled: ['dashboard', 'analytics', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
-        interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 45000 : 30000,
+        interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
     });

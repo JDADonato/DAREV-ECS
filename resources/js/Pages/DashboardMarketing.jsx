@@ -6,6 +6,18 @@ import StaffMessaging from '../Components/common/StaffMessaging';
 import NotificationBell from '../Components/common/NotificationBell';
 import FlashToast from '../Components/common/FlashToast';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import {
+    formatDate,
+    formatFullAddress,
+    formatMoney,
+    formatTime,
+    getBookingValue,
+    getDateKey,
+    getDaysInMonth,
+    getFirstDayOfMonth,
+    getSelectedDishes,
+    titleCase,
+} from '../utils/dashboardUtils';
 
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
@@ -51,7 +63,7 @@ const DashboardMarketing = () => {
 
     useSmartRefresh({
         enabled: true,
-        interval: activeTab === 'settings' ? 60000 : 30000,
+        interval: activeTab === 'settings' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'settings') {
@@ -251,91 +263,6 @@ const DashboardMarketing = () => {
         }
     };
 
-    // Calendar Helper Functions
-    const getDaysInMonth = (date) => {
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        return new Date(year, month + 1, 0).getDate();
-    };
-
-    const getFirstDayOfMonth = (date) => {
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        return new Date(year, month, 1).getDay();
-    };
-
-    const formatFullAddress = (booking) => {
-        const parts = [
-            booking.venue_address_line,
-            booking.venue_street,
-            booking.venue_city,
-            booking.venue_province,
-            booking.venue_zip_code
-        ].filter(Boolean);
-        return parts.length > 0 ? parts.join(', ') : 'Not specified';
-    };
-
-    const formatMoney = (value) => Number(value || 0).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-
-    const formatDate = (value) => {
-        if (!value) return 'N/A';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return String(value);
-        return date.toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-        });
-    };
-
-    const getDateKey = (value) => {
-        if (!value) return '';
-        return String(value).substring(0, 10);
-    };
-
-    const formatTime = (value) => {
-        if (!value) return 'Time TBD';
-        const text = String(value).trim();
-        if (/\b(am|pm)\b/i.test(text)) {
-            return text
-                .replace(/\s+/g, ' ')
-                .replace(/\b(am|pm)\b/gi, match => match.toUpperCase());
-        }
-        const match = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
-        if (match) {
-            const date = new Date();
-            date.setHours(Number(match[1]), Number(match[2]), 0, 0);
-            return date.toLocaleTimeString(undefined, {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true,
-            });
-        }
-        return text.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (_, hour, minute) => {
-            const date = new Date();
-            date.setHours(Number(hour), Number(minute), 0, 0);
-            return date.toLocaleTimeString(undefined, {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true,
-            });
-        });
-    };
-
-    const getBookingValue = (booking) => Number(booking?.total_cost || booking?.budget || 0);
-
-    const titleCase = (value) => {
-        if (!value) return '';
-        return String(value)
-            .replace(/[-_]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .replace(/\b\w/g, char => char.toUpperCase());
-    };
-
     const getCalendarEventLabel = (booking) => {
         const time = formatTime(booking.event_time);
         const eventType = titleCase(booking.event_type || booking.package_type || booking.type) || 'Event';
@@ -366,26 +293,6 @@ const DashboardMarketing = () => {
             booking.status ? `Status: ${booking.status}` : null,
         ].filter(Boolean);
         return parts.join('\n');
-    };
-
-    const getSelectedDishes = (booking) => {
-        if (!booking?.selected_menu) return [];
-        try {
-            const menu = typeof booking.selected_menu === 'string'
-                ? JSON.parse(booking.selected_menu)
-                : booking.selected_menu;
-
-            return Object.entries(menu || {}).flatMap(([category, items]) => {
-                if (!Array.isArray(items)) return [];
-                return items.map((item) => ({
-                    category,
-                    name: typeof item === 'object' && item !== null ? (item.name || item.label || item.id) : item,
-                })).filter((item) => item.name);
-            });
-        } catch (error) {
-            console.error('Unable to parse selected menu', error);
-            return [];
-        }
     };
 
     const [selectedBooking, setSelectedBooking] = useState(null);

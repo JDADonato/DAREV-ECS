@@ -1,9 +1,19 @@
+let menuItemsPromise = null;
+let customMenuItemsPromise = null;
+
 /**
  * Fetches all menu items from the database API and organizes them by category.
  * Returns a DISHES-like object with category keys.
  */
 
 export async function fetchMenuItemsFromAPI() {
+    if (menuItemsPromise) return menuItemsPromise;
+
+    menuItemsPromise = fetchMenuItemsFromAPINetwork();
+    return menuItemsPromise;
+}
+
+async function fetchMenuItemsFromAPINetwork() {
     try {
         const res = await fetch('/api/menu?per_page=100');
         if (res.ok) {
@@ -33,6 +43,7 @@ export async function fetchMenuItemsFromAPI() {
     } catch (error) {
         console.error('Error fetching menu items from API:', error);
     }
+    menuItemsPromise = null;
     return { starter: [], main: [], side: [], dessert: [], drink: [] };
 }
 
@@ -40,6 +51,13 @@ export async function fetchMenuItemsFromAPI() {
  * Fetches custom menu items from the legacy API endpoint (if needed).
  */
 export async function fetchCustomMenuItems() {
+    if (customMenuItemsPromise) return customMenuItemsPromise;
+
+    customMenuItemsPromise = fetchCustomMenuItemsNetwork();
+    return customMenuItemsPromise;
+}
+
+async function fetchCustomMenuItemsNetwork() {
     try {
         const res = await fetch('/api/menu-items');
         if (res.ok) {
@@ -48,6 +66,7 @@ export async function fetchCustomMenuItems() {
     } catch (error) {
         console.error('Error fetching custom menu items:', error);
     }
+    customMenuItemsPromise = null;
     return [];
 }
 
@@ -77,7 +96,7 @@ export function normalizeCustomItems(dbItems) {
 
 /**
  * Returns an organized menu object by category.
- * Now fetches from the database API instead of using static mockData.
+ * Fetches menu data from the database API.
  */
 export function getMergedDishes(customItems = []) {
     // If customItems are provided, organize them by category

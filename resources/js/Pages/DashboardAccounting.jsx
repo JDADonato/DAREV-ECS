@@ -31,6 +31,8 @@ const DashboardAccounting = () => {
     const [bookingSearchQuery, setBookingSearchQuery] = useState('');
     const [bookingSortOrder, setBookingSortOrder] = useState('eventDateSoonest');
     const [bookingPaymentFilter, setBookingPaymentFilter] = useState('all');
+    const [bookingPage, setBookingPage] = useState(1);
+    const [bookingPagination, setBookingPagination] = useState(null);
 
     useEffect(() => {
         if (activeTab === 'bookings') {
@@ -40,7 +42,11 @@ const DashboardAccounting = () => {
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
         }
-    }, [activeTab, ledgerFilter]);
+    }, [activeTab, ledgerFilter, bookingPage, bookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
+
+    useEffect(() => {
+        setBookingPage(1);
+    }, [bookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
 
     useEffect(() => {
         if (toast) {
@@ -51,7 +57,7 @@ const DashboardAccounting = () => {
 
     useSmartRefresh({
         enabled: true,
-        interval: activeTab === 'ledger' ? 45000 : 30000,
+        interval: activeTab === 'ledger' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'bookings') {
@@ -68,11 +74,25 @@ const DashboardAccounting = () => {
         if (!silent) setLoading(true);
         try {
             // Session auth - no token needed
-            const res = await fetch('/api/accounting/bookings', {
+            const query = new URLSearchParams({
+                page: bookingPage,
+                per_page: 25,
+                search: bookingSearchQuery,
+                sort: bookingSortOrder,
+                payment_status: bookingPaymentFilter,
+            }).toString();
+            const res = await fetch('/api/accounting/bookings?' + query, {
                 headers: { }
             });
             const data = await res.json();
-            setBookings(Array.isArray(data) ? data : []);
+            setBookings(Array.isArray(data) ? data : (data.data || []));
+            setBookingPagination(Array.isArray(data) ? null : {
+                currentPage: data.current_page,
+                lastPage: data.last_page,
+                total: data.total,
+                from: data.from,
+                to: data.to,
+            });
         } catch (error) {
             console.error("Error fetching bookings:", error);
         } finally {
@@ -348,44 +368,7 @@ const DashboardAccounting = () => {
                                     </div>
                                 </div>
                                 {(() => {
-                                    const filteredBookings = bookings
-                                        .filter(b => {
-                                            if (!bookingSearchQuery) return true;
-                                            const searchLower = bookingSearchQuery.toLowerCase();
-                                            return (b.client_full_name && b.client_full_name.toLowerCase().includes(searchLower)) ||
-                                                (b.username && b.username.toLowerCase().includes(searchLower)) ||
-                                                (b.id && b.id.toString().includes(searchLower));
-                                        })
-                                        .filter(b => {
-                                            const payments = b.payments || [];
-                                            const hasPayments = payments.length > 0;
-                                            const hasPending = payments.some((payment) => !isPaidStatus(payment.status));
-                                            const isComplete = hasPayments && payments.every((payment) => isPaidStatus(payment.status));
-
-                                            if (bookingPaymentFilter === 'pending') return hasPending;
-                                            if (bookingPaymentFilter === 'complete') return isComplete;
-                                            return true;
-                                        })
-                                        .sort((a, b) => {
-                                            if (bookingSortOrder === 'eventDateSoonest') {
-                                                return new Date(a.event_date) - new Date(b.event_date);
-                                            } else if (bookingSortOrder === 'eventDateLatest') {
-                                                return new Date(b.event_date) - new Date(a.event_date);
-                                            } else if (bookingSortOrder === 'bookingNewest') {
-                                                return new Date(b.created_at) - new Date(a.created_at);
-                                            } else if (bookingSortOrder === 'bookingOldest') {
-                                                return new Date(a.created_at) - new Date(b.created_at);
-                                            } else if (bookingSortOrder === 'clientAZ') {
-                                                const nameA = a.client_full_name || a.username || '';
-                                                const nameB = b.client_full_name || b.username || '';
-                                                return nameA.localeCompare(nameB);
-                                            } else if (bookingSortOrder === 'clientZA') {
-                                                const nameA = a.client_full_name || a.username || '';
-                                                const nameB = b.client_full_name || b.username || '';
-                                                return nameB.localeCompare(nameA);
-                                            }
-                                            return 0;
-                                        });
+                                    const filteredBookings = bookings;
 
                                     if (filteredBookings.length === 0) {
                                         return <div className="p-12 text-center text-slate-500 bg-[#fffaf3] border border-amber-100 rounded-xl">No bookings match your search.</div>;
@@ -603,6 +586,34 @@ const DashboardAccounting = () => {
                                         </div>
                                     );
                                 })()}
+                                {bookingPagination && bookingPagination.lastPage > 1 && (
+                                    <div className="mt-6 flex flex-col gap-3 border-t border-amber-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <p className="text-sm font-medium text-slate-500">
+                                            Showing {bookingPagination.from || 0}-{bookingPagination.to || 0} of {bookingPagination.total || 0} bookings
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                disabled={bookingPagination.currentPage <= 1}
+                                                onClick={() => setBookingPage((page) => Math.max(page - 1, 1))}
+                                                className="rounded-lg border border-[#720101]/10 bg-white px-3 py-2 text-sm font-bold text-slate-600 transition-colors hover:text-[#720101] disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Previous
+                                            </button>
+                                            <span className="rounded-lg bg-[#fffaf3] px-3 py-2 text-sm font-black text-[#720101]">
+                                                {bookingPagination.currentPage} / {bookingPagination.lastPage}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={bookingPagination.currentPage >= bookingPagination.lastPage}
+                                                onClick={() => setBookingPage((page) => Math.min(page + 1, bookingPagination.lastPage))}
+                                                className="rounded-lg border border-[#720101]/10 bg-white px-3 py-2 text-sm font-bold text-slate-600 transition-colors hover:text-[#720101] disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
