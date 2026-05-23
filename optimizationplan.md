@@ -4,6 +4,14 @@ Created: 2026-05-20
 
 ## Implementation Pass Completed
 
+Completed on 2026-05-23:
+
+- Inertia page resolution now uses one stable `import.meta.glob` map instead of rebuilding the page module map during every page resolve.
+- Dashboard cached JSON helper now de-duplicates in-flight requests, so fast tab switches or refresh overlap do not send duplicate identical API calls.
+- Marketing dashboard calendar rendering now builds a date-indexed booking map once per booking/month update instead of filtering the full booking list for every calendar cell.
+- Client dashboard now builds a `paymentsByBookingId` map once and reuses the active booking payments across summary, journey, and payment sections.
+- The new announcement CMS tables and routes were migrated and verified; customer announcement reads are tracked with indexed relationships.
+
 Completed on 2026-05-20:
 
 - Production `.env.example` defaults were changed away from local/debug/database-backed settings and real-looking secrets were replaced with placeholders.

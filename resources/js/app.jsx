@@ -4,10 +4,11 @@ import { createInertiaApp } from '@inertiajs/react';
 import { createRoot } from 'react-dom/client';
 import DefaultLayout from './Layouts/DefaultLayout';
 
+const pages = import.meta.glob('./Pages/**/*.jsx');
+
 createInertiaApp({
     title: (title) => title ? `${title} - Eloquente Catering` : 'Eloquente Catering System',
     resolve: async (name) => {
-        const pages = import.meta.glob('./Pages/**/*.jsx');
         const page = await pages[`./Pages/${name}.jsx`]();
         // Assign DefaultLayout (which includes FlashToast) to every page
         // unless the page already defines its own layout

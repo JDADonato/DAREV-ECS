@@ -12,6 +12,8 @@ const CATEGORY_LABELS = {
 const BlueprintPanel = ({ bookingData, currentStep }) => {
     const {
         eventType,
+        eventName,
+        date,
         pax,
         time,
         duration = 4,
@@ -124,8 +126,8 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
                             </svg>
                         </div>
                         <div>
-                            <h3 className="text-white font-display font-bold text-lg tracking-wide">Booking Summary</h3>
-                            <p className="text-red-100/60 text-xs mt-0.5">Live event details</p>
+                            <h3 className="text-white font-display font-bold text-lg tracking-wide">Your Event Plan</h3>
+                            <p className="text-red-100/60 text-xs mt-0.5">Saved as you build</p>
                         </div>
                     </div>
                 </div>
@@ -152,6 +154,20 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
                                     <span className="text-gray-500 text-sm">Type</span>
                                     <span className={`text-sm font-medium ${eventType ? 'text-white' : 'text-gray-600 italic'}`}>
                                         {eventType || '—'}
+                                    </span>
+                                </div>
+                                {eventName && (
+                                    <div className="flex justify-between items-start">
+                                        <span className="text-gray-500 text-sm">Name</span>
+                                        <span className="max-w-[180px] text-right text-sm font-medium text-white">
+                                            {eventName}
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-500 text-sm">Date</span>
+                                    <span className={`text-sm font-medium ${date ? 'text-white' : 'text-gray-600 italic'}`}>
+                                        {date || '—'}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center">

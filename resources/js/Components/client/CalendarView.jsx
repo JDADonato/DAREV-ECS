@@ -1,135 +1,93 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Modal from '../common/Modal';
 
-const CalendarView = ({ bookingData, updateBooking, onNext }) => {
+let disabledDateCache = null;
+let disabledDatePromise = null;
+
+const QUICK_TIMES = [
+    { label: '8:00 AM', value: '08:00' },
+    { label: '10:00 AM', value: '10:00' },
+    { label: '12:00 PM', value: '12:00' },
+    { label: '2:00 PM', value: '14:00' },
+    { label: '4:00 PM', value: '16:00' },
+    { label: '6:00 PM', value: '18:00' },
+];
+
+const formatDateInput = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const parseStartTime = (value) => {
+    if (!value) return '';
+    if (/^\d{2}:\d{2}$/.test(value)) return value;
+
+    const match = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!match) return '';
+
+    let hour = Number(match[1]);
+    const minute = match[2];
+    const meridiem = match[3].toUpperCase();
+
+    if (meridiem === 'PM' && hour !== 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+
+    return `${String(hour).padStart(2, '0')}:${minute}`;
+};
+
+const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
     const [selectedDate, setSelectedDate] = useState(bookingData.date || '');
-    const [selectedTime, setSelectedTime] = useState(bookingData.time || '');
-    const [availability, setAvailability] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    // Issue 3: Pre-loaded disabled dates
-    const [disabledDates, setDisabledDates] = useState([]);
-    const [loadingDates, setLoadingDates] = useState(true);
-
-    const timeContainerRef = useRef(null);
-
-    // Custom Time Picker State
-    const [timeH, setTimeH] = useState('');
-    const [timeM, setTimeM] = useState('');
-    const [timeAmPm, setTimeAmPm] = useState('PM');
+    const [selectedTime, setSelectedTime] = useState(parseStartTime(bookingData.time));
     const [duration, setDuration] = useState(bookingData.duration || 4);
+    const [disabledDates, setDisabledDates] = useState(disabledDateCache || []);
+    const [loadingDates, setLoadingDates] = useState(!disabledDateCache);
+    const [checkingAvailability, setCheckingAvailability] = useState(false);
+    const [error, setError] = useState('');
+    const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '' });
 
-    // Issue 3: Fetch all disabled dates on mount
     useEffect(() => {
-        const fetchDisabledDates = async () => {
-            try {
-                const res = await fetch('/api/bookings/disabled-dates');
-                if (res.ok) {
-                    const data = await res.json();
-                    setDisabledDates(data.disabled_dates || []);
-                }
-            } catch (e) {
-                console.error('Failed to load disabled dates:', e);
-            } finally {
+        let cancelled = false;
+
+        if (disabledDateCache) {
+            setDisabledDates(disabledDateCache);
+            setLoadingDates(false);
+            return;
+        }
+
+        disabledDatePromise ||= fetch('/api/bookings/disabled-dates')
+            .then((res) => (res.ok ? res.json() : { disabled_dates: [] }))
+            .then((data) => {
+                disabledDateCache = data.disabled_dates || [];
+                return disabledDateCache;
+            })
+            .catch(() => []);
+
+        disabledDatePromise.then((dates) => {
+            if (!cancelled) {
+                setDisabledDates(dates);
                 setLoadingDates(false);
             }
+        });
+
+        return () => {
+            cancelled = true;
         };
-        fetchDisabledDates();
     }, []);
 
-    // Update parent immediately when duration changes for live summary
     useEffect(() => {
         updateBooking({ duration });
     }, [duration]);
 
-    // Initialize custom time picker from bookingData
-    useEffect(() => {
-        if (bookingData.time) {
-            const [h24, m] = bookingData.time.split(':').map(Number);
-            let h12 = h24 % 12;
-            h12 = h12 === 0 ? 12 : h12;
-            setTimeH(h12.toString());
-            setTimeM(m < 10 ? '0' + m : m.toString());
-            setTimeAmPm(h24 >= 12 ? 'PM' : 'AM');
-        }
-        if (bookingData.duration) {
-            setDuration(bookingData.duration);
-        }
+    const minDate = useMemo(() => {
+        const date = new Date();
+        date.setDate(date.getDate() + 7);
+        return formatDateInput(date);
     }, []);
 
-    // Sync to selectedTime whenever custom picker changes
-    useEffect(() => {
-        if (timeH !== '' && timeM !== '') {
-            let h24 = parseInt(timeH) || 12;
-            let mVal = parseInt(timeM) || 0;
-            if (timeAmPm === 'PM' && h24 !== 12) h24 += 12;
-            if (timeAmPm === 'AM' && h24 === 12) h24 = 0;
-            
-            const hStr = h24 < 10 ? '0' + h24 : h24;
-            const mStrFmt = mVal < 10 ? '0' + mVal : mVal;
-            setSelectedTime(`${hStr}:${mStrFmt}`);
-        } else {
-            setSelectedTime('');
-        }
-    }, [timeH, timeM, timeAmPm]);
-
-    // Prevent page scroll when using mouse wheel on time inputs
-    useEffect(() => {
-        const handleWheel = (e) => {
-            const target = e.target;
-            if (target && target.type === 'number' && target.classList.contains('custom-number-input')) {
-                e.preventDefault();
-                if (e.deltaY > 0) target.stepDown();
-                else target.stepUp();
-                
-                // Trigger React onChange
-                const event = new Event('input', { bubbles: true });
-                target.dispatchEvent(event);
-            }
-        };
-
-        const container = timeContainerRef.current;
-        if (container) {
-            container.addEventListener('wheel', handleWheel, { passive: false });
-        }
-        return () => {
-            if (container) container.removeEventListener('wheel', handleWheel);
-        };
-    }, []);
-
-    const handleHChange = (e) => {
-        let v = e.target.value;
-        if (v === '') { setTimeH(''); return; }
-        let num = parseInt(v);
-        if (num > 12) num = 12;
-        if (num < 1) num = 1;
-        setTimeH(num.toString());
-    };
-
-    const handleMChange = (e) => {
-        let v = e.target.value;
-        if (v === '') { setTimeM(''); return; }
-        let num = parseInt(v);
-        if (num > 59) num = 59;
-        if (num < 0) num = 0;
-        setTimeM(num.toString());
-    };
-
-    const handleTimeBlur = () => {
-        if (timeH === '') setTimeH('12');
-        if (timeM !== '') {
-            let num = parseInt(timeM);
-            setTimeM(num < 10 ? '0' + num : num.toString());
-        } else {
-            setTimeM('00');
-        }
-    };
-
-    const getMinDate = () => {
-        const today = new Date();
-        today.setDate(today.getDate() + 7);
-        return today.toISOString().split('T')[0];
-    };
+    const disabledDateSet = useMemo(() => new Set(disabledDates), [disabledDates]);
+    const isDateDisabled = (date) => disabledDateSet.has(date);
 
     const formatTimeRange = (timeStr, dur = duration) => {
         if (!timeStr) return '';
@@ -137,94 +95,101 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
 
         const formatAMPM = (h, m) => {
             const ampm = h >= 12 ? 'PM' : 'AM';
-            h = h % 12;
-            h = h ? h : 12;
-            const mStr = m < 10 ? '0' + m : m;
-            return `${h}:${mStr} ${ampm}`;
+            const hour = h % 12 || 12;
+            return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
         };
 
         const endHours = (hours + dur) % 24;
         return `${formatAMPM(hours, minutes)} - ${formatAMPM(endHours, minutes)}`;
     };
 
-    // Issue 3: Check if a date is in the disabled list
-    const isDateDisabled = (date) => disabledDates.includes(date);
-
-    const handleDateChange = async (e) => {
-        const date = e.target.value;
-
-        // Issue 3: Block disabled dates immediately — no per-date API call needed
-        if (isDateDisabled(date)) {
-            setSelectedDate(date);
-            setAvailability(null);
-            setError('Sorry, this date is fully booked or unavailable.');
-            return;
-        }
-
-        setSelectedDate(date);
-        setAvailability(null);
-        setError('');
-
-        if (date) {
-            setLoading(true);
-            try {
-                const response = await fetch(`/api/bookings/availability/${date}`);
-                const data = await response.json();
-
-                if (data.isFull) {
-                    setError('Sorry, this date is fully booked.');
-                } else {
-                    setAvailability(data);
-                }
-            } catch (err) {
-                console.error('Error fetching availability:', err);
-                setError('Failed to check availability. Please try again.');
-            } finally {
-                setLoading(false);
-            }
-        }
+    const formatDisplayDate = (dateStr) => {
+        if (!dateStr) return '';
+        return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
     };
 
-    const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '' });
+    const handleDateSelect = (date) => {
+        setSelectedDate(date);
+        if (isDateDisabled(date)) {
+            setError('That date is unavailable. Please choose another date.');
+            return;
+        }
+        setError('');
+    };
 
-    const handleNext = () => {
+    const checkAvailability = async () => {
+        if (isDateDisabled(selectedDate)) {
+            return { isFull: true };
+        }
+
+        const response = await fetch(`/api/bookings/availability/${selectedDate}`);
+        if (!response.ok) {
+            throw new Error('Unable to check availability');
+        }
+        return response.json();
+    };
+
+    const handleNext = async () => {
         if (!selectedDate || !selectedTime) {
             setModal({
                 isOpen: true,
-                title: 'Incomplete Selection',
-                message: 'Please select both a date and a time for your event.',
-                type: 'error'
+                title: 'Choose date and time',
+                message: 'Please select your event date and preferred start time.',
+                type: 'error',
             });
             return;
         }
-        if (error) {
+
+        if (error || isDateDisabled(selectedDate)) {
             setModal({
                 isOpen: true,
-                title: 'Invalid Date',
-                message: 'The selected date is unavailable. Please choose another date.',
-                type: 'error'
+                title: 'Date unavailable',
+                message: 'Please choose another event date.',
+                type: 'error',
             });
             return;
         }
-        if (availability) {
+
+        setCheckingAvailability(true);
+        try {
+            const availability = await checkAvailability();
+
+            if (availability.isFull) {
+                setError('That date is unavailable. Please choose another date.');
+                setModal({
+                    isOpen: true,
+                    title: 'Date unavailable',
+                    message: 'Please choose another event date.',
+                    type: 'error',
+                });
+                return;
+            }
+
             updateBooking({
                 date: selectedDate,
                 time: formatTimeRange(selectedTime),
-                duration: duration,
-                remainingPax: availability.remainingPax
+                duration,
+                remainingPax: availability.remainingPax,
             });
-        } else {
-            updateBooking({ 
-                date: selectedDate, 
-                time: formatTimeRange(selectedTime),
-                duration: duration
+            onNext(true);
+        } catch (err) {
+            setModal({
+                isOpen: true,
+                title: 'Could not check date',
+                message: 'Please try again in a moment.',
+                type: 'error',
             });
+        } finally {
+            setCheckingAvailability(false);
         }
-        onNext(true);
     };
 
     return (
-        <div className="flex flex-col h-full justify-between">
+        <div className="flex h-full flex-col justify-between">
             <Modal
                 isOpen={modal.isOpen}
                 onClose={() => setModal({ ...modal, isOpen: false })}
@@ -232,164 +197,125 @@ const CalendarView = ({ bookingData, updateBooking, onNext }) => {
                 message={modal.message}
                 type={modal.type}
             />
-            <div className="space-y-8 animate-fadeIn">
-                <div className="max-w-2xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
-                    {/* Date Input */}
-                    <div className={`bg-gray-50 p-6 rounded-xl border transition-colors ${error ? 'border-red-300 bg-red-50' : 'border-gray-100 hover:border-primary-300'}`}>
-                        <label className="block text-sm font-bold text-gray-700 mb-1 uppercase tracking-wide">Select Date</label>
-                        <p className="text-[11px] text-amber-600 mb-4 font-semibold uppercase tracking-wider">Requires 7 days' notice</p>
-                        <input
-                            type="date"
-                            min={getMinDate()}
-                            value={selectedDate}
-                            onChange={handleDateChange}
-                            disabled={loadingDates}
-                            className={`w-full p-4 border rounded-lg focus:ring-2 outline-none shadow-sm text-gray-700 font-medium ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:ring-primary-500 focus:border-transparent'} ${loadingDates ? 'opacity-60 cursor-wait' : ''}`}
-                        />
-                        {loadingDates && <p className="mt-2 text-xs text-gray-400">Loading calendar availability...</p>}
-                        {loading && !loadingDates && <p className="mt-2 text-xs text-blue-500">Checking availability...</p>}
-                        {error && <p className="mt-2 text-xs text-red-600 font-bold">{error}</p>}
-                        {availability && !error && (
-                            <div className="mt-3 text-xs text-green-600 space-y-1">
-                                <p className="font-bold flex items-center">
-                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Date Available!
-                                </p>
-                                <p>Remaining Slots: {availability.remainingEvents}</p>
-                                <p>Remaining Capacity: {availability.remainingPax} pax</p>
-                            </div>
-                        )}
-                        {!availability && !loading && !error && !loadingDates && (
-                            <div className="mt-3 space-y-1">
-                                <p className="text-xs text-gray-400 flex items-center">
-                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    Select a date to check availability.
-                                </p>
-                                {disabledDates.length > 0 && (
-                                    <p className="text-[11px] text-red-500 flex items-center gap-1">
-                                        <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="10"/></svg>
-                                        {disabledDates.length} date{disabledDates.length !== 1 ? 's are' : ' is'} fully booked.
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                        {/* Issue 3: Clear warning if selected date is disabled */}
-                        {selectedDate && isDateDisabled(selectedDate) && (
-                            <div className="mt-3 p-2 bg-red-100 border border-red-200 rounded-lg">
-                                <p className="text-xs text-red-700 font-semibold">⛔ This date is fully booked. Please choose a different date.</p>
-                            </div>
-                        )}
+
+            <div className="mx-auto w-full max-w-3xl animate-fadeIn">
+                <section className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-sm">
+                    <div className="border-b border-gray-100 bg-gray-50 px-6 py-5">
+                        <h3 className="text-lg font-black text-gray-950">Choose your schedule</h3>
+                        <p className="mt-1 text-sm font-medium text-gray-500">Pick a date, start time, and service length.</p>
                     </div>
 
-                    {/* Time Input */}
-                    <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 hover:border-primary-300 transition-colors">
-                        <label className="block text-sm font-bold text-gray-700 mb-6 uppercase tracking-wide">Select Event Start Time</label>
-                        <div className="flex items-center gap-2" ref={timeContainerRef}>
-                            <div className="flex-1 relative group">
-                                <label className="text-[10px] text-gray-400 font-bold uppercase absolute -top-5 left-2 transition-colors group-focus-within:text-red-900">Hour</label>
-                                <input
-                                    type="number"
-                                    min="1" max="12"
-                                    value={timeH}
-                                    onChange={handleHChange}
-                                    onBlur={handleTimeBlur}
-                                    placeholder="12"
-                                    className="w-full p-3.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-900 focus:border-transparent outline-none text-center font-bold text-xl text-gray-800 bg-white custom-number-input"
-                                />
+                    <div className="space-y-6 p-6">
+                        <div>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                                <label htmlFor="event-date" className="text-xs font-black uppercase tracking-widest text-gray-500">
+                                    Event date
+                                </label>
+                                {loadingDates && <span className="text-xs font-bold text-gray-400">Loading calendar...</span>}
                             </div>
-                            <span className="text-2xl font-bold text-gray-300 pb-1">:</span>
-                            <div className="flex-1 relative group">
-                                <label className="text-[10px] text-gray-400 font-bold uppercase absolute -top-5 left-2 transition-colors group-focus-within:text-red-900">Minute</label>
-                                <input
-                                    type="number"
-                                    min="0" max="59" step="15"
-                                    value={timeM}
-                                    onChange={handleMChange}
-                                    onBlur={handleTimeBlur}
-                                    placeholder="00"
-                                    className="w-full p-3.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-900 focus:border-transparent outline-none text-center font-bold text-xl text-gray-800 bg-white custom-number-input"
-                                />
+                            <input
+                                id="event-date"
+                                type="date"
+                                min={minDate}
+                                value={selectedDate}
+                                onChange={(event) => handleDateSelect(event.target.value)}
+                                className={`w-full rounded-2xl border bg-gray-50 px-4 py-4 text-base font-bold text-gray-900 outline-none transition focus:bg-white focus:ring-4 ${
+                                    error
+                                        ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
+                                        : 'border-gray-200 focus:border-red-900 focus:ring-red-900/10'
+                                }`}
+                            />
+                            {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
+                        </div>
+
+                        <div>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                                <p className="text-xs font-black uppercase tracking-widest text-gray-500">Start time</p>
+                                <label className="text-xs font-bold text-red-900">
+                                    Custom
+                                    <input
+                                        type="time"
+                                        step="900"
+                                        value={selectedTime}
+                                        onChange={(event) => setSelectedTime(event.target.value)}
+                                        className="ml-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-900 outline-none transition focus:border-red-900 focus:bg-white focus:ring-4 focus:ring-red-900/10"
+                                    />
+                                </label>
                             </div>
-                            <div className="flex-1 min-w-[90px] relative ml-2">
-                                <label className="text-[10px] text-gray-400 font-bold uppercase absolute -top-5 left-1 hidden sm:block">AM/PM</label>
-                                <div className="flex bg-gray-100 p-1 rounded-xl gap-1 h-[58px] border border-gray-200">
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {QUICK_TIMES.map((time) => (
                                     <button
-                                        onClick={() => setTimeAmPm('AM')}
-                                        className={`flex-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center ${timeAmPm === 'AM' ? 'bg-white shadow border border-gray-200 text-red-900' : 'text-gray-500 hover:text-gray-700'}`}
+                                        key={time.value}
+                                        type="button"
+                                        onClick={() => setSelectedTime(time.value)}
+                                        className={`rounded-2xl border px-4 py-3 text-sm font-black transition ${
+                                            selectedTime === time.value
+                                                ? 'border-red-900 bg-red-900 text-white shadow-lg'
+                                                : 'border-gray-100 bg-gray-50 text-gray-700 hover:border-red-200 hover:bg-red-50 hover:text-red-900'
+                                        }`}
                                     >
-                                        AM
+                                        {time.label}
                                     </button>
-                                    <button
-                                        onClick={() => setTimeAmPm('PM')}
-                                        className={`flex-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center ${timeAmPm === 'PM' ? 'bg-white shadow border border-gray-200 text-red-900' : 'text-gray-500 hover:text-gray-700'}`}
-                                    >
-                                        PM
-                                    </button>
-                                </div>
+                                ))}
                             </div>
                         </div>
-                        {selectedTime && (
-                            <p className="mt-4 font-medium text-lg text-primary-700 block bg-primary-50 p-3 rounded-lg border border-primary-200 text-center shadow-sm">
-                                {formatTimeRange(selectedTime)}
-                            </p>
-                        )}
-                        
-                        {/* Event Duration Selector */}
-                        <div className="mt-6 pt-5 border-t border-gray-100">
-                            <label className="block text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide flex justify-between items-center">
-                                Event Duration
-                                <span className="text-[10px] text-gray-400 font-normal normal-case">Max 8 hrs</span>
-                            </label>
-                            
-                            <div className="flex items-center gap-3">
-                                <button 
-                                    onClick={() => setDuration(Math.max(4, duration - 1))}
-                                    disabled={duration <= 4}
-                                    className="w-12 h-12 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-red-900 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-                                >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
-                                </button>
-                                
-                                <div className="flex-1 bg-white border border-gray-200 rounded-xl p-3 text-center font-bold text-lg text-gray-800 shadow-sm">
-                                    {duration} Hours
-                                </div>
-                                
-                                <button 
-                                    onClick={() => setDuration(Math.min(8, duration + 1))}
-                                    disabled={duration >= 8}
-                                    className="w-12 h-12 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-red-900 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-                                >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                </button>
+
+                        <div>
+                            <p className="mb-3 text-xs font-black uppercase tracking-widest text-gray-500">Service length</p>
+                            <div className="grid grid-cols-5 gap-2">
+                                {[4, 5, 6, 7, 8].map((hours) => (
+                                    <button
+                                        key={hours}
+                                        type="button"
+                                        onClick={() => setDuration(hours)}
+                                        className={`rounded-2xl border px-3 py-3 text-sm font-black transition ${
+                                            duration === hours
+                                                ? 'border-yellow-400 bg-yellow-400 text-red-950 shadow-lg'
+                                                : 'border-gray-100 bg-gray-50 text-gray-700 hover:border-yellow-200 hover:bg-yellow-50'
+                                        }`}
+                                    >
+                                        {hours}h
+                                    </button>
+                                ))}
                             </div>
-                            
                             {duration > 4 && (
-                                <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 animate-fadeIn">
-                                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    <div>
-                                        <p className="text-sm font-bold text-red-800">+₱{((duration - 4) * 5000).toLocaleString()} Overtime Surcharge</p>
-                                        <p className="text-xs text-red-600 mt-0.5">{duration - 4} hour(s) extension from the standard 4-hour event duration.</p>
-                                    </div>
-                                </div>
+                                <p className="mt-3 text-sm font-bold text-gray-600">
+                                    Extension fee: PHP {((duration - 4) * 5000).toLocaleString()}
+                                </p>
                             )}
                         </div>
 
-                        <p className="text-[11px] text-gray-400 mt-4 text-center">
-                            Standard catering duration is <strong>4 hours</strong>. An additional <strong>₱5,000 per hour</strong> applies for extensions.
-                        </p>
+                        <div className="rounded-2xl border border-red-100 bg-red-50 px-5 py-4">
+                            <p className="text-xs font-black uppercase tracking-widest text-red-900">Selected schedule</p>
+                            <p className="mt-2 text-xl font-black text-gray-950">
+                                {selectedDate ? formatDisplayDate(selectedDate) : 'Choose a date'}
+                                <span className="mx-2 text-gray-300">/</span>
+                                {selectedTime ? formatTimeRange(selectedTime) : 'Choose a time'}
+                            </p>
+                        </div>
                     </div>
-                </div>
-
-
+                </section>
             </div>
 
-            <div className="flex justify-end pt-8">
+            <div className="flex justify-between pt-8">
+                <button
+                    onClick={onBack}
+                    className="flex items-center px-4 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-800"
+                >
+                    <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to event
+                </button>
                 <button
                     onClick={handleNext}
-                    className="bg-red-900 text-white px-10 py-3.5 rounded-xl font-bold shadow-lg hover:bg-red-800 hover:shadow-xl transition-all transform hover:-translate-y-0.5 flex items-center text-sm"
+                    disabled={checkingAvailability}
+                    className="flex items-center rounded-xl bg-red-900 px-10 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:bg-red-800 hover:shadow-xl disabled:cursor-wait disabled:opacity-70"
                 >
-                    Continue
-                    <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+                    {checkingAvailability ? 'Checking...' : 'Continue'}
+                    <svg className="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
                 </button>
             </div>
         </div>

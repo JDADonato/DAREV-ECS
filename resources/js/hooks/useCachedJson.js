@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 
 export default function useCachedJson(defaultBustUrls = []) {
     const requestCache = useRef(new Map());
+    const inFlight = useRef(new Map());
 
     const fetchCachedJson = useCallback(async (url, ttl = 45000) => {
         const cached = requestCache.current.get(url);
@@ -10,18 +11,30 @@ export default function useCachedJson(defaultBustUrls = []) {
             return cached.data;
         }
 
-        const res = await fetch(url, { headers: {} });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            throw data;
+        if (inFlight.current.has(url)) {
+            return inFlight.current.get(url);
         }
 
-        requestCache.current.set(url, { data, time: now });
-        return data;
+        const request = fetch(url, { headers: { Accept: 'application/json' } })
+            .then(async (res) => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw data;
+                requestCache.current.set(url, { data, time: Date.now() });
+                return data;
+            })
+            .finally(() => {
+                inFlight.current.delete(url);
+            });
+
+        inFlight.current.set(url, request);
+        return request;
     }, []);
 
     const bustCache = useCallback((...urls) => {
-        [...urls, ...defaultBustUrls].forEach(url => requestCache.current.delete(url));
+        [...urls, ...defaultBustUrls].forEach(url => {
+            requestCache.current.delete(url);
+            inFlight.current.delete(url);
+        });
     }, [defaultBustUrls]);
 
     return { bustCache, fetchCachedJson };

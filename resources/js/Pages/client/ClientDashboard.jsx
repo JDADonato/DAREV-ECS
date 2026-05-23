@@ -5,6 +5,7 @@ import ChatBubble from '../../Components/common/ChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ReceiptModal from '../../Components/common/ReceiptModal';
+import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
 
 const peso = (value) => `₱${Number(value || 0).toLocaleString()}`;
 const settledStatuses = ['Paid', 'Verified'];
@@ -291,14 +292,23 @@ const ClientDashboard = () => {
         );
     }
 
-    const activeBooking = data.bookings.find(b => b.id === activeBookingId);
-    const activePayments = activeBooking ? data.payments.filter((payment) => payment.booking_id === activeBooking.id) : [];
-    const activePaid = activePayments.filter(isSettledPayment).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const paymentsByBookingId = React.useMemo(() => {
+        const map = new Map();
+        data.payments.forEach((payment) => {
+            if (!map.has(payment.booking_id)) map.set(payment.booking_id, []);
+            map.get(payment.booking_id).push(payment);
+        });
+        return map;
+    }, [data.payments]);
+
+    const activeBooking = React.useMemo(() => data.bookings.find(b => b.id === activeBookingId), [data.bookings, activeBookingId]);
+    const activePayments = activeBooking ? (paymentsByBookingId.get(activeBooking.id) || []) : [];
+    const activePaid = React.useMemo(() => activePayments.filter(isSettledPayment).reduce((sum, payment) => sum + Number(payment.amount || 0), 0), [activePayments]);
     const activeTotal = Number(activeBooking?.total_cost || 0);
     const activeBalance = Math.max(activeTotal - activePaid, 0);
     const activeProgress = activeTotal > 0 ? Math.min((activePaid / activeTotal) * 100, 100) : 0;
-    const activeJourneySteps = activeBooking ? buildJourneySteps(activeBooking, data.payments) : [];
-    const remainingJourneySteps = activeJourneySteps.filter((step) => !step.done);
+    const activeJourneySteps = React.useMemo(() => activeBooking ? buildJourneySteps(activeBooking, activePayments) : [], [activeBooking, activePayments]);
+    const remainingJourneySteps = React.useMemo(() => activeJourneySteps.filter((step) => !step.done), [activeJourneySteps]);
 
     // Action handlers
     const handleCancelBooking = async () => {
@@ -428,6 +438,8 @@ const ClientDashboard = () => {
                         <p className="text-sm font-bold">{toast.message}</p>
                     </div>
                 )}
+
+                <CustomerAnnouncements />
 
                 <div className="mb-8 rounded-3xl bg-[#1a1a1a] p-6 text-white shadow-xl shadow-black/10 sm:p-8">
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -1044,7 +1056,7 @@ const ClientDashboard = () => {
                                                 
                                                 {(() => {
                                                     const total = parseFloat(activeBooking.total_cost || 0);
-                                                    const payments = data.payments.filter(p => p.booking_id === activeBooking.id);
+                                                    const payments = activePayments;
                                                     const paid = payments.filter(isSettledPayment).reduce((s, p) => s + parseFloat(p.amount), 0);
                                                     const balance = total - paid;
                                                     const pct = total > 0 ? (paid / total) * 100 : 0;
@@ -1155,7 +1167,7 @@ const ClientDashboard = () => {
 
                                             {/* Tranche Breakdown */}
                                             {false && (() => {
-                                                const tranches = data.payments.filter(p => p.booking_id === activeBooking.id);
+                                                const tranches = activePayments;
                                                 if (tranches.length === 0) return null;
                                                 return (
                                                     <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden p-6">

@@ -36,33 +36,33 @@ const BookingWizard = () => {
 
     const validateStep = (stepToValidate, dataToValidate = bookingData) => {
         if (stepToValidate === 1) {
-            if (!dataToValidate.date || !dataToValidate.time) {
-                showModal('error', 'Missing Schedule', 'Please select a date and time to continue.');
+            if (!dataToValidate.eventType) {
+                showModal('error', 'Tell us the occasion', 'Choose the kind of event you are planning so we can shape the next steps around it.');
                 return false;
             }
         }
         if (stepToValidate === 2) {
-            if (!dataToValidate.eventType) {
-                showModal('error', 'Missing Event Type', 'Please select the type of event you are planning.');
+            if (!dataToValidate.date || !dataToValidate.time) {
+                showModal('error', 'Choose your schedule', 'Select your preferred date and start time so we can check availability for your event.');
                 return false;
             }
         }
         if (stepToValidate === 3) {
             if (!dataToValidate.pax || dataToValidate.pax < 20) {
-                showModal('error', 'Invalid Guest Count', 'Please enter a valid number of guests (minimum 20).');
+                showModal('error', 'Guest count needed', 'Please enter at least 20 guests so we can price the event properly.');
                 return false;
             }
         }
         if (stepToValidate === 4) {
             const totalDishCount = Object.values(dataToValidate.selectedDishes || {}).reduce((sum, arr) => sum + (arr?.length || 0), 0);
             if (totalDishCount === 0) {
-                showModal('error', 'Empty Menu', 'Please select at least one dish for your menu.');
+                showModal('error', 'Pick your first dish', 'Choose at least one dish so your event plan has a menu to review.');
                 return false;
             }
         }
         if (stepToValidate === 5) {
             if (!dataToValidate.client_full_name || !dataToValidate.client_email || !dataToValidate.client_phone || !dataToValidate.venue_city || !dataToValidate.venue_address_line) {
-                showModal('error', 'Missing Details', 'Please complete all required fields for your contact and venue information.');
+                showModal('error', 'A few details are needed', 'Complete your contact and venue details so the team knows where and how to prepare.');
                 return false;
             }
         }
@@ -133,7 +133,7 @@ const BookingWizard = () => {
         if (!user) {
             // Save current booking progress so they can resume after registering
             saveBookingDraft(merged, currentStep);
-            showModal('error', 'Account Required', 'You need to create an account to submit your booking. Your progress has been saved — you can resume after registering.', () => router.get('/register'), 'Register Now');
+            showModal('error', 'Save your event plan', 'You have already built your event plan. Create an account to save it, submit it, and continue from your dashboard.', () => router.get('/register'), 'Register Now');
             return;
         }
 
@@ -197,7 +197,7 @@ const BookingWizard = () => {
             showModal(
                 'success',
                 'Booking Submitted',
-                'Your event request has been submitted. Open your dashboard to track the booking, complete payments, add event details, manage your menu while editing is allowed, and message the Eloquente team.',
+                'Your event plan has been submitted. Open your dashboard to track approval, payments, event details, menu edits, tastings, and messages from the Eloquente team.',
                 () => router.get('/dashboard/client'),
                 'Go to Dashboard'
             );
@@ -224,22 +224,24 @@ const BookingWizard = () => {
     const totalSteps = 6;
 
     const stepLabels = [
-        { step: 1, label: 'Schedule' },
-        { step: 2, label: 'Event Type' },
-        { step: 3, label: 'Headcount' },
+        { step: 1, label: 'Vision' },
+        { step: 2, label: 'Date' },
+        { step: 3, label: 'Guests' },
         { step: 4, label: 'Menu' },
-        { step: 5, label: 'Location' },
-        { step: 6, label: 'Submit' }
+        { step: 5, label: 'Details' },
+        { step: 6, label: 'Review' }
     ];
 
     const stepMessages = {
-        1: { greeting: "Let's find the perfect date", icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, sub: 'Pick your preferred schedule and we\'ll check availability for you.' },
-        2: { greeting: 'What are we celebrating?', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>, sub: 'Select the type of event so we can tailor the experience.' },
-        3: { greeting: 'Tell us about your guests', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, sub: 'How many people should we prepare for?' },
-        4: { greeting: 'Build your dream menu', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, sub: 'Choose the dishes that will wow your guests.' },
-        5: { greeting: 'Almost there — venue & details', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, sub: 'Tell us where to set up and we\'ll handle the logistics.' },
+        1: { eyebrow: 'Start with the occasion', greeting: 'What are we helping you celebrate?', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>, sub: 'Tell us the event first. We will shape the schedule, menu, and details around it.' },
+        2: { eyebrow: 'Choose the day', greeting: "Let's find your date", icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, sub: 'Pick your preferred schedule and we will check capacity right away.' },
+        3: { eyebrow: 'Estimate the crowd', greeting: 'Who should we prepare for?', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, sub: 'A close estimate is enough. You can still refine details later.' },
+        4: { eyebrow: 'Personalize the spread', greeting: 'Build a menu your guests will remember', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, sub: 'Choose dishes at your own pace. Your estimate updates as you go.' },
+        5: { eyebrow: 'Set the logistics', greeting: 'Where should the team prepare?', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, sub: 'Share contact and venue details so setup fees are clear before you submit.' },
         6: { greeting: 'One last thing before we finalize', icon: <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>, sub: 'Would you like to taste our dishes before the event?' },
     };
+
+    const progressPercent = Math.round(((currentStep - 1) / (totalSteps - 1)) * 100);
 
     const navLinks = [
         { name: 'Home', path: '/' },
@@ -387,9 +389,9 @@ const BookingWizard = () => {
                 confirmText={modal.confirmText}
             />
 
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 {/* Back to Home Button */}
-                <div className="mb-6">
+                <div className="mb-5">
                     <Link href="/" className="inline-flex items-center text-sm font-medium text-gray-500 hover:text-red-900 transition-colors">
                         <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                         Back to Home
@@ -399,72 +401,59 @@ const BookingWizard = () => {
                 {/* Main Content: Step + Booking Summary Panel */}
                 <div className="flex flex-col lg:flex-row gap-8">
                     {/* Left: Main Card */}
-                    <div className="flex-1 bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden flex flex-col min-h-[650px] transition-all duration-300">
+                    <div className="flex-1 bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden flex flex-col min-h-[560px] transition-all duration-300">
                         {/* Top Header inside the card */}
-                        <div className="bg-red-950 px-8 py-6 text-white relative overflow-hidden">
+                        <div className="bg-red-950 px-6 py-5 text-white relative overflow-hidden">
                             <div className="absolute inset-0 opacity-[.06]" style={{backgroundImage:'radial-gradient(circle at 20% 50%,#f0aa0b,transparent 60%)'}} />
                             
-                            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                <div className="flex items-center gap-5">
-                                    <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center shadow-inner backdrop-blur-sm border border-white/20">
+                            <div className="relative z-10">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex shrink-0 items-center justify-center shadow-inner backdrop-blur-sm border border-white/20">
                                         {stepMessages[currentStep]?.icon}
                                     </div>
-                                    <div>
-                                        <div className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest mb-1">Step {currentStep} of {totalSteps}</div>
-                                        <h2 className="text-white font-bold text-2xl md:text-3xl leading-tight">{stepMessages[currentStep]?.greeting}</h2>
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <div className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">{stepMessages[currentStep]?.eyebrow || `Step ${currentStep} of ${totalSteps}`}</div>
+                                            <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-red-50">{progressPercent}% complete</span>
+                                        </div>
+                                        <h2 className="text-white font-bold text-2xl leading-tight">{stepMessages[currentStep]?.greeting}</h2>
                                         <p className="text-gray-300 text-sm mt-0.5">{stepMessages[currentStep]?.sub}</p>
                                     </div>
+                                </div>
+
+                                <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                    {stepLabels.map((item) => (
+                                        <button
+                                            key={item.step}
+                                            type="button"
+                                            onClick={() => handleStepperClick(item.step)}
+                                            className={`rounded-full border px-3 py-2 text-xs font-black transition ${
+                                                currentStep === item.step
+                                                    ? 'border-yellow-300 bg-yellow-300 text-red-950 shadow-lg shadow-red-950/20'
+                                                    : currentStep > item.step
+                                                        ? 'border-white/20 bg-white/15 text-white'
+                                                        : 'border-white/10 bg-white/5 text-red-100/60 hover:bg-white/10 hover:text-white'
+                                            }`}
+                                        >
+                                            {currentStep > item.step ? 'Done' : item.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                         </div>
 
-                        {/* Clean Stepper */}
-                        <div className="px-8 py-6 bg-gray-50 border-b border-gray-100 hidden md:block">
-                            <div className="relative flex justify-between items-center w-full">
-                                <div className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-200 -z-10 transform -translate-y-1/2 rounded-full" />
-                                <div
-                                    className="absolute top-1/2 left-0 h-0.5 -z-10 transform -translate-y-1/2 rounded-full transition-all duration-700 ease-out"
-                                    style={{ width: `${((currentStep - 1) / (totalSteps - 1)) * 100}%`, background: 'linear-gradient(90deg, #7f1d1d, #eab308)' }}
-                                />
-                                {stepLabels.map((item) => (
-                                    <button 
-                                        key={item.step} 
-                                        onClick={() => handleStepperClick(item.step)}
-                                        className="flex flex-col items-center relative cursor-pointer group focus:outline-none"
-                                    >
-                                        <div
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-all duration-300 border-[3px] ${
-                                                currentStep > item.step
-                                                    ? 'bg-red-900 border-red-900 text-white shadow-md'
-                                                    : currentStep === item.step
-                                                        ? 'bg-white border-yellow-500 text-yellow-600 shadow-lg ring-4 ring-yellow-100 scale-110'
-                                                        : 'bg-white border-gray-200 text-gray-400'
-                                            }`}
-                                        >
-                                            {currentStep > item.step ? (
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                                            ) : item.step}
-                                        </div>
-                                        <span className={`absolute top-10 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors duration-300 ${currentStep >= item.step ? 'text-red-900' : 'text-gray-400'}`}>
-                                            {item.label}
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
                         {/* Step Content */}
-                        <div className="p-8 flex-1 flex flex-col">
+                        <div className="p-6 flex-1 flex flex-col">
                             <div key={currentStep} className="animate-fadeInUp flex-1">
                         {currentStep === 1 && (
-                            <CalendarView
+                            <EventIdentity
                                 bookingData={bookingData}
                                 updateBooking={updateBooking}
                                 onNext={nextStep}
                             />
                         )}
                         {currentStep === 2 && (
-                            <EventIdentity
+                            <CalendarView
                                 bookingData={bookingData}
                                 updateBooking={updateBooking}
                                 onNext={nextStep}
@@ -510,7 +499,7 @@ const BookingWizard = () => {
                     </div>
 
                     {/* Right: Booking Summary Sidebar */}
-                    <div className="w-full lg:w-80 flex-shrink-0 animate-fadeInRight">
+                    <div className="w-full lg:w-[380px] flex-shrink-0 animate-fadeInRight">
                         <BlueprintPanel
                             bookingData={bookingData}
                             currentStep={currentStep}

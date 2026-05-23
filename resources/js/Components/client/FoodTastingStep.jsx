@@ -91,7 +91,7 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmi
                         </div>
                     </div>
                 )}
-                <div className="max-w-2xl mx-auto w-full space-y-6 mt-4">
+                <div className="max-w-2xl mx-auto w-full space-y-6">
                     {/* Toggle */}
                     <div className="flex gap-4">
                         <button

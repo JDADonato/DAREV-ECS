@@ -66,18 +66,18 @@ class DatabaseSeeder extends Seeder
     private function seedEventTypes(): void
     {
         $events = [
-            ['slug' => 'formal-wedding', 'label' => 'Formal Wedding', 'icon' => 'wedding', 'description' => 'Elegant ceremonies & receptions', 'image' => 'https://images.unsplash.com/photo-1519225421980-715cb0215aed?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'debut', 'label' => 'Debut', 'icon' => 'crown', 'description' => '18th birthday celebrations', 'image' => 'https://images.unsplash.com/photo-1541086095944-f4b5412d3666?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'casual-birthday', 'label' => 'Casual Birthday', 'icon' => 'cake', 'description' => 'Fun birthday parties', 'image' => 'https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'corporate-seminar', 'label' => 'Corporate Seminar', 'icon' => 'briefcase', 'description' => 'Professional events & conferences', 'image' => 'https://images.unsplash.com/photo-1505373877841-8d25f7d46678?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'family-reunion', 'label' => 'Family Reunion', 'icon' => 'users', 'description' => 'Bringing families together', 'image' => 'https://images.unsplash.com/photo-1511895426328-dc8714191300?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'anniversary', 'label' => 'Anniversary', 'icon' => 'heart', 'description' => 'Celebrating milestones', 'image' => 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'graduation', 'label' => 'Graduation', 'icon' => 'academic', 'description' => 'Academic celebrations', 'image' => 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&auto=format&fit=crop'],
-            ['slug' => 'other', 'label' => 'Other', 'icon' => 'sparkles', 'description' => 'Any special occasion', 'image' => 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?q=80&w=800&auto=format&fit=crop'],
+            ['slug' => 'formal-wedding', 'label' => 'Formal Wedding', 'icon' => 'wedding', 'description' => 'Elegant ceremonies & receptions', 'image' => '/images/event-types/formal-wedding.webp'],
+            ['slug' => 'debut', 'label' => 'Debut', 'icon' => 'crown', 'description' => '18th birthday celebrations', 'image' => '/images/event-types/debut.webp'],
+            ['slug' => 'casual-birthday', 'label' => 'Casual Birthday', 'icon' => 'cake', 'description' => 'Fun birthday parties', 'image' => '/images/event-types/casual-birthday.webp'],
+            ['slug' => 'corporate-seminar', 'label' => 'Corporate Seminar', 'icon' => 'briefcase', 'description' => 'Professional events & conferences', 'image' => '/images/event-types/corporate-seminar.webp'],
+            ['slug' => 'family-reunion', 'label' => 'Family Reunion', 'icon' => 'users', 'description' => 'Bringing families together', 'image' => '/images/event-types/family-reunion.webp'],
+            ['slug' => 'anniversary', 'label' => 'Anniversary', 'icon' => 'heart', 'description' => 'Celebrating milestones', 'image' => '/images/event-types/anniversary.webp'],
+            ['slug' => 'graduation', 'label' => 'Graduation', 'icon' => 'academic', 'description' => 'Academic celebrations', 'image' => '/images/event-types/graduation.webp'],
+            ['slug' => 'other', 'label' => 'Other', 'icon' => 'sparkles', 'description' => 'Any special occasion', 'image' => '/images/event-types/other.webp'],
         ];
 
         foreach ($events as $event) {
-            EventType::firstOrCreate(['slug' => $event['slug']], $event);
+            EventType::updateOrCreate(['slug' => $event['slug']], $event);
         }
 
         $this->command->info('Seeded 8 event types');

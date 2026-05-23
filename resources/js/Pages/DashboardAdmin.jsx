@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, ScatterChart, Scatter, ZAxis } from 'recharts';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
+import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
@@ -174,6 +175,11 @@ const DashboardAdmin = () => {
             eyebrow: 'Governance',
             title: 'Reports Center',
             description: 'Operational exports and management snapshots.',
+        },
+        content: {
+            eyebrow: 'Customer communications',
+            title: 'Content Studio',
+            description: 'Publish customer announcements, advisories, promos, and email-ready updates.',
         },
         users: {
             eyebrow: 'Access & clients',
@@ -911,6 +917,7 @@ const DashboardAdmin = () => {
                             { id: 'analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'Analytics' },
                             { id: 'configuration', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM12 15a3 3 0 100-6 3 3 0 000 6z', label: 'Configuration' },
                             { id: 'reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', label: 'Reports' },
+                            { id: 'content', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v8a2 2 0 01-2 2zM14 4v6h6M8 13h8M8 17h5', label: 'Content' },
                             { id: 'users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', label: 'Users' },
                             { id: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Bookings' },
                             { id: 'refunds', icon: 'M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 12H6L5 9zm7 4v4m-3-2h6', label: 'Refunds' },
@@ -1574,6 +1581,9 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
+                    {activeTab === 'content' && (
+                        <AnnouncementManager variant="admin" user={user} />
+                    )}
                     {
                         activeTab === 'users' && (
                             <div className="animate-fadeIn">

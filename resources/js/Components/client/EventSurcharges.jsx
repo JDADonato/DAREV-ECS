@@ -101,6 +101,10 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
             setModal({ isOpen: true, type: 'error', title: 'Missing Information', message: 'Please enter your full name.' });
             return;
         }
+        if (!formData.client_email.trim() || !formData.client_phone.trim()) {
+            setModal({ isOpen: true, type: 'error', title: 'Contact details needed', message: 'Please add the email and mobile number we should use for booking updates.' });
+            return;
+        }
         if (!formData.venue_address_line.trim() || !formData.venue_city) {
             setModal({ isOpen: true, type: 'error', title: 'Missing Address', message: 'Please fill in the address and select a city.' });
             return;
@@ -137,7 +141,7 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
             />
 
             <div className="space-y-6">
-                <div className="max-w-3xl mx-auto w-full space-y-6 mt-4">
+                <div className="max-w-3xl mx-auto w-full space-y-6">
                     {/* Client Info */}
                     <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 hover:border-primary-300 transition-colors">
                         <label className="block text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide">

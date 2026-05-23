@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
 use App\Http\Controllers\ClientDashboardController;
@@ -157,6 +158,9 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 
     // File upload
     Route::post('/api/upload', [FileUploadController::class, 'store']);
+
+    Route::get('/api/customer/announcements', [AnnouncementController::class, 'customerIndex']);
+    Route::post('/api/customer/announcements/{announcement}/read', [AnnouncementController::class, 'markRead']);
 });
 
 // ─── Marketing Routes (Marketing + Admin) ───
@@ -173,6 +177,12 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::put('/api/settings/event-types/{id}', [SettingsController::class, 'updateEventType']);
     Route::delete('/api/settings/event-types/{id}', [SettingsController::class, 'deleteEventType']);
     Route::put('/api/settings/menu-items/{id}/pricing', [SettingsController::class, 'updateDishPricing']);
+    Route::get('/api/admin/announcements', [AnnouncementController::class, 'index']);
+    Route::post('/api/admin/announcements', [AnnouncementController::class, 'store']);
+    Route::patch('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'update']);
+    Route::post('/api/admin/announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
+    Route::post('/api/admin/announcements/{announcement}/archive', [AnnouncementController::class, 'archive']);
+    Route::post('/api/admin/announcements/{announcement}/send-test', [AnnouncementController::class, 'sendTest']);
 });
 
 // ─── Accounting Routes ───
@@ -220,6 +230,12 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::put('/api/admin/event-types/{id}', [SettingsController::class, 'updateEventType']);
     Route::delete('/api/admin/event-types/{id}', [SettingsController::class, 'deleteEventType']);
     Route::put('/api/admin/menu-items/{id}/pricing', [SettingsController::class, 'updateDishPricing']);
+    Route::get('/api/admin/announcements', [AnnouncementController::class, 'index']);
+    Route::post('/api/admin/announcements', [AnnouncementController::class, 'store']);
+    Route::patch('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'update']);
+    Route::post('/api/admin/announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
+    Route::post('/api/admin/announcements/{announcement}/archive', [AnnouncementController::class, 'archive']);
+    Route::post('/api/admin/announcements/{announcement}/send-test', [AnnouncementController::class, 'sendTest']);
 });
 
 Route::fallback(function (Request $request) {

@@ -5,6 +5,7 @@ import { router } from '@inertiajs/react';
 import StaffMessaging from '../Components/common/StaffMessaging';
 import NotificationBell from '../Components/common/NotificationBell';
 import FlashToast from '../Components/common/FlashToast';
+import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
     formatDate,
@@ -297,33 +298,54 @@ const DashboardMarketing = () => {
 
     const [selectedBooking, setSelectedBooking] = useState(null);
 
-    const dashboardSummary = useMemo(() => {
+    const marketingBookingIndexes = useMemo(() => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
         const monthKey = `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`;
-        const pending = bookings.filter(b => b.status === 'Pending');
-        const confirmed = bookings.filter(b => b.status === 'Confirmed');
-        const monthEvents = bookings.filter(b => b.event_date?.substring(0, 7) === monthKey);
-        const upcoming = bookings.filter(b => {
-            if (!b.event_date || !['Pending', 'Confirmed'].includes(b.status)) return false;
-            const eventDate = new Date(b.event_date);
+        const byDate = new Map();
+        const pending = [];
+        let confirmed = 0;
+        let monthEvents = 0;
+        let upcoming = 0;
+        let pipeline = 0;
+
+        bookings.forEach((booking) => {
+            if (booking.event_date) {
+                const dateKey = booking.event_date.substring(0, 10);
+                if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+                byDate.get(dateKey).push(booking);
+                if (booking.event_date.substring(0, 7) === monthKey) monthEvents += 1;
+            }
+
+            if (booking.status === 'Pending') {
+                pending.push(booking);
+                pipeline += getBookingValue(booking);
+            }
+            if (booking.status === 'Confirmed') confirmed += 1;
+
+            if (!booking.event_date || !['Pending', 'Confirmed'].includes(booking.status)) return;
+            const eventDate = new Date(booking.event_date);
             eventDate.setHours(0, 0, 0, 0);
-            return eventDate >= now;
+            if (eventDate >= now && ['Pending', 'Confirmed'].includes(booking.status)) upcoming += 1;
         });
 
         return {
+            byDate,
             pending: pending.length,
-            confirmed: confirmed.length,
-            monthEvents: monthEvents.length,
-            upcoming: upcoming.length,
-            pipeline: pending.reduce((sum, booking) => sum + getBookingValue(booking), 0),
+            confirmed,
+            monthEvents,
+            upcoming,
+            pipeline,
         };
     }, [bookings, selectedMonth]);
+
+    const dashboardSummary = marketingBookingIndexes;
 
     const tabMeta = {
         calendar: 'Calendar',
         inquiries: 'Inquiries',
         documents: 'Documents',
+        content: 'Content',
         settings: 'Catalog',
         messages: 'Messages',
     };
@@ -339,7 +361,7 @@ const DashboardMarketing = () => {
 
         for (let day = 1; day <= daysInMonth; day++) {
             const dateStr = `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const dayBookings = bookings.filter(b => b.event_date && b.event_date.substring(0, 10) === dateStr);
+            const dayBookings = marketingBookingIndexes.byDate.get(dateStr) || [];
 
             days.push(
                 <div key={day} className="marketing-calendar-cell custom-scrollbar">
@@ -1300,7 +1322,7 @@ const DashboardMarketing = () => {
 
                 <div className="marketing-nav-wrap mb-5">
                     <nav className="marketing-nav">
-                        {['calendar', 'inquiries', 'documents', 'settings', 'messages'].map((tab) => {
+                        {['calendar', 'inquiries', 'documents', 'content', 'settings', 'messages'].map((tab) => {
                             return (
                             <button
                                 key={tab}
@@ -1360,6 +1382,7 @@ const DashboardMarketing = () => {
 
                 {activeTab === 'inquiries' && renderInquiries()}
                 {activeTab === 'documents' && renderDocuments()}
+                {activeTab === 'content' && <AnnouncementManager user={user} />}
                 {activeTab === 'settings' && renderSettings()}
                 {activeTab === 'messages' && <StaffMessaging />}
 

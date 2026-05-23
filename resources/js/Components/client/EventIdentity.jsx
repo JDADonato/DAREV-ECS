@@ -50,6 +50,7 @@ const EventIcon = ({ type, className = "w-10 h-10" }) => {
 
 const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
     const [selected, setSelected] = useState(bookingData.eventType || '');
+    const [eventName, setEventName] = useState(bookingData.eventName || '');
     const [eventTypes, setEventTypes] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -70,30 +71,44 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
     const handleSelect = (eventType) => {
         setSelected(eventType.label);
         updateBooking({ eventType: eventType.label });
-        // Auto-advance after brief delay - skip validation since we just set it
-        setTimeout(() => onNext(true), 300);
     };
 
     const handleNext = () => {
         if (!selected) return;
+        updateBooking({ eventType: selected, eventName });
         onNext(true);
     };
 
     return (
         <div className="flex flex-col h-full justify-between animate-fadeIn">
-            <div className="space-y-6">
-                <p className="text-center text-sm text-gray-500">Select the type of event you're planning</p>
+            <div className="space-y-5">
+                <div className="mx-auto max-w-2xl rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                    <label htmlFor="eventName" className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-500">
+                        Event name or note <span className="font-semibold normal-case tracking-normal text-gray-400">(optional)</span>
+                    </label>
+                    <input
+                        id="eventName"
+                        type="text"
+                        value={eventName}
+                        onChange={(e) => {
+                            setEventName(e.target.value);
+                            updateBooking({ eventName: e.target.value });
+                        }}
+                        placeholder="e.g. Ana and Miguel's wedding, Mama's 60th birthday"
+                        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-900 outline-none transition focus:border-red-900 focus:bg-white focus:ring-4 focus:ring-red-900/10"
+                    />
+                </div>
                 {loading ? (
                     <div className="text-center text-gray-500">Loading event types...</div>
                 ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
                         {eventTypes.map((eventType) => {
                             const isSelected = selected === eventType.label;
                             return (
                                 <button
                                     key={eventType.id}
                                     onClick={() => handleSelect(eventType)}
-                                    className={`group relative h-44 rounded-2xl overflow-hidden transition-all duration-300 transform hover:-translate-y-1 ${isSelected
+                                    className={`group relative h-40 rounded-2xl overflow-hidden text-left transition-all duration-300 transform hover:-translate-y-1 ${isSelected
                                         ? 'ring-[3px] ring-yellow-400 shadow-xl scale-[1.02]'
                                         : 'shadow-sm hover:shadow-xl hover:ring-2 hover:ring-red-300'
                                         }`}
@@ -117,14 +132,14 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                                     )}
 
                                     {/* Content */}
-                                    <div className="absolute inset-0 flex flex-col items-center justify-end text-white z-10 p-4 pb-5">
-                                        <div className={`mb-2 transform transition-all duration-300 ${isSelected ? 'scale-110 text-yellow-300' : 'text-gray-200 group-hover:text-white group-hover:scale-110'}`}>
+                                    <div className="absolute inset-0 flex flex-col items-start justify-end text-white z-10 p-5">
+                                        <div className={`mb-3 transform transition-all duration-300 ${isSelected ? 'scale-110 text-yellow-300' : 'text-gray-200 group-hover:text-white group-hover:scale-110'}`}>
                                             <EventIcon type={eventType.icon} className="w-10 h-10 drop-shadow-lg" />
                                         </div>
-                                        <h3 className={`font-bold text-base mb-1 drop-shadow-lg text-center leading-tight ${isSelected ? 'text-yellow-100' : ''}`}>
+                                        <h3 className={`font-black text-lg mb-1 drop-shadow-lg leading-tight ${isSelected ? 'text-yellow-100' : ''}`}>
                                             {eventType.label}
                                         </h3>
-                                        <p className="text-[11px] text-center text-gray-200/80 drop-shadow-md leading-snug">
+                                        <p className="text-xs text-gray-200/85 drop-shadow-md leading-snug">
                                             {eventType.description}
                                         </p>
                                     </div>
@@ -136,15 +151,17 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
             </div>
 
             <div className="flex justify-between pt-8 items-center border-t border-gray-100 mt-8">
-                <button
-                    onClick={onBack}
-                    className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
-                >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                    Go Back
-                </button>
+                {onBack ? (
+                    <button
+                        onClick={onBack}
+                        className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
+                    >
+                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Go Back
+                    </button>
+                ) : <span />}
                 <button
                     onClick={handleNext}
                     disabled={!selected}

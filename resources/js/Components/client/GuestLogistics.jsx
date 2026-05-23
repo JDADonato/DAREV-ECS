@@ -52,8 +52,8 @@ const GuestLogistics = ({ bookingData, updateBooking, onNext, onBack }) => {
                 type={modal.type}
             />
 
-            <div className="space-y-8">
-                <div className="max-w-2xl mx-auto w-full space-y-8 mt-4">
+            <div className="space-y-6">
+                <div className="max-w-2xl mx-auto w-full space-y-6">
                     {/* Headcount */}
                     <div className="bg-gray-50 p-8 rounded-2xl border border-gray-100 hover:border-primary-300 transition-colors">
                         <label className="block text-sm font-bold text-gray-700 mb-4 uppercase tracking-wide">
