@@ -32,7 +32,7 @@ class AnalyticsDemoSeeder extends Seeder
         Cache::forget('admin.analytics.v3');
         Cache::forget('admin.analytics.v4');
 
-        $this->command?->info('Seeded analytics demo data: 125 clients, 180 bookings, 540 payments, and 1,400+ booking items.');
+        $this->command?->info('Seeded analytics demo data: 125 clients, 216 bookings from 2024-2026, payments, and booking menu items.');
     }
 
     private function cleanGeneratedAnalyticsData(): void
@@ -131,30 +131,52 @@ class AnalyticsDemoSeeder extends Seeder
 
     private function seedBookings(array $clients): void
     {
-        $packages = Package::all()->values();
-        $eventTypes = EventType::all()->values();
+        $packages = Package::whereRaw('is_active is true')->get()->values();
+        $eventTypes = EventType::all()->keyBy('slug');
         $menuItems = MenuItem::where('is_active', DB::raw('true'))->get()->groupBy('category');
         $cities = ['Makati City', 'Quezon City', 'Pasig City', 'Taguig City', 'San Juan', 'Paranaque City', 'Mandaluyong', 'Alabang', 'Antipolo City', 'Tagaytay City', 'Santa Rosa'];
-        $venues = ['Grand Pavilion', 'Glass Garden', 'Corporate Hall', 'Lakeside Events Place', 'Heritage Ballroom', 'Skyline Function Room', 'Vista Tent', 'Garden Courtyard'];
-        $monthOffsets = collect(range(-10, 8))->flatMap(function ($offset) {
-            $month = Carbon::now()->startOfMonth()->addMonths($offset)->month;
-            return in_array($month, [5, 6, 11, 12], true) ? [$offset, $offset, $offset] : [$offset];
-        })->values();
+        $venues = ['Grand Pavilion', 'Glass Garden', 'Corporate Hall', 'Lakeside Events Place', 'Heritage Ballroom', 'Skyline Function Room', 'Vista Tent', 'Garden Courtyard', 'Ayala Executive Hall', 'The Blue Leaf Pavilion'];
+        $eventPattern = [
+            'formal-wedding',
+            'corporate-seminar',
+            'casual-birthday',
+            'debut',
+            'family-reunion',
+            'graduation',
+            'anniversary',
+            'corporate-seminar',
+            'formal-wedding',
+            'other',
+        ];
+        $months = collect();
+        $cursor = Carbon::create(2024, 1, 1)->startOfMonth();
+        $last = Carbon::create(2026, 12, 1)->startOfMonth();
+        while ($cursor->lte($last)) {
+            $weight = in_array($cursor->month, [5, 6, 11, 12], true) ? 9 : (in_array($cursor->month, [2, 3, 10], true) ? 6 : 4);
+            for ($j = 0; $j < $weight; $j++) {
+                $months->push($cursor->copy());
+            }
+            $cursor->addMonth();
+        }
 
-        for ($i = 0; $i < 180; $i++) {
+        for ($i = 0; $i < 216; $i++) {
             $client = $clients[$i % count($clients)];
-            $package = $packages[$i % max($packages->count(), 1)] ?? null;
-            $eventType = $eventTypes[($i * 3) % max($eventTypes->count(), 1)] ?? null;
-            $eventDate = Carbon::now()->startOfMonth()
-                ->addMonths($monthOffsets[$i % $monthOffsets->count()])
-                ->addDays(3 + (($i * 5) % 24));
+            $eventSlug = $eventPattern[$i % count($eventPattern)];
+            $eventType = $eventTypes[$eventSlug] ?? $eventTypes->first();
+            $package = $this->packageForEvent($packages, $eventType?->slug ?? 'other', $i);
+            $month = $months[$i % $months->count()];
+            $eventDate = $month->copy()->addDays(2 + (($i * 5) % 24));
             $city = $cities[$i % count($cities)];
             $pax = $this->paxForEvent($eventType?->slug ?? '', $i);
             $base = (int) ($package?->base_price_per_head ?? 650);
             $transport = in_array($city, ['Antipolo City', 'Tagaytay City', 'Santa Rosa'], true) ? 8500 + (($i % 3) * 1500) : 2500 + (($i % 4) * 700);
             $labor = $pax >= 280 ? 16000 : ($pax >= 160 ? 9500 : 4500);
-            $stylePremium = in_array($eventType?->slug, ['formal-wedding', 'debut'], true) ? 18000 : 0;
-            $total = ($base * $pax) + $transport + $labor + $stylePremium;
+            $baseEventCost = $base * $pax;
+            $serviceCharge = in_array($package?->package_category, ['premium', 'birthday'], true) ? (int) round($baseEventCost * 0.10) : 0;
+            $vat = $package?->package_category === 'standard' ? (int) round($baseEventCost * 0.12) : 0;
+            $security = $package?->security_type === 'contingency' ? (int) round(($baseEventCost + $serviceCharge + $transport + $labor) * 0.10) : 1500;
+            $stylePremium = $package?->package_category === 'premium' ? 18000 : 0;
+            $total = $baseEventCost + $serviceCharge + $vat + $security + $transport + $labor + $stylePremium;
             $status = $this->statusForDate($eventDate, $i);
 
             $booking = Booking::create([
@@ -184,19 +206,33 @@ class AnalyticsDemoSeeder extends Seeder
                 'live_status' => $status === 'Completed' ? 'Completed' : ($status === 'Confirmed' ? 'Payment Verified' : 'Not Started'),
                 'transport_fee' => $transport,
                 'labor_surcharge' => $labor,
-                'created_at' => $eventDate->copy()->subDays(28 + ($i % 42)),
-                'updated_at' => now()->subDays($i % 9),
+                'created_at' => $this->notInFuture($eventDate->copy()->subDays(28 + ($i % 42))),
+                'updated_at' => $eventDate->isPast() ? $eventDate->copy()->addDays(2) : now()->subDays($i % 9),
             ]);
 
-            $selected = $this->attachMenuItems($booking, $menuItems, $i);
-            $booking->update(['selected_menu' => json_encode($selected)]);
+            $selected = $this->attachMenuItems($booking, $menuItems, $i, $package);
+            $booking->update(['selected_menu' => $selected]);
             $this->seedPaymentPlan($booking, $status);
         }
     }
 
-    private function attachMenuItems(Booking $booking, $menuItems, int $index): array
+    private function packageForEvent($packages, string $eventSlug, int $index): ?Package
     {
-        $structure = ['starter' => 2, 'main' => 3, 'side' => 1, 'dessert' => 1, 'drink' => 1];
+        $candidates = $packages->filter(function ($package) use ($eventSlug) {
+            $slugs = $package->event_type_slugs ?: [];
+            return $package->type === $eventSlug || in_array($eventSlug, $slugs, true);
+        })->values();
+
+        if ($candidates->isEmpty()) {
+            $candidates = $packages->where('package_category', 'standard')->values();
+        }
+
+        return $candidates->isNotEmpty() ? $candidates[$index % $candidates->count()] : null;
+    }
+
+    private function attachMenuItems(Booking $booking, $menuItems, int $index, ?Package $package): array
+    {
+        $structure = $this->normalizePackageStructure($package?->menu_structure ?: []);
         $selected = [];
 
         foreach ($structure as $category => $count) {
@@ -223,6 +259,17 @@ class AnalyticsDemoSeeder extends Seeder
         return $selected;
     }
 
+    private function normalizePackageStructure(array $structure): array
+    {
+        return [
+            'starter' => (int) ($structure['starter'] ?? $structure['starters'] ?? 1),
+            'main' => (int) ($structure['main'] ?? $structure['mains'] ?? 2),
+            'side' => (int) ($structure['side'] ?? $structure['sides'] ?? 1),
+            'dessert' => (int) ($structure['dessert'] ?? $structure['desserts'] ?? 1),
+            'drink' => (int) ($structure['drink'] ?? $structure['drinks'] ?? $structure['refreshments'] ?? 1),
+        ];
+    }
+
     private function seedPaymentPlan(Booking $booking, string $status): void
     {
         $eventDate = Carbon::parse($booking->event_date);
@@ -233,9 +280,12 @@ class AnalyticsDemoSeeder extends Seeder
         ];
 
         foreach ($plan as [$type, $ratio, $dueDate]) {
-            $settled = $status === 'Completed'
+            $isPayableNow = $dueDate->lte(now());
+            $settled = $isPayableNow && (
+                $status === 'Completed'
                 || ($status === 'Confirmed' && $type !== 'Final')
-                || ($status === 'Confirmed' && $dueDate->isPast() && $type === 'Final' && $booking->id % 4 !== 0);
+                || ($status === 'Confirmed' && $type === 'Final' && $booking->id % 4 !== 0)
+            );
 
             Payment::create([
                 'booking_id' => $booking->id,
@@ -246,10 +296,15 @@ class AnalyticsDemoSeeder extends Seeder
                 'due_date' => $dueDate->toDateString(),
                 'verified_by' => $settled ? 'accounting' : null,
                 'verified_at' => $settled ? $dueDate->copy()->addDay() : null,
-                'created_at' => $dueDate->copy()->subDays(2),
+                'created_at' => $this->notInFuture($dueDate->copy()->subDays(2)),
                 'updated_at' => $settled ? $dueDate->copy()->addDay() : now(),
             ]);
         }
+    }
+
+    private function notInFuture(Carbon $date): Carbon
+    {
+        return $date->gt(now()) ? now()->copy()->subDay() : $date;
     }
 
     private function statusForDate(Carbon $eventDate, int $index): string
@@ -258,7 +313,7 @@ class AnalyticsDemoSeeder extends Seeder
             return $index % 12 === 0 ? 'Cancelled' : 'Completed';
         }
 
-        return $index % 5 === 0 ? 'Pending' : 'Confirmed';
+        return $index % 4 === 0 ? 'Pending' : 'Confirmed';
     }
 
     private function paxForEvent(string $slug, int $index): int

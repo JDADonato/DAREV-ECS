@@ -21,7 +21,15 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
 
     const handleSelect = (eventType) => {
         setSelected(eventType.label);
-        updateBooking({ eventType: eventType.label });
+        updateBooking({
+            eventType: eventType.label,
+            eventTypeSlug: eventType.slug,
+            package_category: eventType.package_category || 'standard',
+            event_applicable_setups: eventType.applicable_setups || [],
+            event_security_type: eventType.security_type,
+            event_security_label: eventType.security_label,
+            event_security_description: eventType.security_description,
+        });
     };
 
     const handleNext = () => {

@@ -52,8 +52,12 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
     });
     const [loadingDates, setLoadingDates] = useState(!disabledDateCache);
     const [checkingAvailability, setCheckingAvailability] = useState(false);
+    const [availability, setAvailability] = useState(null);
+    const [availabilityLoading, setAvailabilityLoading] = useState(false);
+    const [availabilityError, setAvailabilityError] = useState('');
     const [error, setError] = useState('');
     const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '' });
+    const isCustomTime = selectedTime && !QUICK_TIMES.some(time => time.value === selectedTime);
 
     useEffect(() => {
         let cancelled = false;
@@ -146,15 +150,61 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
 
     const handleDateSelect = (date) => {
         if (!date || isBeforeMinDate(date) || isDateDisabled(date)) {
+            setAvailability(null);
+            setAvailabilityError('');
             setError('That date is unavailable. Please choose another date.');
             return;
         }
         setSelectedDate(date);
+        setAvailability(null);
+        setAvailabilityError('');
         setError('');
     };
 
+    useEffect(() => {
+        let cancelled = false;
+
+        if (!selectedDate || isBeforeMinDate(selectedDate) || isDateDisabled(selectedDate)) {
+            setAvailability(null);
+            setAvailabilityError('');
+            setAvailabilityLoading(false);
+            return;
+        }
+
+        setAvailabilityLoading(true);
+        setAvailabilityError('');
+
+        fetch(`/api/bookings/availability/${selectedDate}`)
+            .then((response) => {
+                if (!response.ok) throw new Error('Unable to check availability');
+                return response.json();
+            })
+            .then((data) => {
+                if (cancelled) return;
+                setAvailability(data);
+                if (data.isFull) {
+                    setError('That date is unavailable. Please choose another date.');
+                } else {
+                    setError('');
+                }
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setAvailability(null);
+                setAvailabilityError('Availability could not be loaded. We will check again when you continue.');
+            })
+            .finally(() => {
+                if (!cancelled) setAvailabilityLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedDate, disabledDateSet, minDate]);
+
     const checkAvailability = async () => {
         if (isDateDisabled(selectedDate)) return { isFull: true };
+        if (availability?.date === selectedDate) return availability;
         const response = await fetch(`/api/bookings/availability/${selectedDate}`);
         if (!response.ok) throw new Error('Unable to check availability');
         return response.json();
@@ -243,7 +293,7 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                 <section className="booking-choice-area booking-schedule-panel">
                     <div className="booking-schedule-group">
                         <p className="booking-field-label">Start time</p>
-                        <p className="booking-helper-copy">Choose the closest service start time.</p>
+                        <p className="booking-helper-copy">Choose a common start time or set your own.</p>
                         <div className="booking-time-list">
                             {QUICK_TIMES.map((time) => (
                                 <button
@@ -256,6 +306,14 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                                 </button>
                             ))}
                         </div>
+                        <label className={`booking-custom-time ${isCustomTime ? 'active' : ''}`}>
+                            <span>Set own time</span>
+                            <input
+                                type="time"
+                                value={selectedTime}
+                                onChange={(event) => setSelectedTime(event.target.value)}
+                            />
+                        </label>
                     </div>
 
                     <div className="booking-schedule-group">
@@ -273,14 +331,44 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                                 </button>
                             ))}
                         </div>
-                        {duration > 4 && <p className="mt-2 text-sm font-semibold text-slate-500">Extra service hours: ₱{((duration - 4) * 5000).toLocaleString()}</p>}
+                        {duration > 4 && <p className="mt-2 text-sm font-semibold text-slate-500">Extra service hours: PHP {((duration - 4) * 5000).toLocaleString()}</p>}
                     </div>
 
                     <div className="booking-summary-strip booking-schedule-summary">
-                        <span>Selected schedule</span>
-                        <strong>
-                            {selectedDate ? formatDisplayDate(selectedDate) : 'Choose a date'} · {selectedTime ? formatTimeRange(selectedTime) : 'Choose a time'}
-                        </strong>
+                        <div className="booking-schedule-summary-copy">
+                            <span>Selected schedule</span>
+                            <strong>
+                                {selectedDate ? formatDisplayDate(selectedDate) : 'Choose a date'} - {selectedTime ? formatTimeRange(selectedTime) : 'Choose a time'}
+                            </strong>
+                            <p>
+                                {!selectedDate
+                                    ? 'Pick a date to check capacity'
+                                    : availabilityLoading
+                                        ? 'Checking this date...'
+                                        : availability?.isFull
+                                            ? 'This date is fully booked'
+                                            : availability
+                                                ? 'Date is available'
+                                                : 'Availability pending'}
+                                {' '}
+                                {availabilityError
+                                    || (!selectedDate
+                                        ? 'Remaining event slots and guest capacity will appear here.'
+                                        : availability
+                                            ? `${availability.remainingEvents} event slot${availability.remainingEvents === 1 ? '' : 's'} left and ${availability.remainingPax} pax capacity remaining.`
+                                            : 'We will verify capacity before you continue.')}
+                            </p>
+                        </div>
+                        <div className={`booking-availability-metrics ${availability?.isFull ? 'full' : availability ? 'open' : ''}`}>
+                            <div>
+                                <span>Slots</span>
+                                <strong>{availabilityLoading ? '...' : availability ? availability.remainingEvents : '-'}</strong>
+                            </div>
+                            <div>
+                                <span>Pax left</span>
+                                <strong>{availabilityLoading ? '...' : availability ? availability.remainingPax.toLocaleString() : '-'}</strong>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -296,4 +384,3 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
 };
 
 export default CalendarView;
-

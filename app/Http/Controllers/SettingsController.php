@@ -51,15 +51,25 @@ class SettingsController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'type' => 'required|string|max:255|exists:event_types,slug',
+            'package_category' => 'nullable|string|max:255',
+            'event_type_slugs' => 'nullable',
             'base_price_per_head' => 'required|numeric|min:0',
             'minimum_pax' => 'required|integer|min:1',
             'description' => 'nullable|string',
             'inclusions' => 'nullable',
+            'amenities' => 'nullable',
+            'applicable_setups' => 'nullable',
             'menu_structure' => 'nullable',
+            'security_type' => 'nullable|string|max:255',
+            'security_label' => 'nullable|string|max:255',
             'is_active' => 'nullable|boolean',
         ]);
 
         $data['inclusions'] = $this->normalizeLines($data['inclusions'] ?? []);
+        $data['amenities'] = $this->normalizeLines($data['amenities'] ?? []);
+        $data['applicable_setups'] = $this->normalizeLines($data['applicable_setups'] ?? []);
+        $data['event_type_slugs'] = $this->normalizeSlugs($data['event_type_slugs'] ?? [$data['type']]);
+        $data['package_category'] = $data['package_category'] ?? 'standard';
         $data['menu_structure'] = $this->normalizeMenuStructure($data['menu_structure'] ?? []);
         $data['is_active'] = $data['is_active'] ?? true;
 
@@ -75,16 +85,31 @@ class SettingsController extends Controller
         $data = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|string|max:255|exists:event_types,slug',
+            'package_category' => 'nullable|string|max:255',
+            'event_type_slugs' => 'nullable',
             'base_price_per_head' => 'sometimes|required|numeric|min:0',
             'minimum_pax' => 'sometimes|required|integer|min:1',
             'description' => 'nullable|string',
             'inclusions' => 'nullable',
+            'amenities' => 'nullable',
+            'applicable_setups' => 'nullable',
             'menu_structure' => 'nullable',
+            'security_type' => 'nullable|string|max:255',
+            'security_label' => 'nullable|string|max:255',
             'is_active' => 'nullable|boolean',
         ]);
 
         if (array_key_exists('inclusions', $data)) {
             $data['inclusions'] = $this->normalizeLines($data['inclusions']);
+        }
+        if (array_key_exists('amenities', $data)) {
+            $data['amenities'] = $this->normalizeLines($data['amenities']);
+        }
+        if (array_key_exists('applicable_setups', $data)) {
+            $data['applicable_setups'] = $this->normalizeLines($data['applicable_setups']);
+        }
+        if (array_key_exists('event_type_slugs', $data)) {
+            $data['event_type_slugs'] = $this->normalizeSlugs($data['event_type_slugs']);
         }
         if (array_key_exists('menu_structure', $data)) {
             $data['menu_structure'] = $this->normalizeMenuStructure($data['menu_structure']);
@@ -119,10 +144,17 @@ class SettingsController extends Controller
             'icon' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'image' => 'nullable|string|max:2048',
+            'package_category' => 'nullable|string|max:255',
+            'applicable_setups' => 'nullable',
+            'security_type' => 'nullable|string|max:255',
+            'security_label' => 'nullable|string|max:255',
+            'security_description' => 'nullable|string',
         ]);
 
         $data['slug'] = $data['slug'] ?? Str::slug($data['label']);
         $data['icon'] = $data['icon'] ?? 'sparkles';
+        $data['package_category'] = $data['package_category'] ?? 'standard';
+        $data['applicable_setups'] = $this->normalizeLines($data['applicable_setups'] ?? []);
 
         if (EventType::where('slug', $data['slug'])->exists()) {
             return response()->json(['error' => 'An event type with this slug already exists.'], 422);
@@ -143,10 +175,30 @@ class SettingsController extends Controller
             'icon' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'image' => 'nullable|string|max:2048',
+            'package_category' => 'nullable|string|max:255',
+            'applicable_setups' => 'nullable',
+            'security_type' => 'nullable|string|max:255',
+            'security_label' => 'nullable|string|max:255',
+            'security_description' => 'nullable|string',
         ]);
 
         if (array_key_exists('slug', $data)) {
             Package::where('type', $eventType->slug)->update(['type' => $data['slug']]);
+            Package::all()->each(function (Package $package) use ($eventType, $data) {
+                $slugs = $package->event_type_slugs ?: [];
+                if (!in_array($eventType->slug, $slugs, true)) {
+                    return;
+                }
+
+                $package->event_type_slugs = array_values(array_unique(array_map(
+                    fn ($slug) => $slug === $eventType->slug ? $data['slug'] : $slug,
+                    $slugs
+                )));
+                $package->save();
+            });
+        }
+        if (array_key_exists('applicable_setups', $data)) {
+            $data['applicable_setups'] = $this->normalizeLines($data['applicable_setups']);
         }
 
         $eventType->update($data);
@@ -159,6 +211,16 @@ class SettingsController extends Controller
         $eventType = EventType::findOrFail($id);
 
         Package::where('type', $eventType->slug)->update(['type' => 'other']);
+        Package::all()->each(function (Package $package) use ($eventType) {
+            $slugs = $package->event_type_slugs ?: [];
+            if (!in_array($eventType->slug, $slugs, true)) {
+                return;
+            }
+
+            $remaining = array_values(array_filter($slugs, fn ($slug) => $slug !== $eventType->slug));
+            $package->event_type_slugs = $remaining ?: ['other'];
+            $package->save();
+        });
         $eventType->delete();
 
         return response()->json(['message' => 'Event type deleted successfully.']);
@@ -171,6 +233,15 @@ class SettingsController extends Controller
         }
 
         return array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $value))));
+    }
+
+    private function normalizeSlugs($value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_unique(array_filter(array_map('trim', $value))));
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', preg_split('/,|\r\n|\r|\n/', (string) $value)))));
     }
 
     private function normalizeMenuStructure($value): array

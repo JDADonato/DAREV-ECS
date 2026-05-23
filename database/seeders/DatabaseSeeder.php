@@ -65,15 +65,39 @@ class DatabaseSeeder extends Seeder
 
     private function seedEventTypes(): void
     {
+        $premiumSetups = [
+            'Elegant backdrop with floral arrangements',
+            'Red carpet rollout',
+            'Elegant Presidential Table Set-Up',
+            'Tiffany chairs with motif ribbons',
+            'Fresh flower centerpieces',
+            'Styled registration and gift tables',
+            'Free food tasting for two',
+        ];
+        $birthdaySetups = [
+            'Tiffany chairs with motif ribbons',
+            'Fresh flower centerpieces',
+            'Buffet table styling',
+            'Styled registration and gift tables',
+            'Free food tasting for two',
+        ];
+        $standardSetups = [
+            'Buffet table styling',
+            'Guest tables with floor-length mantels and lace',
+            'Complete dinnerware, flatware, and glassware',
+            'Uniformed waitstaff',
+            'Purified water and ice',
+        ];
+
         $events = [
-            ['slug' => 'formal-wedding', 'label' => 'Formal Wedding', 'icon' => 'wedding', 'description' => 'Elegant ceremonies & receptions', 'image' => '/images/event-types/formal-wedding.webp'],
-            ['slug' => 'debut', 'label' => 'Debut', 'icon' => 'crown', 'description' => '18th birthday celebrations', 'image' => '/images/event-types/debut.webp'],
-            ['slug' => 'casual-birthday', 'label' => 'Casual Birthday', 'icon' => 'cake', 'description' => 'Fun birthday parties', 'image' => '/images/event-types/casual-birthday.webp'],
-            ['slug' => 'corporate-seminar', 'label' => 'Corporate Seminar', 'icon' => 'briefcase', 'description' => 'Professional events & conferences', 'image' => '/images/event-types/corporate-seminar.webp'],
-            ['slug' => 'family-reunion', 'label' => 'Family Reunion', 'icon' => 'users', 'description' => 'Bringing families together', 'image' => '/images/event-types/family-reunion.webp'],
-            ['slug' => 'anniversary', 'label' => 'Anniversary', 'icon' => 'heart', 'description' => 'Celebrating milestones', 'image' => '/images/event-types/anniversary.webp'],
-            ['slug' => 'graduation', 'label' => 'Graduation', 'icon' => 'academic', 'description' => 'Academic celebrations', 'image' => '/images/event-types/graduation.webp'],
-            ['slug' => 'other', 'label' => 'Other', 'icon' => 'sparkles', 'description' => 'Any special occasion', 'image' => '/images/event-types/other.webp'],
+            ['slug' => 'formal-wedding', 'label' => 'Formal Wedding', 'icon' => 'wedding', 'description' => 'Grand ceremonial wedding receptions with premium styling.', 'image' => '/images/event-types/formal-wedding.webp', 'package_category' => 'premium', 'applicable_setups' => $premiumSetups, 'security_type' => 'contingency', 'security_label' => '10% Contingency', 'security_description' => 'Flexible emergency fund built into the estimate for extra guests, overtime, or unexpected event overages.'],
+            ['slug' => 'debut', 'label' => 'Debut', 'icon' => 'crown', 'description' => '18th birthday celebrations with ceremonial debut traditions.', 'image' => '/images/event-types/debut.webp', 'package_category' => 'premium', 'applicable_setups' => array_merge($premiumSetups, ['18 Roses', '18 Candles', 'Bouquet for the Debutant']), 'security_type' => 'contingency', 'security_label' => '10% Contingency', 'security_description' => 'Flexible emergency fund built into the estimate for extra guests, overtime, or unexpected event overages.'],
+            ['slug' => 'casual-birthday', 'label' => 'Casual Birthday', 'icon' => 'cake', 'description' => 'Elegant birthday parties without the ceremonial wedding build-out.', 'image' => '/images/event-types/casual-birthday.webp', 'package_category' => 'birthday', 'applicable_setups' => $birthdaySetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for broken plates or missing equipment.'],
+            ['slug' => 'corporate-seminar', 'label' => 'Corporate Seminar', 'icon' => 'briefcase', 'description' => 'Professional seminars, conferences, and company gatherings.', 'image' => '/images/event-types/corporate-seminar.webp', 'package_category' => 'standard', 'applicable_setups' => $standardSetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for equipment damages.'],
+            ['slug' => 'family-reunion', 'label' => 'Family Reunion', 'icon' => 'users', 'description' => 'Large family lunches, reunions, and homecoming celebrations.', 'image' => '/images/event-types/family-reunion.webp', 'package_category' => 'standard', 'applicable_setups' => $standardSetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for equipment damages.'],
+            ['slug' => 'anniversary', 'label' => 'Anniversary', 'icon' => 'heart', 'description' => 'Milestone dinners and celebration receptions.', 'image' => '/images/event-types/anniversary.webp', 'package_category' => 'standard', 'applicable_setups' => $standardSetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for equipment damages.'],
+            ['slug' => 'graduation', 'label' => 'Graduation', 'icon' => 'academic', 'description' => 'Academic recognition parties and school celebrations.', 'image' => '/images/event-types/graduation.webp', 'package_category' => 'standard', 'applicable_setups' => $standardSetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for equipment damages.'],
+            ['slug' => 'other', 'label' => 'Other', 'icon' => 'sparkles', 'description' => 'Flexible standard package setup for special occasions.', 'image' => '/images/event-types/other.webp', 'package_category' => 'standard', 'applicable_setups' => $standardSetups, 'security_type' => 'cash_bond', 'security_label' => 'Php 1,500 Cash Bond', 'security_description' => 'Refundable deposit for equipment damages.'],
         ];
 
         foreach ($events as $event) {
@@ -156,41 +180,173 @@ class DatabaseSeeder extends Seeder
 
     private function seedPackages(): void
     {
+        Package::whereIn('name', [
+            'Wedding & Debut Anthurium',
+            'Corporate Standard',
+            'Social Celebration',
+        ])->delete();
+
+        $premiumAmenities = [
+            'Elegant backdrop with floral arrangements',
+            'Red carpet rollout',
+            'Elegant Presidential Table Set-Up',
+            'Tiffany chairs for all guests with motif ribbons',
+            'Fresh flower centerpieces on each guest table',
+            'Bottle of wine for toasting',
+            'Styled registration and gift tables',
+            'Buffet table styling with centerpiece, skirting, and lights',
+            'Complete dinnerware, flatware, and glassware',
+            'Free food tasting for two',
+        ];
+        $birthdayAmenities = [
+            'Tiffany chairs for all guests with motif ribbons',
+            'Fresh flower centerpieces on each guest table',
+            'Bottle of wine for toasting',
+            'Styled registration and gift tables',
+            'Buffet table styling',
+            'Complete dinnerware, flatware, and glassware',
+            'Free food tasting for two',
+        ];
+        $standardAmenities = [
+            'Buffet table styling',
+            'Guest tables with floor-length mantels and lace',
+            'Artificial flower centerpieces for guest tables',
+            'Complete dinnerware, flatware, and glassware',
+            'Uniformed waitstaff',
+            'Purified water and ice',
+        ];
+
         $packages = [
             [
-                'name' => 'Wedding & Debut Anthurium',
-                'type' => 'wedding',
+                'name' => 'Anthurium',
+                'type' => 'formal-wedding',
+                'package_category' => 'premium',
+                'event_type_slugs' => ['formal-wedding', 'debut'],
+                'base_price_per_head' => 950,
+                'minimum_pax' => 1,
+                'description' => 'Wedding and debut tier with beef main course, fish, pasta, chicken, and pork belly carving station.',
+                'inclusions' => ['Beef main course included', 'Pork belly carving station', 'Full ceremonial setup'],
+                'amenities' => $premiumAmenities,
+                'applicable_setups' => ['Premium ceremonial setup', 'Debut exclusives apply for debut events', '150+ guest perks may be added when qualified'],
+                'menu_structure' => ['starter' => 2, 'main' => 3, 'side' => 1, 'dessert' => 2, 'drink' => 1],
+                'security_type' => 'contingency',
+                'security_label' => '10% Contingency',
+            ],
+            [
+                'name' => 'Stargazer',
+                'type' => 'formal-wedding',
+                'package_category' => 'premium',
+                'event_type_slugs' => ['formal-wedding', 'debut'],
+                'base_price_per_head' => 1250,
+                'minimum_pax' => 1,
+                'description' => 'Expanded wedding and debut tier with a broader premium menu and complete grand setup.',
+                'inclusions' => ['Expanded premium menu', 'Beef main course included', 'Full ceremonial setup'],
+                'amenities' => $premiumAmenities,
+                'applicable_setups' => ['Premium ceremonial setup', 'Debut exclusives apply for debut events', '150+ guest perks may be added when qualified'],
+                'menu_structure' => ['starter' => 2, 'main' => 4, 'side' => 1, 'dessert' => 2, 'drink' => 1],
+                'security_type' => 'contingency',
+                'security_label' => '10% Contingency',
+            ],
+            [
+                'name' => 'Carnation',
+                'type' => 'formal-wedding',
+                'package_category' => 'premium',
+                'event_type_slugs' => ['formal-wedding', 'debut'],
+                'base_price_per_head' => 1450,
+                'minimum_pax' => 1,
+                'description' => 'Top wedding and debut tier with the widest menu allowance and strongest reception styling.',
+                'inclusions' => ['Widest wedding menu allowance', 'Beef main course included', 'Best fit for grand receptions'],
+                'amenities' => $premiumAmenities,
+                'applicable_setups' => ['Premium ceremonial setup', 'Debut exclusives apply for debut events', '150+ guest perks may be added when qualified'],
+                'menu_structure' => ['starter' => 3, 'main' => 4, 'side' => 2, 'dessert' => 2, 'drink' => 1],
+                'security_type' => 'contingency',
+                'security_label' => '10% Contingency',
+            ],
+            [
+                'name' => 'Anthurium',
+                'type' => 'casual-birthday',
+                'package_category' => 'birthday',
+                'event_type_slugs' => ['casual-birthday'],
+                'base_price_per_head' => 800,
+                'minimum_pax' => 1,
+                'description' => 'Lite birthday tier with fish, pasta, chicken, and pork belly carving station.',
+                'inclusions' => ['Birthday-scaled menu', 'Pork belly carving station', 'Tiffany chair party setup'],
+                'amenities' => $birthdayAmenities,
+                'applicable_setups' => ['Elegant birthday setup', 'No red carpet, backdrop, or presidential table'],
+                'menu_structure' => ['starter' => 1, 'main' => 2, 'side' => 1, 'dessert' => 2, 'drink' => 1],
+                'security_type' => 'cash_bond',
+                'security_label' => 'Php 1,500 Cash Bond',
+            ],
+            [
+                'name' => 'Stargazer',
+                'type' => 'casual-birthday',
+                'package_category' => 'birthday',
+                'event_type_slugs' => ['casual-birthday'],
+                'base_price_per_head' => 980,
+                'minimum_pax' => 1,
+                'description' => 'Mid birthday tier with extra menu variety while keeping the setup lighter.',
+                'inclusions' => ['More menu variety', 'No red carpet or backdrop', 'Cash bond only'],
+                'amenities' => $birthdayAmenities,
+                'applicable_setups' => ['Elegant birthday setup', 'No red carpet, backdrop, or presidential table'],
+                'menu_structure' => ['starter' => 2, 'main' => 3, 'side' => 1, 'dessert' => 2, 'drink' => 1],
+                'security_type' => 'cash_bond',
+                'security_label' => 'Php 1,500 Cash Bond',
+            ],
+            [
+                'name' => 'Carnation',
+                'type' => 'casual-birthday',
+                'package_category' => 'birthday',
+                'event_type_slugs' => ['casual-birthday'],
+                'base_price_per_head' => 1120,
+                'minimum_pax' => 1,
+                'description' => 'Highest birthday tier with the broadest party menu but no ceremonial production.',
+                'inclusions' => ['Broadest birthday menu', 'Elegant party setup', 'Cash bond only'],
+                'amenities' => $birthdayAmenities,
+                'applicable_setups' => ['Elegant birthday setup', 'No red carpet, backdrop, or presidential table'],
+                'menu_structure' => ['starter' => 2, 'main' => 3, 'side' => 1, 'dessert' => 3, 'drink' => 1],
+                'security_type' => 'cash_bond',
+                'security_label' => 'Php 1,500 Cash Bond',
+            ],
+            [
+                'name' => 'Package A - Tiffany Setup',
+                'type' => 'corporate-seminar',
+                'package_category' => 'standard',
+                'event_type_slugs' => ['corporate-seminar', 'family-reunion', 'anniversary', 'graduation', 'other'],
                 'base_price_per_head' => 850,
-                'minimum_pax' => 100,
-                'description' => 'Premium wedding package including elegant styling and comprehensive amenities.',
-                'inclusions' => ['Elegant Backdrop & Floral Arrangement', 'Presidential Table Set-Up', 'Tiffany Chairs with Motif Ribbon', '3-Layer Fondant Cake', 'Professional Emcee & Bridal Car', 'Bottle of Wine for Toasting'],
-                'menu_structure' => ['starters' => 2, 'mains' => 4, 'sides' => 1, 'desserts' => 1, 'drinks' => 1],
+                'minimum_pax' => 1,
+                'description' => 'Standard event package with Tiffany chairs and motif ribbons.',
+                'inclusions' => ['Tiffany chairs with motif ribbons', '+12% VAT applies', 'Refundable cash bond'],
+                'amenities' => $standardAmenities,
+                'applicable_setups' => ['Standard event setup', 'Artificial flower centerpieces'],
+                'menu_structure' => ['starter' => 2, 'main' => 2, 'side' => 1, 'dessert' => 1, 'drink' => 1],
+                'security_type' => 'cash_bond',
+                'security_label' => 'Php 1,500 Cash Bond',
             ],
             [
-                'name' => 'Corporate Standard',
-                'type' => 'corporate',
-                'base_price_per_head' => 650,
-                'minimum_pax' => 30,
-                'description' => 'Professional catering for seminars, conferences, and corporate events.',
-                'inclusions' => ['Buffet Service Setup', 'Uniformed Waiters', 'Round Tables with Linens', 'Purified Drinking Water', 'Ice for Drinks'],
-                'menu_structure' => ['starters' => 1, 'mains' => 3, 'sides' => 1, 'desserts' => 1, 'drinks' => 1],
-            ],
-            [
-                'name' => 'Social Celebration',
-                'type' => 'social',
-                'base_price_per_head' => 550,
-                'minimum_pax' => 50,
-                'description' => 'Perfect for birthdays, reunions, and casual gatherings.',
-                'inclusions' => ['Basic Balloon Decor', 'Buffet Setup', 'Cake Table', 'Sound System Basic'],
-                'menu_structure' => ['starters' => 1, 'mains' => 2, 'sides' => 1, 'desserts' => 1, 'drinks' => 1],
+                'name' => 'Package B - Monoblock Setup',
+                'type' => 'corporate-seminar',
+                'package_category' => 'standard',
+                'event_type_slugs' => ['corporate-seminar', 'family-reunion', 'anniversary', 'graduation', 'other'],
+                'base_price_per_head' => 750,
+                'minimum_pax' => 1,
+                'description' => 'Budget-conscious standard package with monoblock chairs and motif ribbons.',
+                'inclusions' => ['Monoblock chairs with motif ribbons', '+12% VAT applies', 'Refundable cash bond'],
+                'amenities' => $standardAmenities,
+                'applicable_setups' => ['Standard event setup', 'Artificial flower centerpieces'],
+                'menu_structure' => ['starter' => 1, 'main' => 2, 'side' => 1, 'dessert' => 1, 'drink' => 1],
+                'security_type' => 'cash_bond',
+                'security_label' => 'Php 1,500 Cash Bond',
             ],
         ];
 
         foreach ($packages as $package) {
-            Package::firstOrCreate(['name' => $package['name']], $package);
+            Package::updateOrCreate(
+                ['name' => $package['name'], 'type' => $package['type']],
+                $package
+            );
         }
 
-        $this->command->info('Seeded 3 packages');
+        $this->command->info('Seeded current package tiers');
     }
 
     private function seedBusinessRules(): void

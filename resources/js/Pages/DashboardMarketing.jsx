@@ -21,6 +21,50 @@ import {
 } from '../utils/dashboardUtils';
 import { getListData } from '../utils/apiResponses';
 
+const PACKAGE_CATEGORY_OPTIONS = [
+    { value: 'premium', label: 'Weddings & Debuts' },
+    { value: 'birthday', label: 'Birthdays' },
+    { value: 'standard', label: 'Standard Events' },
+];
+
+const SECURITY_OPTIONS = [
+    { value: 'contingency', label: '10% Contingency' },
+    { value: 'cash_bond', label: 'Php 1,500 Cash Bond' },
+];
+
+const emptyPackageForm = (defaultType = '') => ({
+    name: '',
+    type: defaultType,
+    package_category: 'standard',
+    event_type_slugs: defaultType ? [defaultType] : [],
+    base_price_per_head: '',
+    minimum_pax: 1,
+    description: '',
+    inclusions: '',
+    amenities: '',
+    applicable_setups: '',
+    menu_structure: { starter: 1, main: 2, side: 1, dessert: 1, drink: 1 },
+    security_type: 'cash_bond',
+    security_label: 'Php 1,500 Cash Bond',
+});
+
+const emptyEventTypeForm = () => ({
+    label: '',
+    slug: '',
+    icon: 'sparkles',
+    description: '',
+    image: '',
+    package_category: 'standard',
+    applicable_setups: '',
+    security_type: 'cash_bond',
+    security_label: 'Php 1,500 Cash Bond',
+    security_description: 'Refundable deposit for broken plates or missing equipment.',
+});
+
+const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
+const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
+const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
+
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
     const toast = useToast();
@@ -31,11 +75,12 @@ const DashboardMarketing = () => {
     const [menuItems, setMenuItems] = useState([]);
     const [packages, setPackages] = useState([]);
     const [eventTypes, setEventTypes] = useState([]);
-    const [eventTypeForm, setEventTypeForm] = useState({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+    const [eventTypeForm, setEventTypeForm] = useState(emptyEventTypeForm());
     const [editingEventTypeId, setEditingEventTypeId] = useState(null);
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
     const [activeConfigTab, setActiveConfigTab] = useState('packages');
-    const [packageForm, setPackageForm] = useState({ name: '', type: '', base_price_per_head: '', minimum_pax: 50, description: '', inclusions: '' });
+    const [packageForm, setPackageForm] = useState(emptyPackageForm());
+    const [editingPackageId, setEditingPackageId] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [updatingBookingIds, setUpdatingBookingIds] = useState({});
 
@@ -172,7 +217,14 @@ const DashboardMarketing = () => {
                 const data = await eventRes.json();
                 const types = data.data || data;
                 setEventTypes(types);
-                setPackageForm(prev => ({ ...prev, type: prev.type || types[0]?.slug || '' }));
+                setPackageForm(prev => {
+                    const defaultType = prev.type || types[0]?.slug || '';
+                    return {
+                        ...prev,
+                        type: defaultType,
+                        event_type_slugs: prev.event_type_slugs?.length ? prev.event_type_slugs : (defaultType ? [defaultType] : []),
+                    };
+                });
             }
         } catch (error) {
             console.error('Error fetching marketing settings:', error);
@@ -199,13 +251,14 @@ const DashboardMarketing = () => {
         e.preventDefault();
         setSettingsSaving(true);
         try {
-            const response = await fetch('/api/settings/packages', {
-                method: 'POST',
+            const response = await fetch(editingPackageId ? `/api/settings/packages/${editingPackageId}` : '/api/settings/packages', {
+                method: editingPackageId ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(packageForm),
             });
             if (response.ok) {
-                setPackageForm({ name: '', type: eventTypes[0]?.slug || '', base_price_per_head: '', minimum_pax: 50, description: '', inclusions: '' });
+                setEditingPackageId(null);
+                setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
                 fetchMarketingSettings();
             }
         } catch (error) {
@@ -215,9 +268,40 @@ const DashboardMarketing = () => {
         }
     };
 
+    const startEditingPackage = (pkg) => {
+        const defaultType = pkg.type || eventTypes[0]?.slug || '';
+        setEditingPackageId(pkg.id);
+        setPackageForm({
+            name: pkg.name || '',
+            type: defaultType,
+            package_category: pkg.package_category || 'standard',
+            event_type_slugs: pkg.event_type_slugs?.length ? pkg.event_type_slugs : (defaultType ? [defaultType] : []),
+            base_price_per_head: pkg.base_price_per_head ?? '',
+            minimum_pax: pkg.minimum_pax ?? 1,
+            description: pkg.description || '',
+            inclusions: linesToText(pkg.inclusions),
+            amenities: linesToText(pkg.amenities),
+            applicable_setups: linesToText(pkg.applicable_setups),
+            menu_structure: {
+                starter: Number(pkg.menu_structure?.starter ?? pkg.menu_structure?.starters ?? 0),
+                main: Number(pkg.menu_structure?.main ?? pkg.menu_structure?.mains ?? 0),
+                side: Number(pkg.menu_structure?.side ?? pkg.menu_structure?.sides ?? 0),
+                dessert: Number(pkg.menu_structure?.dessert ?? pkg.menu_structure?.desserts ?? 0),
+                drink: Number(pkg.menu_structure?.drink ?? pkg.menu_structure?.refreshments ?? 0),
+            },
+            security_type: pkg.security_type || 'cash_bond',
+            security_label: pkg.security_label || (pkg.security_type === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond'),
+        });
+    };
+
+    const resetPackageForm = () => {
+        setEditingPackageId(null);
+        setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
+    };
+
     const resetEventTypeForm = () => {
         setEditingEventTypeId(null);
-        setEventTypeForm({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+        setEventTypeForm(emptyEventTypeForm());
     };
 
     const handleEventTypeSubmit = async (e) => {
@@ -249,6 +333,11 @@ const DashboardMarketing = () => {
             icon: eventType.icon || 'sparkles',
             description: eventType.description || '',
             image: eventType.image || '',
+            package_category: eventType.package_category || 'standard',
+            applicable_setups: linesToText(eventType.applicable_setups),
+            security_type: eventType.security_type || 'cash_bond',
+            security_label: eventType.security_label || (eventType.security_type === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond'),
+            security_description: eventType.security_description || '',
         });
     };
 
@@ -1066,14 +1155,44 @@ const DashboardMarketing = () => {
                         <form onSubmit={handlePackageSubmit} className="border-b border-gray-100 p-6">
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                                 <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
+                                <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
                                     {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                </select>
+                                <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
+                                    {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                                 </select>
                                 <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <button disabled={settingsSaving} className="lg:col-span-3 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : 'Create Package'}</button>
-                                <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <button disabled={settingsSaving} className="lg:col-span-1 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : editingPackageId ? 'Save' : 'Create'}</button>
+                                <label className="lg:col-span-4 text-xs font-black uppercase tracking-wide text-slate-500">
+                                    Connected event types
+                                    <select multiple value={packageForm.event_type_slugs || []} onChange={e => setPackageForm({ ...packageForm, event_type_slugs: Array.from(e.target.selectedOptions).map(option => option.value) })} className="mt-2 min-h-28 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium normal-case outline-none focus:ring-2 focus:ring-primary-100">
+                                        {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                    </select>
+                                </label>
+                                <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
+                                    {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <div className="lg:col-span-12 grid grid-cols-2 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-4 md:grid-cols-5">
+                                    {[
+                                        ['starter', 'Starters'],
+                                        ['main', 'Main Dish'],
+                                        ['side', 'Sides'],
+                                        ['dessert', 'Dessert'],
+                                        ['drink', 'Refreshments'],
+                                    ].map(([key, label]) => (
+                                        <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                            {label}
+                                            <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold normal-case outline-none focus:ring-2 focus:ring-primary-100" />
+                                        </label>
+                                    ))}
+                                </div>
+                                {editingPackageId && <button type="button" onClick={resetPackageForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Package Edit</button>}
                             </div>
                         </form>
                         <div className="overflow-x-auto">
@@ -1082,9 +1201,12 @@ const DashboardMarketing = () => {
                                     <tr>
                                         <th className="px-6 py-4 text-left">Package</th>
                                         <th className="px-6 py-4 text-left">Event Type</th>
+                                        <th className="px-6 py-4 text-left">Category</th>
+                                        <th className="px-6 py-4 text-left">Connected To</th>
                                         <th className="px-6 py-4 text-right">Price / Head</th>
                                         <th className="px-6 py-4 text-right">Min Pax</th>
                                         <th className="px-6 py-4 text-left">Description</th>
+                                        <th className="px-6 py-4 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -1092,9 +1214,14 @@ const DashboardMarketing = () => {
                                         <tr key={pkg.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 font-bold text-gray-900">{pkg.name}</td>
                                             <td className="px-6 py-4"><span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-black uppercase text-primary-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
+                                            <td className="px-6 py-4 text-gray-600">{getCategoryLabel(pkg.package_category)}</td>
+                                            <td className="px-6 py-4 text-gray-600">{(pkg.event_type_slugs || [pkg.type]).map(slug => eventTypes.find(type => type.slug === slug)?.label || slug).join(', ')}</td>
                                             <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
                                             <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
+                                            <td className="px-6 py-4 text-right">
+                                                <button type="button" onClick={() => startEditingPackage(pkg)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1112,7 +1239,16 @@ const DashboardMarketing = () => {
                                 <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 <button disabled={settingsSaving} className="lg:col-span-2 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
-                                <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-10 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
+                                    {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
+                                    {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
                             </div>
                         </form>
@@ -1122,6 +1258,8 @@ const DashboardMarketing = () => {
                                     <tr>
                                         <th className="px-6 py-4 text-left">Event Type</th>
                                         <th className="px-6 py-4 text-left">Short Name</th>
+                                        <th className="px-6 py-4 text-left">Category</th>
+                                        <th className="px-6 py-4 text-left">Security</th>
                                         <th className="px-6 py-4 text-left">Icon</th>
                                         <th className="px-6 py-4 text-left">Description</th>
                                         <th className="px-6 py-4 text-right">Actions</th>
@@ -1132,6 +1270,8 @@ const DashboardMarketing = () => {
                                         <tr key={type.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 font-bold text-gray-900">{type.label}</td>
                                             <td className="px-6 py-4"><span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black uppercase text-gray-700">{type.slug}</span></td>
+                                            <td className="px-6 py-4 text-gray-600">{getCategoryLabel(type.package_category)}</td>
+                                            <td className="px-6 py-4 text-gray-600">{type.security_label || getSecurityLabel(type.security_type)}</td>
                                             <td className="px-6 py-4 text-gray-600">{type.icon}</td>
                                             <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
                                             <td className="px-6 py-4 text-right">

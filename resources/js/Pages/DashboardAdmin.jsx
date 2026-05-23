@@ -28,6 +28,67 @@ const paymentLabel = (type) => ({
     Final: 'Final Payment',
 }[type] || type || 'Payment');
 
+const PACKAGE_CATEGORY_OPTIONS = [
+    { value: 'premium', label: 'Weddings & Debuts' },
+    { value: 'birthday', label: 'Birthdays' },
+    { value: 'standard', label: 'Standard Events' },
+];
+
+const SECURITY_OPTIONS = [
+    { value: 'contingency', label: '10% Contingency' },
+    { value: 'cash_bond', label: 'Php 1,500 Cash Bond' },
+];
+
+const FORECAST_PERIOD_OPTIONS = [
+    { value: 'monthly', label: 'Monthly' },
+    { value: 'quarterly', label: 'Quarterly' },
+];
+
+const SMA_WINDOW_OPTIONS = [2, 3, 4, 5, 6];
+const FORECAST_HORIZON_OPTIONS = [3, 4, 6, 8, 12];
+const ANALYTICS_YEARS = [2024, 2025, 2026];
+const SNAPSHOT_WINDOW_OPTIONS = [
+    { value: 'all', label: 'All time' },
+    { value: '3m', label: 'Last 3 months' },
+    { value: '6m', label: 'Last 6 months' },
+    { value: '12m', label: 'Last 12 months' },
+    { value: '24m', label: 'Last 24 months' },
+    { value: 'ytd', label: 'Year to date' },
+];
+
+const emptyPackageForm = (defaultType = '') => ({
+    name: '',
+    type: defaultType,
+    package_category: 'standard',
+    event_type_slugs: defaultType ? [defaultType] : [],
+    base_price_per_head: '',
+    minimum_pax: 1,
+    description: '',
+    inclusions: '',
+    amenities: '',
+    applicable_setups: '',
+    menu_structure: { starter: 1, main: 2, side: 1, dessert: 1, drink: 1 },
+    security_type: 'cash_bond',
+    security_label: 'Php 1,500 Cash Bond',
+});
+
+const emptyEventTypeForm = () => ({
+    label: '',
+    slug: '',
+    icon: 'sparkles',
+    description: '',
+    image: '',
+    package_category: 'standard',
+    applicable_setups: '',
+    security_type: 'cash_bond',
+    security_label: 'Php 1,500 Cash Bond',
+    security_description: 'Refundable deposit for broken plates or missing equipment.',
+});
+
+const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
+const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
+const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
+
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -52,16 +113,10 @@ const DashboardAdmin = () => {
     const [activeConfigTab, setActiveConfigTab] = useState('packages');
     const [packages, setPackages] = useState([]);
     const [eventTypes, setEventTypes] = useState([]);
-    const [eventTypeForm, setEventTypeForm] = useState({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+    const [eventTypeForm, setEventTypeForm] = useState(emptyEventTypeForm());
     const [editingEventTypeId, setEditingEventTypeId] = useState(null);
-    const [packageForm, setPackageForm] = useState({
-        name: '',
-        type: '',
-        base_price_per_head: '',
-        minimum_pax: 50,
-        description: '',
-        inclusions: '',
-    });
+    const [packageForm, setPackageForm] = useState(emptyPackageForm());
+    const [editingPackageId, setEditingPackageId] = useState(null);
     const [packageSaving, setPackageSaving] = useState(false);
 
     // ==========================================
@@ -108,6 +163,16 @@ const DashboardAdmin = () => {
         city: '',
         pax_min: '',
         pax_max: '',
+        trend_months: '6',
+        revenue_forecast_period: 'quarterly',
+        revenue_forecast_horizon: '4',
+        revenue_sma_window: '3',
+        pax_projection_period: 'monthly',
+        pax_projection_horizon: '6',
+        pax_sma_window: '3',
+        pax_projection_year: '',
+        pax_projection_quarter: '',
+        snapshot_window: 'all',
     });
     const [reportWidgets, setReportWidgets] = useState([]);
     const [reportTemplates, setReportTemplates] = useState([]);
@@ -139,6 +204,14 @@ const DashboardAdmin = () => {
     const operationalAlerts = analytics?.operationalAlerts || analytics?.alerts || [];
     const topSellerData = analytics?.topSellers || [];
     const peakSeasonData = analytics?.peakSeasons || [];
+    const revenueForecast = analytics?.revenueForecast || {};
+    const revenueForecastData = revenueForecast.rows || [];
+    const revenueForecastSummary = revenueForecast.summary || {};
+    const paxDemandProjection = analytics?.paxDemandProjection || {};
+    const paxDemandData = paxDemandProjection.rows || [];
+    const paxDemandSummary = paxDemandProjection.summary || {};
+    const businessSnapshot = analytics?.businessSnapshot || {};
+    const businessSnapshotCards = businessSnapshot.cards || [];
 
     // Toast notification
     const [toast, setToast] = useState(null);
@@ -159,6 +232,12 @@ const DashboardAdmin = () => {
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
+    };
+
+    const formatAnalyticsCardValue = (value, format) => {
+        if (format === 'currency') return formatCurrency(value || 0);
+        if (format === 'percent') return `${Number(value || 0).toLocaleString()}%`;
+        return Number(value || 0).toLocaleString();
     };
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
@@ -476,7 +555,14 @@ const DashboardAdmin = () => {
             setPackages(packageData.data || packageData);
             const types = eventData.data || eventData;
             setEventTypes(types);
-            setPackageForm(prev => ({ ...prev, type: prev.type || types[0]?.slug || '' }));
+            setPackageForm(prev => {
+                const defaultType = prev.type || types[0]?.slug || '';
+                return {
+                    ...prev,
+                    type: defaultType,
+                    event_type_slugs: prev.event_type_slugs?.length ? prev.event_type_slugs : (defaultType ? [defaultType] : []),
+                };
+            });
         } catch (error) {
             console.error(error);
         }
@@ -486,15 +572,16 @@ const DashboardAdmin = () => {
         e.preventDefault();
         setPackageSaving(true);
         try {
-            const res = await fetch('/api/admin/packages', {
-                method: 'POST',
+            const res = await fetch(editingPackageId ? `/api/admin/packages/${editingPackageId}` : '/api/admin/packages', {
+                method: editingPackageId ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(packageForm),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                showToast('Package preset created');
-                setPackageForm({ name: '', type: eventTypes[0]?.slug || '', base_price_per_head: '', minimum_pax: 50, description: '', inclusions: '' });
+                showToast(editingPackageId ? 'Package preset updated' : 'Package preset created');
+                setEditingPackageId(null);
+                setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
                 bustAdminCache('/api/packages?per_page=100');
                 fetchPackages();
             } else {
@@ -508,9 +595,40 @@ const DashboardAdmin = () => {
         }
     };
 
+    const startEditingPackage = (pkg) => {
+        const defaultType = pkg.type || eventTypes[0]?.slug || '';
+        setEditingPackageId(pkg.id);
+        setPackageForm({
+            name: pkg.name || '',
+            type: defaultType,
+            package_category: pkg.package_category || 'standard',
+            event_type_slugs: pkg.event_type_slugs?.length ? pkg.event_type_slugs : (defaultType ? [defaultType] : []),
+            base_price_per_head: pkg.base_price_per_head ?? '',
+            minimum_pax: pkg.minimum_pax ?? 1,
+            description: pkg.description || '',
+            inclusions: linesToText(pkg.inclusions),
+            amenities: linesToText(pkg.amenities),
+            applicable_setups: linesToText(pkg.applicable_setups),
+            menu_structure: {
+                starter: Number(pkg.menu_structure?.starter ?? pkg.menu_structure?.starters ?? 0),
+                main: Number(pkg.menu_structure?.main ?? pkg.menu_structure?.mains ?? 0),
+                side: Number(pkg.menu_structure?.side ?? pkg.menu_structure?.sides ?? 0),
+                dessert: Number(pkg.menu_structure?.dessert ?? pkg.menu_structure?.desserts ?? 0),
+                drink: Number(pkg.menu_structure?.drink ?? pkg.menu_structure?.refreshments ?? 0),
+            },
+            security_type: pkg.security_type || 'cash_bond',
+            security_label: pkg.security_label || (pkg.security_type === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond'),
+        });
+    };
+
+    const resetPackageForm = () => {
+        setEditingPackageId(null);
+        setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
+    };
+
     const resetEventTypeForm = () => {
         setEditingEventTypeId(null);
-        setEventTypeForm({ label: '', slug: '', icon: 'sparkles', description: '', image: '' });
+        setEventTypeForm(emptyEventTypeForm());
     };
 
     const handleEventTypeSubmit = async (e) => {
@@ -548,6 +666,11 @@ const DashboardAdmin = () => {
             icon: eventType.icon || 'sparkles',
             description: eventType.description || '',
             image: eventType.image || '',
+            package_category: eventType.package_category || 'standard',
+            applicable_setups: linesToText(eventType.applicable_setups),
+            security_type: eventType.security_type || 'cash_bond',
+            security_label: eventType.security_label || (eventType.security_type === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond'),
+            security_description: eventType.security_description || '',
         });
     };
 
@@ -683,10 +806,10 @@ const DashboardAdmin = () => {
             }));
     }
 
-    const fetchAnalytics = async ({ silent = false } = {}) => {
+    const fetchAnalytics = async ({ silent = false, filters = analyticsFilters } = {}) => {
         if (!silent) setAnalyticsLoading(true);
         try {
-            const params = new URLSearchParams(Object.entries(analyticsFilters).filter(([, value]) => value !== ''));
+            const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''));
             const path = `/api/admin/analytics${params.toString() ? `?${params.toString()}` : ''}`;
             const res = await fetch(path);
             if (!res.ok) throw new Error('Analytics request failed');
@@ -1200,10 +1323,26 @@ const DashboardAdmin = () => {
                                 <div className="admin-panel p-6">
                                     <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                                        Revenue Trends (Last 6 Months)
+                                        Revenue Trends (Last {analyticsFilters.trend_months || 6} Months)
                                     </h3>
+                                    <div className="mb-4 flex justify-end">
+                                        <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                            Window
+                                            <select
+                                                value={analyticsFilters.trend_months}
+                                                onChange={(event) => {
+                                                    const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
+                                                    setAnalyticsFilters(nextFilters);
+                                                    fetchAnalytics({ filters: nextFilters });
+                                                }}
+                                                className="ml-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100"
+                                            >
+                                                {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
+                                            </select>
+                                        </label>
+                                    </div>
                                     <div className="h-64 flex items-end justify-between gap-2 overflow-hidden">
-                                        {(revenueTrendData.length ? revenueTrendData.slice(-6) : []).map((item, i) => {
+                                        {(revenueTrendData.length ? revenueTrendData : []).map((item, i) => {
                                             const maxRevenue = Math.max(...revenueTrendData.map(row => row.revenue || 0), 1);
                                             const val = Math.max(8, Math.round(((item.revenue || 0) / maxRevenue) * 100));
                                             return (
@@ -1232,7 +1371,7 @@ const DashboardAdmin = () => {
                                             return (
                                             <div key={i}>
                                                 <div className="flex justify-between text-sm mb-2">
-                                                    <span className="font-bold text-gray-700">{item.name}</span>
+                                                    <span className="font-bold text-gray-700">{item.label || item.name}</span>
                                                     <span className="text-gray-500 font-bold">{item.count} Bookings</span>
                                                 </div>
                                                 <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
@@ -1251,7 +1390,7 @@ const DashboardAdmin = () => {
                                     </h3>
                                     <div className="grid grid-cols-6 md:grid-cols-12 gap-3 text-center text-xs">
                                         {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, i) => {
-                                            const val = peakSeasonData.find(item => item.month === month)?.count || 0;
+                                            const val = peakSeasonData.find(item => item.month === month)?.events || peakSeasonData.find(item => item.month === month)?.count || 0;
                                             const bgColor = val <= 3 ? 'bg-green-100 text-green-800' : val <= 6 ? 'bg-yellow-200 text-yellow-800' : val <= 8 ? 'bg-orange-300 text-orange-900' : 'bg-red-500 text-white font-bold shadow-sm';
 
                                             return (
@@ -1273,58 +1412,212 @@ const DashboardAdmin = () => {
                         </div>
                     )}
                     {activeTab === 'analytics' && (
-                        <div className="animate-fadeIn space-y-8">
-                            <div className="admin-panel p-5">
-                                <div className="grid grid-cols-1 gap-3 md:grid-cols-4 xl:grid-cols-8">
-                                    {[
-                                        ['date_from', 'From', 'date'],
-                                        ['date_to', 'To', 'date'],
-                                        ['event_type', 'Event type', 'text'],
-                                        ['booking_status', 'Booking status', 'text'],
-                                        ['payment_status', 'Payment status', 'text'],
-                                        ['city', 'City', 'text'],
-                                        ['pax_min', 'Min pax', 'number'],
-                                        ['pax_max', 'Max pax', 'number'],
-                                    ].map(([key, label, type]) => (
-                                        <label key={key} className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                            {label}
-                                            <input
-                                                type={type}
-                                                value={analyticsFilters[key]}
-                                                onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, [key]: e.target.value })}
-                                                className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100"
-                                                placeholder={type === 'text' ? 'All' : undefined}
-                                            />
-                                        </label>
-                                    ))}
-                                </div>
-                                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                    <p className="text-sm font-semibold text-gray-500">Collected revenue and pending work are kept separate so decisions stay clear.</p>
-                                    <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary px-5 py-2.5 text-sm font-black">
-                                        {analyticsLoading ? 'Refreshing...' : 'Apply Filters'}
+                        <div className="animate-fadeIn space-y-6">
+                            <section className="admin-panel overflow-hidden">
+                                <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 lg:flex-row lg:items-center lg:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Predictive Intelligence</p>
+                                        <h3 className="mt-1 text-2xl font-black text-gray-950">Business Forecasting & Operational Signals</h3>
+                                        <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">Forecast revenue and guest demand with simple moving averages, then review the operational signals admins need for staffing, purchasing, and payment follow-up.</p>
+                                    </div>
+                                    <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary w-full px-5 py-2.5 text-sm font-black sm:w-auto">
+                                        {analyticsLoading ? 'Refreshing...' : 'Refresh Analytics'}
                                     </button>
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                                {[
-                                    ['Actual collected', formatCurrency(analyticsSummary.settledRevenue || 0), 'Verified/Paid payments'],
-                                    ['Pending collection', formatCurrency(analyticsSummary.pendingRevenue || 0), 'Unpaid payments'],
-                                    ['Overdue balance', formatCurrency(analyticsSummary.overdueRevenue || 0), 'Past due unpaid'],
-                                    ['Collection rate', `${analyticsSummary.collectionRate || 0}%`, 'Collected vs collectible'],
-                                ].map(([label, value, hint]) => (
-                                    <div key={label} className="admin-panel p-5">
-                                        <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
-                                        <p className="mt-2 text-2xl font-black text-gray-950">{value}</p>
-                                        <p className="mt-1 text-xs font-semibold text-gray-500">{hint}</p>
+                                <div className="p-5">
+                                    <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                                        <div>
+                                            <h4 className="text-lg font-black text-gray-950">Business Snapshot</h4>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">High-signal metrics for revenue, demand, bookings, and collection health.</p>
+                                        </div>
+                                        <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                            Timeframe
+                                            <select
+                                                value={analyticsFilters.snapshot_window}
+                                                onChange={(event) => {
+                                                    const nextFilters = { ...analyticsFilters, snapshot_window: event.target.value };
+                                                    setAnalyticsFilters(nextFilters);
+                                                    fetchAnalytics({ filters: nextFilters });
+                                                }}
+                                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100 sm:w-48"
+                                            >
+                                                {SNAPSHOT_WINDOW_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                            </select>
+                                        </label>
                                     </div>
-                                ))}
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                        {businessSnapshotCards.map((card) => (
+                                            <div key={card.label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{card.label}</p>
+                                                <p className="mt-2 text-2xl font-black text-gray-950">{formatAnalyticsCardValue(card.value, card.format)}</p>
+                                                <p className="mt-1 text-xs font-semibold text-gray-500">{card.hint}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {businessSnapshot.insight && (
+                                        <p className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">{businessSnapshot.insight}</p>
+                                    )}
+                                </div>
+                            </section>
+
+                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                                <section className="admin-panel p-6">
+                                    <div className="border-b border-gray-100 pb-5">
+                                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                            <div>
+                                                <p className="admin-kicker">Finance Forecast</p>
+                                                <h3 className="mt-1 text-xl font-black text-gray-950">Revenue Forecast Using SMA</h3>
+                                                <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">Projects short-term collected revenue by smoothing verified payment history.</p>
+                                            </div>
+                                            <button onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808]">Apply</button>
+                                        </div>
+                                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Period
+                                                <select value={analyticsFilters.revenue_forecast_period} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, revenue_forecast_period: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {FORECAST_PERIOD_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Smoothing
+                                                <select value={analyticsFilters.revenue_sma_window} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, revenue_sma_window: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {SMA_WINDOW_OPTIONS.map(value => <option key={value} value={value}>{value}-period SMA</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Forecast
+                                                <select value={analyticsFilters.revenue_forecast_horizon} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, revenue_forecast_horizon: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {FORECAST_HORIZON_OPTIONS.map(value => <option key={value} value={value}>{value} periods ahead</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        {[
+                                            ['Next forecast', formatCurrency(revenueForecastSummary.nextForecast || 0)],
+                                            ['Last actual', formatCurrency(revenueForecastSummary.lastActual || 0)],
+                                            ['Movement', `${revenueForecastSummary.changePercent || 0}% ${revenueForecastSummary.direction === 'up' ? 'increase' : 'decrease'}`],
+                                        ].map(([label, value]) => (
+                                            <div key={label} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
+                                                <p className="mt-1 text-lg font-black text-gray-950">{value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-6 h-80">
+                                        {revenueForecastData.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={revenueForecastData}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} tickFormatter={(value) => `PHP ${Math.round(value / 1000)}k`} />
+                                                    <RechartsTooltip formatter={(value) => formatCurrency(value)} />
+                                                    <Bar dataKey="revenue" fill="#720101" radius={[6, 6, 0, 0]} name="Actual collected" />
+                                                    <Bar dataKey="forecast" fill="#f0aa0b" radius={[6, 6, 0, 0]} name="SMA forecast" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No revenue data available.</div>}
+                                    </div>
+                                    <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">{revenueForecast.insight}</p>
+                                </section>
+
+                                <section className="admin-panel p-6">
+                                    <div className="border-b border-gray-100 pb-5">
+                                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                            <div>
+                                                <p className="admin-kicker">Operations Forecast</p>
+                                                <h3 className="mt-1 text-xl font-black text-gray-950">Moving Averages for Pax Demand Projection</h3>
+                                                <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">Smooths historical guest demand so culinary and logistics planning is not distorted by one-off spikes.</p>
+                                            </div>
+                                            <button onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808]">Apply</button>
+                                        </div>
+                                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Period
+                                                <select value={analyticsFilters.pax_projection_period} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_projection_period: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {FORECAST_PERIOD_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Year
+                                                <select value={analyticsFilters.pax_projection_year} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_projection_year: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    <option value="">All years</option>
+                                                    {ANALYTICS_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Quarter
+                                                <select value={analyticsFilters.pax_projection_quarter} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_projection_quarter: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    <option value="">All quarters</option>
+                                                    {[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Smoothing
+                                                <select value={analyticsFilters.pax_sma_window} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_sma_window: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {SMA_WINDOW_OPTIONS.map(value => <option key={value} value={value}>{value}-period SMA</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400 sm:col-span-2">
+                                                Forecast horizon
+                                                <select value={analyticsFilters.pax_projection_horizon} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_projection_horizon: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {FORECAST_HORIZON_OPTIONS.map(value => <option key={value} value={value}>{value} periods ahead</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        {[
+                                            ['Next pax forecast', Number(paxDemandSummary.nextForecast || 0).toLocaleString()],
+                                            ['Forecast horizon pax', Number(paxDemandSummary.forecastPax || 0).toLocaleString()],
+                                            ['Peak historical period', paxDemandSummary.peakPeriod || 'No data'],
+                                        ].map(([label, value]) => (
+                                            <div key={label} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
+                                                <p className="mt-1 text-lg font-black text-gray-950">{value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-6 h-80">
+                                        {paxDemandData.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={paxDemandData}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                    <RechartsTooltip />
+                                                    <Bar dataKey="pax" fill="#2563eb" radius={[6, 6, 0, 0]} name="Actual pax" />
+                                                    <Bar dataKey="forecast" fill="#22c55e" radius={[6, 6, 0, 0]} name="SMA forecast" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No pax demand data available.</div>}
+                                    </div>
+                                    <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-900">{paxDemandProjection.insight}</p>
+                                </section>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
-                                <div className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Collected Revenue Over Time</h3>
-                                    <p className="mb-6 text-sm font-semibold text-gray-500">Only verified or paid payments are counted.</p>
+                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                                <section className="admin-panel p-6">
+                                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h3 className="text-lg font-black text-gray-950">Collected Revenue Trend</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">Historical verified collections ending at the current month.</p>
+                                        </div>
+                                        <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                            Window
+                                            <select
+                                                value={analyticsFilters.trend_months}
+                                                onChange={(event) => {
+                                                    const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
+                                                    setAnalyticsFilters(nextFilters);
+                                                    fetchAnalytics({ filters: nextFilters });
+                                                }}
+                                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none sm:w-44"
+                                            >
+                                                {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
+                                            </select>
+                                        </label>
+                                    </div>
                                     <div className="h-72">
                                         {revenueTrendData.length ? (
                                             <ResponsiveContainer width="100%" height="100%">
@@ -1336,13 +1629,13 @@ const DashboardAdmin = () => {
                                                     <Line type="monotone" dataKey="revenue" stroke="#720101" strokeWidth={3} dot={{ r: 4 }} name="Collected" />
                                                 </LineChart>
                                             </ResponsiveContainer>
-                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No collected revenue for these filters.</div>}
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No collected revenue for this window.</div>}
                                     </div>
-                                </div>
+                                </section>
 
-                                <div className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Payment Status And Aging</h3>
-                                    <p className="mb-6 text-sm font-semibold text-gray-500">Use this to decide which balances need reminders or verification.</p>
+                                <section className="admin-panel p-6">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Payment Risk</h3>
+                                    <p className="mb-6 text-sm font-semibold text-gray-500">Balances by payment status and aging bucket.</p>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                                         <div className="h-64">
                                             {paymentStatusBreakdown.length ? (
@@ -1368,13 +1661,13 @@ const DashboardAdmin = () => {
                                             ))}
                                         </div>
                                     </div>
-                                </div>
+                                </section>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
-                                <div className="admin-panel p-6 xl:col-span-2">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Booking Pipeline</h3>
-                                    <p className="mb-5 text-sm font-semibold text-gray-500">Counts and value by current booking status.</p>
+                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                                <section className="admin-panel p-6 xl:col-span-2">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Booking Pipeline & Upcoming Workload</h3>
+                                    <p className="mb-5 text-sm font-semibold text-gray-500">Counts, value, and next events that need operational attention.</p>
                                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                                         {bookingPipelineData.map((row) => (
                                             <div key={row.label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -1383,7 +1676,6 @@ const DashboardAdmin = () => {
                                                 <p className="text-sm font-bold text-amber-700">{formatCurrency(row.value || 0)}</p>
                                             </div>
                                         ))}
-                                        {!bookingPipelineData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No bookings match these filters.</div>}
                                     </div>
                                     <div className="mt-6 overflow-hidden rounded-xl border border-gray-100">
                                         <table className="w-full text-sm">
@@ -1399,13 +1691,13 @@ const DashboardAdmin = () => {
                                                         <td className="px-4 py-3 text-gray-600">{event.status || event.eventType}</td>
                                                     </tr>
                                                 ))}
-                                                {!upcomingWorkloadData.length && <tr><td colSpan="4" className="px-4 py-8 text-center font-bold text-gray-400">No upcoming events for these filters.</td></tr>}
+                                                {!upcomingWorkloadData.length && <tr><td colSpan="4" className="px-4 py-8 text-center font-bold text-gray-400">No upcoming events.</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
-                                </div>
+                                </section>
 
-                                <div className="admin-panel p-6">
+                                <section className="admin-panel p-6">
                                     <h3 className="mb-1 text-lg font-black text-gray-950">Operational Alerts</h3>
                                     <p className="mb-5 text-sm font-semibold text-gray-500">Queues that should be handled before they become customer issues.</p>
                                     <div className="space-y-3">
@@ -1419,11 +1711,11 @@ const DashboardAdmin = () => {
                                             </div>
                                         ))}
                                     </div>
-                                </div>
+                                </section>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
-                                <div className="admin-panel p-6">
+                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                                <section className="admin-panel p-6">
                                     <h3 className="mb-1 text-lg font-black text-gray-950">Package Performance</h3>
                                     <p className="mb-5 text-sm font-semibold text-gray-500">Which packages are producing bookings and value.</p>
                                     <div className="space-y-3">
@@ -1438,9 +1730,9 @@ const DashboardAdmin = () => {
                                         ))}
                                         {!packagePerformanceData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No package data yet.</div>}
                                     </div>
-                                </div>
+                                </section>
 
-                                <div className="admin-panel p-6">
+                                <section className="admin-panel p-6">
                                     <h3 className="mb-1 text-lg font-black text-gray-950">Menu Performance</h3>
                                     <p className="mb-5 text-sm font-semibold text-gray-500">Dish selections from actual booking items.</p>
                                     <div className="h-72">
@@ -1456,7 +1748,7 @@ const DashboardAdmin = () => {
                                             </ResponsiveContainer>
                                         ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No menu selections yet.</div>}
                                     </div>
-                                </div>
+                                </section>
                             </div>
                         </div>
                     )}
@@ -1491,14 +1783,44 @@ const DashboardAdmin = () => {
                                                 <form onSubmit={handlePackageSubmit} className="border-b border-gray-100 p-6">
                                                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                                                         <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                        <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
                                                             {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                                        </select>
+                                                        <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                            {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                                                         </select>
                                                         <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <button disabled={packageSaving} className="lg:col-span-3 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : 'Create Package'}</button>
-                                                        <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-6 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <button disabled={packageSaving} className="lg:col-span-1 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingPackageId ? 'Save' : 'Create'}</button>
+                                                        <label className="lg:col-span-4 text-xs font-black uppercase tracking-wide text-slate-500">
+                                                            Connected event types
+                                                            <select multiple value={packageForm.event_type_slugs || []} onChange={e => setPackageForm({ ...packageForm, event_type_slugs: Array.from(e.target.selectedOptions).map(option => option.value) })} className="mt-2 min-h-28 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium normal-case outline-none focus:ring-2 focus:ring-indigo-100">
+                                                                {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                                            </select>
+                                                        </label>
+                                                        <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                            {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                        </select>
+                                                        <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <div className="lg:col-span-12 grid grid-cols-2 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-4 md:grid-cols-5">
+                                                            {[
+                                                                ['starter', 'Starters'],
+                                                                ['main', 'Main Dish'],
+                                                                ['side', 'Sides'],
+                                                                ['dessert', 'Dessert'],
+                                                                ['drink', 'Refreshments'],
+                                                            ].map(([key, label]) => (
+                                                                <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                                                    {label}
+                                                                    <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold normal-case outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                        {editingPackageId && <button type="button" onClick={resetPackageForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Package Edit</button>}
                                                     </div>
                                                 </form>
                                                 <div className="overflow-x-auto">
@@ -1507,9 +1829,12 @@ const DashboardAdmin = () => {
                                                             <tr>
                                                                 <th className="px-6 py-4 text-left">Package</th>
                                                                 <th className="px-6 py-4 text-left">Event Type</th>
+                                                                <th className="px-6 py-4 text-left">Category</th>
+                                                                <th className="px-6 py-4 text-left">Connected To</th>
                                                                 <th className="px-6 py-4 text-right">Price / Head</th>
                                                                 <th className="px-6 py-4 text-right">Min Pax</th>
                                                                 <th className="px-6 py-4 text-left">Description</th>
+                                                                <th className="px-6 py-4 text-right">Actions</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-gray-100">
@@ -1517,9 +1842,14 @@ const DashboardAdmin = () => {
                                                                 <tr key={pkg.id} className="hover:bg-gray-50">
                                                                     <td className="px-6 py-4 font-bold text-gray-900">{pkg.name}</td>
                                                                     <td className="px-6 py-4"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black uppercase text-indigo-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
+                                                                    <td className="px-6 py-4 text-gray-600">{getCategoryLabel(pkg.package_category)}</td>
+                                                                    <td className="px-6 py-4 text-gray-600">{(pkg.event_type_slugs || [pkg.type]).map(slug => eventTypes.find(type => type.slug === slug)?.label || slug).join(', ')}</td>
                                                                     <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</td>
                                                                     <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
                                                                     <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
+                                                                    <td className="px-6 py-4 text-right">
+                                                                        <button type="button" onClick={() => startEditingPackage(pkg)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                                                    </td>
                                                                 </tr>
                                                             ))}
                                                         </tbody>
@@ -1538,7 +1868,16 @@ const DashboardAdmin = () => {
                                                         <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         <button disabled={packageSaving} className="lg:col-span-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
-                                                        <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-10 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                            {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                        </select>
+                                                        <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
+                                                            {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                        </select>
+                                                        <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
                                                     </div>
                                                 </form>
@@ -1548,6 +1887,8 @@ const DashboardAdmin = () => {
                                                             <tr>
                                                                 <th className="px-6 py-4 text-left">Event Type</th>
                                                                 <th className="px-6 py-4 text-left">Short Name</th>
+                                                                <th className="px-6 py-4 text-left">Category</th>
+                                                                <th className="px-6 py-4 text-left">Security</th>
                                                                 <th className="px-6 py-4 text-left">Icon</th>
                                                                 <th className="px-6 py-4 text-left">Description</th>
                                                                 <th className="px-6 py-4 text-right">Actions</th>
@@ -1558,6 +1899,8 @@ const DashboardAdmin = () => {
                                                                 <tr key={type.id} className="hover:bg-gray-50">
                                                                     <td className="px-6 py-4 font-bold text-gray-900">{type.label}</td>
                                                                     <td className="px-6 py-4"><span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black uppercase text-gray-700">{type.slug}</span></td>
+                                                                    <td className="px-6 py-4 text-gray-600">{getCategoryLabel(type.package_category)}</td>
+                                                                    <td className="px-6 py-4 text-gray-600">{type.security_label || getSecurityLabel(type.security_type)}</td>
                                                                     <td className="px-6 py-4 text-gray-600">{type.icon}</td>
                                                                     <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
                                                                     <td className="px-6 py-4 text-right">

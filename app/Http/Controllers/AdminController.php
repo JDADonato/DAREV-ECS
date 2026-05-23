@@ -445,6 +445,16 @@ class AdminController extends Controller
             'city',
             'pax_min',
             'pax_max',
+            'trend_months',
+            'revenue_forecast_period',
+            'revenue_forecast_horizon',
+            'revenue_sma_window',
+            'pax_projection_period',
+            'pax_projection_horizon',
+            'pax_sma_window',
+            'pax_projection_year',
+            'pax_projection_quarter',
+            'snapshot_window',
         ]), fn ($value) => $value !== null && $value !== '');
     }
 

@@ -36,8 +36,8 @@ Follow these steps **exactly in order** when setting up the project for the firs
 ### Step 1: Clone the Repository
 
 ```powershell
-git clone https://github.com/mavvricks/ECS-LATEST.git
-cd ECS-LATEST
+git clone https://github.com/mavvricks/24ECS.git
+cd 24ECS
 ```
 
 ### Step 2: Enable the Local PHP
@@ -80,7 +80,7 @@ extension=curl
 ### Step 4: Install Dependencies
 
 ```powershell
-php composer.phar install
+.\composer.bat install
 npm install
 ```
 
@@ -228,11 +228,11 @@ $env:PATH = ".\php;" + $env:PATH
 php artisan optimize:clear
 
 # Step 3: Start all services
-composer run dev
+.\composer.bat run dev
 ```
 
 > [!IMPORTANT]
-> `composer run dev` starts **4 services simultaneously**:
+> `.\composer.bat run dev` starts **4 services simultaneously**:
 > | Service | URL | Purpose |
 > | :--- | :--- | :--- |
 > | Laravel Web Server | http://127.0.0.1:8080 | Main application |
@@ -247,7 +247,7 @@ composer run dev
 Open a **second** PowerShell window:
 
 ```powershell
-cd path\to\ECS-LATEST
+cd path\to\24ECS
 $env:PATH = ".\php;" + $env:PATH
 php artisan paymongo:webhook-sync
 ```
@@ -339,7 +339,7 @@ You should see a `POST /webhook/paymongo` request with a `200 OK` response. If n
 The chat system uses **Laravel Reverb** (WebSockets).
 
 - Ensure `BROADCAST_CONNECTION=reverb` in `.env`
-- Chat runs on port `8085` (started automatically by `composer run dev`)
+- Chat runs on port `8085` (started automatically by `.\composer.bat run dev`)
 - If the chat bubble says "Disconnected", check that port `8085` is not blocked
 - Client side: `ChatBubble.jsx`
 - Staff side: `StaffMessaging.jsx` (Marketing Dashboard)
@@ -421,7 +421,7 @@ php artisan optimize:clear
 
 ### Vite manifest not found
 
-**Fix:** If `composer run dev` is not running, build assets manually:
+**Fix:** If `.\composer.bat run dev` is not running, build assets manually:
 ```powershell
 npm run build
 ```
@@ -459,14 +459,14 @@ This re-syncs the webhook and updates the secret automatically.
 | When | Command | Purpose |
 | :--- | :--- | :--- |
 | Every new terminal | `$env:PATH = ".\php;" + $env:PATH` | Enable local PHP |
-| One-time | `php composer.phar install` | Install PHP packages |
+| One-time | `.\composer.bat install` | Install PHP packages |
 | One-time | `npm install` | Install JS packages |
 | One-time | `Copy-Item .env.example .env` | Create environment file |
 | One-time | `php artisan key:generate` | Generate app encryption key |
 | One-time | `php artisan migrate --seed` | Create tables + seed data |
 | One-time | `Invoke-WebRequest -Uri "https://curl.se/ca/cacert.pem" -OutFile "storage\app\cacert.pem"` | Download SSL certificates |
 | One-time | `ngrok config add-authtoken YOUR_TOKEN` | Authenticate ngrok |
-| Daily | `composer run dev` | Start all services |
+| Daily | `.\composer.bat run dev` | Start all services |
 | Daily | `php artisan paymongo:webhook-sync` | Sync webhook (2nd terminal) |
 | When needed | `php artisan optimize:clear` | Clear all caches |
 | When needed | `php artisan config:clear` | Clear config cache only |

@@ -287,17 +287,6 @@ const ClientDashboard = () => {
         });
     };
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-[#faf7f2]">
-                <div className="text-center">
-                    <div className="animate-spin w-10 h-10 border-4 border-[#720101] border-t-transparent rounded-full mx-auto mb-4"></div>
-                    <p className="text-gray-500 font-medium tracking-wide">Loading your dashboard...</p>
-                </div>
-            </div>
-        );
-    }
-
     const paymentsByBookingId = React.useMemo(() => {
         const map = new Map();
         data.payments.forEach((payment) => {
@@ -315,6 +304,17 @@ const ClientDashboard = () => {
     const activeProgress = activeTotal > 0 ? Math.min((activePaid / activeTotal) * 100, 100) : 0;
     const activeJourneySteps = React.useMemo(() => activeBooking ? buildJourneySteps(activeBooking, activePayments) : [], [activeBooking, activePayments]);
     const remainingJourneySteps = React.useMemo(() => activeJourneySteps.filter((step) => !step.done), [activeJourneySteps]);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#faf7f2]">
+                <div className="text-center">
+                    <div className="animate-spin w-10 h-10 border-4 border-[#720101] border-t-transparent rounded-full mx-auto mb-4"></div>
+                    <p className="text-gray-500 font-medium tracking-wide">Loading your dashboard...</p>
+                </div>
+            </div>
+        );
+    }
 
     // Action handlers
     const handleCancelBooking = async () => {

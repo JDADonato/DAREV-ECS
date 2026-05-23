@@ -31,7 +31,7 @@ const stepMessages = {
     1: { eyebrow: 'Start with the occasion', greeting: 'What are we helping you celebrate?', sub: 'Choose the event type first. The next steps adjust around your celebration.' },
     2: { eyebrow: 'Choose the day', greeting: "Let's find your date", sub: 'Pick a date, start time, and duration. Availability checks happen here.' },
     3: { eyebrow: 'Estimate the crowd', greeting: 'Who should we prepare for?', sub: 'A close guest estimate is enough. You can refine details later.' },
-    4: { eyebrow: 'Choose a starting point', greeting: 'Pick how you want to build the menu', sub: 'Start from a package, budget guide, or empty menu. You can adjust dishes next.' },
+    4: { eyebrow: 'Choose your package', greeting: 'Review packages for your event type', sub: 'The package options, amenities, pricing, and security terms adjust based on the event you selected.' },
     5: { eyebrow: 'Personalize the spread', greeting: 'Build a menu your guests will remember', sub: 'Choose dishes and keep an eye on the estimate in the summary.' },
     6: { eyebrow: 'Set the logistics', greeting: 'Where should the team prepare?', sub: 'Add contact and venue details so setup fees are clear before submitting.' },
     7: { eyebrow: 'Food tasting', greeting: 'Would you like to schedule a tasting?', sub: 'Choose whether you want a tasting, then submit your event plan.' },
@@ -88,9 +88,21 @@ const BookingWizard = () => {
         }
 
         if (stepToValidate === 5) {
-            const totalDishCount = Object.values(dataToValidate.selectedDishes || {}).reduce((sum, arr) => sum + (arr?.length || 0), 0);
-            if (totalDishCount === 0) {
-                showModal('error', 'Pick your first dish', 'Choose at least one dish so your event plan has a menu to review.');
+            const requiredCategories = ['starter', 'main', 'side', 'dessert', 'drink'];
+            const categoryLabels = {
+                starter: 'starter',
+                main: 'main dish',
+                side: 'side',
+                dessert: 'dessert',
+                drink: 'refreshment',
+            };
+            const missingCategories = requiredCategories.filter(category => !(dataToValidate.selectedDishes?.[category]?.length));
+            if (missingCategories.length > 0) {
+                showModal(
+                    'error',
+                    'Complete each menu category',
+                    `Please choose at least one ${missingCategories.map(category => categoryLabels[category]).join(', ')} before continuing.`
+                );
                 return false;
             }
         }
@@ -150,14 +162,23 @@ const BookingWizard = () => {
             return;
         }
 
-        let transportFee = 0;
-        if (merged.venueDistance === 'outside-16-30') transportFee = 1500;
-        if (merged.venueDistance === 'outside-31-50') transportFee = 3000;
-
-        const highRiseFee = merged.isHighRise ? Math.round((merged.totalCost || 0) * 0.03) : 0;
+        const baseEventCost = merged.totalCost || 0;
+        const serviceCharge = Math.round(baseEventCost * (merged.package_service_charge_rate || 0));
+        const vatFee = Math.round(baseEventCost * (merged.package_vat_rate || 0));
+        const locationSurcharge = ['outside-16-30', 'outside-31-50'].includes(merged.venueDistance)
+            ? Math.round(baseEventCost * (merged.package_location_surcharge_rate || 0.20))
+            : 0;
+        const highRiseFee = merged.isHighRise ? Math.round(baseEventCost * (merged.package_floor_surcharge_rate || 0.03)) : 0;
+        const decemberSurcharge = merged.date && merged.package_december_surcharge && new Date(merged.date).getMonth() === 11
+            ? merged.package_december_surcharge
+            : 0;
+        const contingencyFee = merged.package_security_type === 'contingency'
+            ? Math.round((baseEventCost + serviceCharge + vatFee + locationSurcharge + highRiseFee + decemberSurcharge) * (merged.package_security_rate || 0))
+            : 0;
+        const cashBond = merged.package_security_type === 'cash_bond' ? (merged.package_cash_bond || 0) : 0;
         const overtimeFee = Math.max(0, (merged.duration || 4) - 4) * 5000;
-        const laborSurcharge = highRiseFee + overtimeFee;
-        const finalTotal = (merged.totalCost || 0) + transportFee + laborSurcharge;
+        const laborSurcharge = serviceCharge + vatFee + highRiseFee + decemberSurcharge + contingencyFee + cashBond + overtimeFee;
+        const finalTotal = baseEventCost + locationSurcharge + laborSurcharge;
 
         const payload = {
             user_id: user.id,
@@ -167,7 +188,7 @@ const BookingWizard = () => {
             pax: merged.pax,
             budget: merged.budget,
             dietary_notes: merged.dietaryNotes,
-            package_id: 'custom',
+            package_id: merged.package_id || 'custom',
             client_full_name: merged.client_full_name,
             venue_address_line: merged.venue_address_line,
             venue_street: merged.venue_street,
@@ -178,7 +199,7 @@ const BookingWizard = () => {
             client_phone: merged.client_phone,
             venue_distance: merged.venueDistance,
             is_high_rise: merged.isHighRise,
-            transport_fee: transportFee,
+            transport_fee: locationSurcharge,
             labor_surcharge: laborSurcharge,
             total_cost: finalTotal,
             selected_menu: merged.customMenu,

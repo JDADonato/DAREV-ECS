@@ -71,6 +71,7 @@ class AdminReportService
                 'completedBookings' => $this->countBookings($filters, ['Completed']),
                 'totalPax' => $this->bookingQuery($filters)->sum('pax') ?: 0,
             ],
+            'businessSnapshot' => $this->businessSnapshot($filters),
             'revenueTrends' => $this->settledRevenueTrend($filters),
             'revenueHealth' => [
                 'settledRevenueOverTime' => $this->settledRevenueTrend($filters),
@@ -89,11 +90,89 @@ class AdminReportService
             'operationsLoad' => $this->operationsLoad($filters),
             'alerts' => $this->operationalAlerts($filters),
             'operationalAlerts' => $this->operationalAlerts($filters),
-            'revenueForecast' => [],
-            'projectedPaxDemand' => $this->upcomingWorkload($filters)['rows'],
+            'revenueForecast' => $this->revenueForecast($filters),
+            'paxDemandProjection' => $this->paxDemandProjection($filters),
+            'projectedPaxDemand' => $this->paxDemandProjection($filters)['rows'],
             'salesFrequency' => $this->legacySalesFrequency($filters),
             'topSellers' => $this->packagePerformance($filters)['rows'],
             'peakSeasons' => $this->operationsLoad($filters),
+        ];
+    }
+
+    private function businessSnapshot(array $filters): array
+    {
+        $window = $filters['snapshot_window'] ?? 'all';
+        $snapshotFilters = $this->snapshotFilters($window);
+        $summary = $this->revenueSummary($snapshotFilters);
+        $bookingRow = $this->bookingQuery($snapshotFilters)
+            ->selectRaw('COUNT(*) as count')
+            ->selectRaw('SUM(pax) as pax')
+            ->selectRaw('SUM(COALESCE(total_cost, budget, 0)) as value')
+            ->first();
+
+        $bookingCount = (int) ($bookingRow->count ?? 0);
+        $bookingValue = (float) ($bookingRow->value ?? 0);
+        $totalRevenue = $summary['settledRevenue'] + $summary['pendingRevenue'];
+        $overdueRatio = $totalRevenue > 0 ? round(($summary['overdueRevenue'] / $totalRevenue) * 100, 1) : 0;
+
+        return [
+            'window' => $window,
+            'label' => $this->snapshotWindowLabel($window),
+            'dateFrom' => $snapshotFilters['date_from'] ?? null,
+            'dateTo' => $snapshotFilters['date_to'] ?? null,
+            'cards' => [
+                [
+                    'label' => 'Total revenue',
+                    'value' => $totalRevenue,
+                    'format' => 'currency',
+                    'hint' => 'Collected plus unpaid booked revenue',
+                ],
+                [
+                    'label' => 'Collected revenue',
+                    'value' => $summary['settledRevenue'],
+                    'format' => 'currency',
+                    'hint' => 'Verified and paid payment milestones',
+                ],
+                [
+                    'label' => 'Pending collection',
+                    'value' => $summary['pendingRevenue'],
+                    'format' => 'currency',
+                    'hint' => 'Cash still expected from active bookings',
+                ],
+                [
+                    'label' => 'Overdue balance',
+                    'value' => $summary['overdueRevenue'],
+                    'format' => 'currency',
+                    'hint' => $overdueRatio . '% of total revenue exposure',
+                ],
+                [
+                    'label' => 'Bookings',
+                    'value' => $bookingCount,
+                    'format' => 'number',
+                    'hint' => 'Events inside the selected window',
+                ],
+                [
+                    'label' => 'Total pax',
+                    'value' => (int) ($bookingRow->pax ?? 0),
+                    'format' => 'number',
+                    'hint' => 'Guest demand covered by these bookings',
+                ],
+                [
+                    'label' => 'Average booking value',
+                    'value' => $bookingCount > 0 ? round($bookingValue / $bookingCount, 2) : 0,
+                    'format' => 'currency',
+                    'hint' => 'Revenue value per booking',
+                ],
+                [
+                    'label' => 'Collection rate',
+                    'value' => $summary['collectionRate'],
+                    'format' => 'percent',
+                    'hint' => 'Collected share of total revenue',
+                ],
+            ],
+            'insight' => $summary['overdueRevenue'] > 0
+                ? 'Collection risk is present in this window. Prioritize overdue milestones before approving new adjustments.'
+                : 'No overdue revenue is visible in this window. Keep monitoring pending milestones as event dates approach.',
         ];
     }
 
@@ -276,22 +355,215 @@ class AdminReportService
     private function settledRevenueTrend(array $filters): array
     {
         $monthExpression = $this->monthExpression('payments.verified_at');
+        $monthCount = min(max((int) ($filters['trend_months'] ?? 6), 1), 24);
+        $endMonth = today()->startOfMonth();
+        $startMonth = $endMonth->copy()->subMonths($monthCount - 1);
 
-        return $this->paymentQuery($filters)
+        $rows = $this->paymentQuery($filters)
             ->whereIn('payments.status', ['Paid', 'Verified'])
             ->whereNotNull('payments.verified_at')
+            ->where('payments.verified_at', '<=', now())
+            ->where('payments.verified_at', '>=', $startMonth->toDateString())
+            ->where('payments.verified_at', '<', $endMonth->copy()->addMonth()->toDateString())
             ->selectRaw("$monthExpression as month")
             ->selectRaw('SUM(payments.amount) as revenue')
             ->groupBy('month')
             ->orderBy('month')
             ->get()
-            ->map(fn ($row) => [
-                'month' => $row->month,
-                'label' => Carbon::createFromFormat('Y-m', $row->month)->format('M Y'),
-                'revenue' => (float) $row->revenue,
-            ])
+            ->keyBy('month');
+
+        return collect(range(0, $monthCount - 1))
+            ->map(function ($index) use ($startMonth, $rows) {
+                $month = $startMonth->copy()->addMonths($index);
+                $key = $month->format('Y-m');
+
+                return [
+                    'month' => $key,
+                    'label' => $month->format('M Y'),
+                    'revenue' => (float) ($rows[$key]->revenue ?? 0),
+                ];
+            })
             ->values()
             ->all();
+    }
+
+    private function revenueForecast(array $filters): array
+    {
+        $period = $this->normalizePeriod($filters['revenue_forecast_period'] ?? 'quarterly');
+        $horizon = min(max((int) ($filters['revenue_forecast_horizon'] ?? ($period === 'quarterly' ? 4 : 6)), 1), 8);
+        $window = min(max((int) ($filters['revenue_sma_window'] ?? 3), 2), 6);
+        $historyCount = max($window + 5, $period === 'quarterly' ? 8 : 12);
+        $end = $this->periodStart(today(), $period);
+        $start = $this->shiftPeriod($end, -($historyCount - 1), $period);
+        $periodExpression = $this->periodExpression('payments.verified_at', $period);
+
+        $rows = $this->paymentQuery($filters)
+            ->whereIn('payments.status', ['Paid', 'Verified'])
+            ->whereNotNull('payments.verified_at')
+            ->where('payments.verified_at', '<=', now())
+            ->where('payments.verified_at', '>=', $start->toDateString())
+            ->where('payments.verified_at', '<', $this->shiftPeriod($end, 1, $period)->toDateString())
+            ->selectRaw("$periodExpression as period_key")
+            ->selectRaw('SUM(payments.amount) as revenue')
+            ->groupBy('period_key')
+            ->orderBy('period_key')
+            ->get()
+            ->keyBy('period_key');
+
+        $history = collect(range(0, $historyCount - 1))
+            ->map(function ($index) use ($start, $period, $rows) {
+                $date = $this->shiftPeriod($start, $index, $period);
+                $key = $this->periodKey($date, $period);
+
+                return [
+                    'period' => $key,
+                    'label' => $this->periodLabel($date, $period),
+                    'revenue' => (float) ($rows[$key]->revenue ?? 0),
+                    'forecast' => null,
+                    'isForecast' => false,
+                ];
+            })
+            ->values();
+
+        $seriesValues = $history->pluck('revenue')->map(fn ($value) => (float) $value)->values()->all();
+        $forecastRows = [];
+
+        for ($i = 1; $i <= $horizon; $i++) {
+            $forecast = $this->simpleMovingAverage($seriesValues, $window);
+            $seriesValues[] = $forecast;
+            $date = $this->shiftPeriod($end, $i, $period);
+            $forecastRows[] = [
+                'period' => $this->periodKey($date, $period),
+                'label' => $this->periodLabel($date, $period),
+                'revenue' => null,
+                'forecast' => round($forecast, 2),
+                'isForecast' => true,
+            ];
+        }
+
+        $lastActual = (float) ($history->last()['revenue'] ?? 0);
+        $nextForecast = (float) ($forecastRows[0]['forecast'] ?? 0);
+
+        return [
+            'period' => $period,
+            'smaWindow' => $window,
+            'horizon' => $horizon,
+            'rows' => $history->concat($forecastRows)->values()->all(),
+            'summary' => [
+                'nextForecast' => $nextForecast,
+                'lastActual' => $lastActual,
+                'direction' => $nextForecast >= $lastActual ? 'up' : 'down',
+                'changePercent' => $lastActual > 0 ? round((($nextForecast - $lastActual) / $lastActual) * 100, 1) : 0,
+                'method' => strtoupper((string) $window) . '-period SMA',
+            ],
+            'insight' => 'SMA smooths collected revenue so one-off large events do not overstate the next planning period.',
+        ];
+    }
+
+    private function paxDemandProjection(array $filters): array
+    {
+        $period = $this->normalizePeriod($filters['pax_projection_period'] ?? 'monthly');
+        $horizon = min(max((int) ($filters['pax_projection_horizon'] ?? ($period === 'quarterly' ? 4 : 6)), 1), 12);
+        $window = min(max((int) ($filters['pax_sma_window'] ?? 3), 2), 6);
+        $year = isset($filters['pax_projection_year']) ? (int) $filters['pax_projection_year'] : null;
+        $quarter = isset($filters['pax_projection_quarter']) ? (int) $filters['pax_projection_quarter'] : null;
+        $historyCount = max($window + 7, $period === 'quarterly' ? 10 : 18);
+        $end = $this->periodStart(today(), $period);
+        $start = $this->shiftPeriod($end, -($historyCount - 1), $period);
+        $periodExpression = $this->periodExpression('event_date', $period);
+
+        $rows = $this->bookingQuery($filters)
+            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
+            ->whereDate('event_date', '<=', today())
+            ->whereDate('event_date', '>=', $start->toDateString())
+            ->whereDate('event_date', '<', $this->shiftPeriod($end, 1, $period)->toDateString())
+            ->when($year, fn ($q) => $q->whereYear('event_date', $year))
+            ->when($quarter, fn ($q) => $q->whereRaw($this->quarterWhereExpression('event_date') . ' = ?', [$quarter]))
+            ->selectRaw("$periodExpression as period_key")
+            ->selectRaw('SUM(pax) as pax')
+            ->selectRaw('COUNT(*) as events')
+            ->groupBy('period_key')
+            ->orderBy('period_key')
+            ->get()
+            ->keyBy('period_key');
+
+        $baseStart = $year
+            ? ($quarter ? Carbon::create($year, (($quarter - 1) * 3) + 1, 1) : Carbon::create($year, 1, 1))
+            : $start;
+        $baseCount = $year
+            ? ($quarter && $period === 'monthly' ? 3 : ($period === 'quarterly' ? ($quarter ? 1 : 4) : 12))
+            : $historyCount;
+
+        $history = collect(range(0, $baseCount - 1))
+            ->map(function ($index) use ($baseStart, $period, $rows) {
+                $date = $this->shiftPeriod($this->periodStart($baseStart, $period), $index, $period);
+                $key = $this->periodKey($date, $period);
+
+                return [
+                    'period' => $key,
+                    'label' => $this->periodLabel($date, $period),
+                    'pax' => (int) ($rows[$key]->pax ?? 0),
+                    'events' => (int) ($rows[$key]->events ?? 0),
+                    'forecast' => null,
+                    'isForecast' => false,
+                ];
+            })
+            ->filter(fn ($row) => !$year || str_starts_with($row['period'], (string) $year))
+            ->values();
+
+        $smaBasis = $this->bookingQuery($filters)
+            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
+            ->whereDate('event_date', '<=', today())
+            ->whereDate('event_date', '>=', $start->toDateString())
+            ->whereDate('event_date', '<', $this->shiftPeriod($end, 1, $period)->toDateString())
+            ->selectRaw("$periodExpression as period_key")
+            ->selectRaw('SUM(pax) as pax')
+            ->groupBy('period_key')
+            ->orderBy('period_key')
+            ->get()
+            ->keyBy('period_key');
+
+        $seriesValues = collect(range(0, $historyCount - 1))
+            ->map(function ($index) use ($start, $period, $smaBasis) {
+                $key = $this->periodKey($this->shiftPeriod($start, $index, $period), $period);
+                return (float) ($smaBasis[$key]->pax ?? 0);
+            })
+            ->values()
+            ->all();
+
+        $forecastRows = [];
+        for ($i = 1; $i <= $horizon; $i++) {
+            $forecast = $this->simpleMovingAverage($seriesValues, $window);
+            $seriesValues[] = $forecast;
+            $date = $this->shiftPeriod($end, $i, $period);
+            $forecastRows[] = [
+                'period' => $this->periodKey($date, $period),
+                'label' => $this->periodLabel($date, $period),
+                'pax' => null,
+                'events' => null,
+                'forecast' => (int) round($forecast),
+                'isForecast' => true,
+            ];
+        }
+
+        $historicalPax = $history->sum('pax');
+        $forecastTotal = collect($forecastRows)->sum('forecast');
+        $peak = $history->sortByDesc('pax')->first();
+
+        return [
+            'period' => $period,
+            'smaWindow' => $window,
+            'horizon' => $horizon,
+            'rows' => $history->concat($forecastRows)->values()->all(),
+            'summary' => [
+                'historicalPax' => (int) $historicalPax,
+                'forecastPax' => (int) $forecastTotal,
+                'nextForecast' => (int) ($forecastRows[0]['forecast'] ?? 0),
+                'peakPeriod' => $peak['label'] ?? 'No historical demand',
+                'method' => strtoupper((string) $window) . '-period SMA',
+            ],
+            'insight' => 'Moving averages smooth pax demand so logistics and culinary teams can prepare for seasonal fluctuations without overreacting to one-off booking spikes.',
+        ];
     }
 
     private function paymentAging(array $filters): array
@@ -318,7 +590,7 @@ class AdminReportService
 
     private function operationsLoad(array $filters): array
     {
-        $monthExpression = $this->monthExpression('event_date');
+        $monthExpression = $this->calendarMonthExpression('event_date');
 
         return $this->bookingQuery($filters)
             ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
@@ -328,7 +600,13 @@ class AdminReportService
             ->groupBy('month')
             ->orderBy('month')
             ->get()
-            ->map(fn ($row) => ['label' => $row->month, 'events' => (int) $row->events, 'pax' => (int) $row->pax])
+            ->map(fn ($row) => [
+                'month' => Carbon::createFromFormat('m', str_pad((string) $row->month, 2, '0', STR_PAD_LEFT))->format('M'),
+                'monthNumber' => (int) $row->month,
+                'events' => (int) $row->events,
+                'count' => (int) $row->events,
+                'pax' => (int) $row->pax,
+            ])
             ->values()
             ->all();
     }
@@ -413,12 +691,112 @@ class AdminReportService
         return $grouped;
     }
 
+    private function simpleMovingAverage(array $values, int $window): float
+    {
+        $slice = array_slice(array_values($values), -$window);
+        $slice = array_pad($slice, -$window, 0);
+
+        return count($slice) > 0 ? array_sum($slice) / count($slice) : 0;
+    }
+
+    private function snapshotFilters(string $window): array
+    {
+        $today = today();
+
+        return match ($window) {
+            '3m' => ['date_from' => $today->copy()->subMonths(3)->startOfDay()->toDateString(), 'date_to' => $today->toDateString()],
+            '6m' => ['date_from' => $today->copy()->subMonths(6)->startOfDay()->toDateString(), 'date_to' => $today->toDateString()],
+            '12m' => ['date_from' => $today->copy()->subMonths(12)->startOfDay()->toDateString(), 'date_to' => $today->toDateString()],
+            '24m' => ['date_from' => $today->copy()->subMonths(24)->startOfDay()->toDateString(), 'date_to' => $today->toDateString()],
+            'ytd' => ['date_from' => $today->copy()->startOfYear()->toDateString(), 'date_to' => $today->toDateString()],
+            default => [],
+        };
+    }
+
+    private function snapshotWindowLabel(string $window): string
+    {
+        return match ($window) {
+            '3m' => 'Last 3 months',
+            '6m' => 'Last 6 months',
+            '12m' => 'Last 12 months',
+            '24m' => 'Last 24 months',
+            'ytd' => 'Year to date',
+            default => 'All time',
+        };
+    }
+
+    private function normalizePeriod(string $period): string
+    {
+        return in_array($period, ['monthly', 'quarterly'], true) ? $period : 'monthly';
+    }
+
+    private function periodStart(Carbon $date, string $period): Carbon
+    {
+        if ($period === 'quarterly') {
+            return $date->copy()->startOfQuarter()->startOfDay();
+        }
+
+        return $date->copy()->startOfMonth()->startOfDay();
+    }
+
+    private function shiftPeriod(Carbon $date, int $offset, string $period): Carbon
+    {
+        return $period === 'quarterly'
+            ? $date->copy()->addQuarters($offset)->startOfQuarter()->startOfDay()
+            : $date->copy()->addMonths($offset)->startOfMonth()->startOfDay();
+    }
+
+    private function periodKey(Carbon $date, string $period): string
+    {
+        return $period === 'quarterly'
+            ? $date->format('Y') . '-Q' . $date->quarter
+            : $date->format('Y-m');
+    }
+
+    private function periodLabel(Carbon $date, string $period): string
+    {
+        return $period === 'quarterly'
+            ? 'Q' . $date->quarter . ' ' . $date->format('Y')
+            : $date->format('M Y');
+    }
+
+    private function periodExpression(string $column, string $period): string
+    {
+        if ($period === 'quarterly') {
+            return match (DB::getDriverName()) {
+                'pgsql' => "CONCAT(EXTRACT(YEAR FROM $column)::int, '-Q', EXTRACT(QUARTER FROM $column)::int)",
+                'mysql', 'mariadb' => "CONCAT(YEAR($column), '-Q', QUARTER($column))",
+                default => "strftime('%Y', $column) || '-Q' || (((cast(strftime('%m', $column) as integer) - 1) / 3) + 1)",
+            };
+        }
+
+        return $this->monthExpression($column);
+    }
+
+    private function quarterWhereExpression(string $column): string
+    {
+        return match (DB::getDriverName()) {
+            'pgsql' => "EXTRACT(QUARTER FROM $column)::int",
+            'mysql', 'mariadb' => "QUARTER($column)",
+            default => "(((cast(strftime('%m', $column) as integer) - 1) / 3) + 1)",
+        };
+    }
+
     private function monthExpression(string $column): string
     {
         return match (DB::getDriverName()) {
             'pgsql' => "TO_CHAR($column, 'YYYY-MM')",
             'mysql', 'mariadb' => "DATE_FORMAT($column, '%Y-%m')",
             default => "strftime('%Y-%m', $column)",
+        };
+    }
+
+    private function calendarMonthExpression(string $column): string
+    {
+        return match (DB::getDriverName()) {
+            'pgsql' => "TO_CHAR($column, 'MM')",
+            'mysql', 'mariadb' => "DATE_FORMAT($column, '%m')",
+            default => "strftime('%m', $column)",
         };
     }
 }

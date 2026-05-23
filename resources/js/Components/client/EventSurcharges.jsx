@@ -66,8 +66,10 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
     }, [user]);
 
     const selectedCity = CITY_OPTIONS.find(city => city.value === formData.venue_city);
-    const transportFee = selectedCity?.fee || 0;
     const venueDistance = selectedCity?.zone || 'metro-manila';
+    const locationSurcharge = venueDistance !== 'metro-manila'
+        ? Math.round((bookingData.totalCost || 0) * (bookingData.package_location_surcharge_rate || 0.20))
+        : 0;
 
     const filteredCities = CITY_OPTIONS.filter(city => city.label.toLowerCase().includes(citySearch.toLowerCase()));
     const metroCities = filteredCities.filter(city => city.zone === 'metro-manila');
@@ -135,8 +137,8 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
                     </p>
 
                     <div className="booking-summary-strip">
-                        <span>Transport fee</span>
-                        <strong>{transportFee > 0 ? `PHP ${transportFee.toLocaleString()}` : 'Included'}</strong>
+                        <span>Location surcharge</span>
+                        <strong>{locationSurcharge > 0 ? `PHP ${locationSurcharge.toLocaleString()}` : 'Included'}</strong>
                     </div>
                     <div className="booking-summary-strip">
                         <span>Venue access</span>
@@ -187,8 +189,8 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
                                             ) : (
                                                 <>
                                                     {metroCities.length > 0 && <CityGroup title="Metro Manila" feeLabel="Included" cities={metroCities} selectedValue={formData.venue_city} onSelect={handleSelectCity} />}
-                                                    {nearCities.length > 0 && <CityGroup title="Nearby areas" feeLabel="+PHP 1,500" cities={nearCities} selectedValue={formData.venue_city} onSelect={handleSelectCity} />}
-                                                    {farCities.length > 0 && <CityGroup title="Extended service area" feeLabel="+PHP 3,000" cities={farCities} selectedValue={formData.venue_city} onSelect={handleSelectCity} />}
+                                                    {nearCities.length > 0 && <CityGroup title="Nearby areas" feeLabel="+20%" cities={nearCities} selectedValue={formData.venue_city} onSelect={handleSelectCity} />}
+                                                    {farCities.length > 0 && <CityGroup title="Extended service area" feeLabel="+20%" cities={farCities} selectedValue={formData.venue_city} onSelect={handleSelectCity} />}
                                                 </>
                                             )}
                                         </div>
@@ -203,14 +205,14 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
                             <span>
                                 <span className="block font-bold text-gray-900">High-rise venue</span>
                                 <span className="mt-1 block text-sm font-medium leading-relaxed text-gray-500">
-                                    Select this for venues on the 5th floor or above, or locations that require additional carrying and setup.
+                                    Select this for basement venues, the 2nd floor and above, or locations that require additional carrying and setup.
                                 </span>
                             </span>
                         </label>
 
                         {isHighRise && (
                             <div className="md:col-span-2 booking-inline-error border-[#f0aa0b]/40 bg-[#f0aa0b]/10 text-[#6f4a05]">
-                                A 3% labor surcharge is added for high-rise logistics.
+                                A 3% floor service charge is added for basement or upper-floor logistics.
                             </div>
                         )}
                     </div>

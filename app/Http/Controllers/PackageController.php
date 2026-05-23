@@ -34,8 +34,11 @@ class PackageController extends Controller
      */
     public function byType($type)
     {
-        $packages = Package::where('type', $type)
-            ->whereRaw('is_active is true')
+        $packages = Package::whereRaw('is_active is true')
+            ->where(function ($query) use ($type) {
+                $query->where('type', $type)
+                    ->orWhereJsonContains('event_type_slugs', $type);
+            })
             ->orderBy('name')
             ->get();
 
