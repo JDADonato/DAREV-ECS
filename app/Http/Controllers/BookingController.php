@@ -91,16 +91,8 @@ class BookingController extends Controller
         $eventDate = $request->event_date;
         $pax = (int) $request->pax;
 
-        // 1. Stringify arrays if present
-        $outsourcedServices = $request->outsourced_services;
-        if (is_array($outsourcedServices)) {
-            $outsourcedServices = json_encode($outsourcedServices);
-        }
-
-        $selectedMenu = $request->selected_menu;
-        if (is_array($selectedMenu)) {
-            $selectedMenu = json_encode($selectedMenu);
-        }
+        $outsourcedServices = $this->normalizeJsonPayload($request->outsourced_services);
+        $selectedMenu = $this->normalizeJsonPayload($request->selected_menu);
 
         // 4. Insert Booking
         $booking = Booking::create([
@@ -338,7 +330,7 @@ class BookingController extends Controller
             'special_instructions'  => $request->special_instructions,
             'venue_building_details' => $request->venue_building_details,
             'selected_menu'         => $request->has('selected_menu')
-                ? (is_array($request->selected_menu) ? json_encode($request->selected_menu) : $request->selected_menu)
+                ? $this->normalizeJsonPayload($request->selected_menu)
                 : $booking->selected_menu,
         ]);
 
@@ -432,7 +424,7 @@ class BookingController extends Controller
             }
 
             $booking->update([
-                'selected_menu' => json_encode($selectedMenu),
+                'selected_menu' => $selectedMenu,
                 'total_cost' => $newTotal,
                 'live_status' => $paidTotal > $newTotal ? 'Credit Review' : $booking->live_status,
             ]);
@@ -602,5 +594,15 @@ class BookingController extends Controller
         }
 
         return response()->json(['message' => 'Payment processed and verified successfully.']);
+    }
+
+    private function normalizeJsonPayload(mixed $value): mixed
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            return json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
+        }
+
+        return $value;
     }
 }

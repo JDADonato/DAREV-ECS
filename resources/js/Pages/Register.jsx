@@ -64,7 +64,7 @@ const Register = () => {
             phone: formData.phone,
         }, {
             onError: (errors) => {
-                const msg = errors.username || errors.password || errors.email || errors.phone || 'Registration failed. Please try again.';
+                const msg = errors.username || errors.password || errors.email || errors.phone || 'We could not create your account. Please try again.';
                 setError(msg);
                 setLoading(false);
             },

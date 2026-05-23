@@ -1,17 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 
-const TabIcon = ({ type, className = 'w-4 h-4' }) => {
-    const icons = {
-        starter: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.87c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3-4.87v-1.5m-6 1.5v-1.5m12 9.75l-1.5.75a3.354 3.354 0 01-3 0 3.354 3.354 0 00-3 0 3.354 3.354 0 01-3 0 3.354 3.354 0 00-3 0 3.354 3.354 0 01-3 0L3 16.5m18-4.5a9 9 0 11-18 0" /></svg>,
-        main: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1.001A3.75 3.75 0 0012 18z" /></svg>,
-        side: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>,
-        dessert: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.87c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513M6 13.121v3.629c0 1.135.845 2.098 1.976 2.192a48.424 48.424 0 008.048 0c1.131-.094 1.976-1.057 1.976-2.192v-3.629" /></svg>,
-        drink: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" /></svg>
-    };
-    return icons[type] || null;
-};
-
 const CATEGORY_TABS = [
     { key: 'starter', label: 'Starters' },
     { key: 'main', label: 'Main Course' },
@@ -20,11 +9,13 @@ const CATEGORY_TABS = [
     { key: 'drink', label: 'Refreshments' }
 ];
 
-const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
+const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full' }) => {
     const { pax, selectedDishes: existingDishes } = bookingData;
-    const [phase, setPhase] = useState('budget'); // 'budget' | 'path' | 'menu'
+    const [phase, setPhase] = useState(() => {
+        if (mode === 'menu') return 'menu';
+        return bookingData.packageChoiceStage === 'curated' ? 'curated' : 'path';
+    }); // 'path' | 'curated' | 'menu'
     const [budget, setBudget] = useState(bookingData.budget || '');
-    const [hasBudget, setHasBudget] = useState(false);
     const [activeTab, setActiveTab] = useState('starter');
     const [selections, setSelections] = useState({
         starter: [],
@@ -78,9 +69,37 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                 dessert: existingDishes.dessert || existingDishes.desserts || [],
                 drink: existingDishes.drink || existingDishes.drinks || []
             });
-            setPhase('menu');
+            if (mode !== 'packages') {
+                setPhase('menu');
+            }
         }
     }, []);
+
+    const getSelectionTotal = (nextSelections) => {
+        let total = 0;
+        Object.keys(nextSelections).forEach(category => {
+            nextSelections[category].forEach(id => {
+                const dish = mergedDishes[category]?.find(d => d.id === id);
+                if (dish) total += getDishCost(dish) * (pax || 0);
+            });
+        });
+        return total;
+    };
+
+    const advanceFromPackageChoice = (nextSelections, extra = {}) => {
+        updateBooking({
+            selectedDishes: nextSelections,
+            totalCost: getSelectionTotal(nextSelections),
+            ...extra,
+        });
+
+        if (mode === 'packages') {
+            onNext(true);
+            return;
+        }
+
+        setPhase('menu');
+    };
 
     // Get effective cost per head for a dish
     const getDishCost = (dish) => {
@@ -152,7 +171,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
 
         const categories = ['starter', 'main', 'side', 'dessert', 'drink'];
 
-        // Build sorted dish lists per category (most expensive first to maximize budget usage)
+        // Build sorted dish lists per category, then fit selections within the target budget.
         const categoryQueues = {};
         categories.forEach(cat => {
             categoryQueues[cat] = [...(mergedDishes[cat] || [])]
@@ -220,7 +239,13 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
         }
 
         setSelections(newSelections);
-        setPhase('menu');
+        advanceFromPackageChoice(newSelections, {
+            budget: parseInt(budget) || 0,
+            package_id: 'budget-guided',
+            package_base_price: null,
+            package_name: null,
+            packageChoiceStage: 'path',
+        });
     };
 
     // Apply a curated package — map DB menu_structure (plural keys) to singular keys
@@ -242,31 +267,18 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
         });
         
         setSelections(newSelections);
-        updateBooking({ 
+        advanceFromPackageChoice(newSelections, {
             package_id: pkg.id, 
             package_base_price: pkg.base_price_per_head,
-            package_name: pkg.name 
+            package_name: pkg.name,
+            packageChoiceStage: 'curated',
         });
-        setPhase('menu');
     };
 
     // Apply blank canvas
     const applyBlankCanvas = () => {
         setSelections({ starter: [], main: [], side: [], dessert: [], drink: [] });
-        updateBooking({ package_id: 'custom', package_base_price: null, package_name: null });
-        setPhase('menu');
-    };
-
-    const handleBuildMenu = () => {
-        setHasBudget(true);
-        updateBooking({ budget: parseInt(budget) || 0 });
-        setPhase('path');
-    };
-
-    const handleSkipBudget = () => {
-        setHasBudget(false);
-        updateBooking({ budget: 0 });
-        setPhase('path');
+        advanceFromPackageChoice({ starter: [], main: [], side: [], dessert: [], drink: [] }, { package_id: 'custom', package_base_price: null, package_name: null, packageChoiceStage: 'path' });
     };
 
     const handleConfirmMenu = () => {
@@ -296,6 +308,30 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
     };
 
     const totalDishCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0);
+    const activeCategoryIndex = CATEGORY_TABS.findIndex(tab => tab.key === activeTab);
+    const activeCategory = CATEGORY_TABS[activeCategoryIndex] || CATEGORY_TABS[0];
+    const isFirstCategory = activeCategoryIndex <= 0;
+    const isLastCategory = activeCategoryIndex === CATEGORY_TABS.length - 1;
+    const activeCategoryCount = selections[activeTab]?.length || 0;
+    const activeCategoryLimit = CATEGORY_LIMITS[activeTab] || 5;
+    const isGuidedMenu = bookingData.package_id === 'custom';
+    const isCuratedSelection = bookingData.package_id && !['custom', 'budget-guided'].includes(String(bookingData.package_id));
+    const canAdvanceMenu = isGuidedMenu ? (!isLastCategory || totalDishCount > 0) : totalDishCount > 0;
+    const goToPreviousCategory = () => {
+        if (!isGuidedMenu || isFirstCategory) {
+            updateBooking({ packageChoiceStage: isCuratedSelection ? 'curated' : 'path' });
+            onBack();
+            return;
+        }
+        setActiveTab(CATEGORY_TABS[activeCategoryIndex - 1].key);
+    };
+    const goToNextCategory = () => {
+        if (!isGuidedMenu || isLastCategory) {
+            handleConfirmMenu();
+            return;
+        }
+        setActiveTab(CATEGORY_TABS[activeCategoryIndex + 1].key);
+    };
 
     // ==========================================
     // PHASE: BUDGET ENTRY
@@ -378,43 +414,54 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
             <div className="flex flex-col h-full justify-between animate-fadeIn">
                 <div className="space-y-8">
                     <div className="text-center mb-2">
-                        <p className="text-gray-500 text-sm">Choose how you'd like to build your menu</p>
+                        <h3 className="text-2xl font-black text-gray-950">How would you like to build your menu?</h3>
+                        <p className="mt-2 text-sm font-semibold text-gray-500">Choose a starting point. You can review and adjust dishes before continuing.</p>
                     </div>
-                    <div className={`grid grid-cols-1 ${hasBudget ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 max-w-4xl mx-auto`}>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto booking-menu-path">
                         {/* Budget Maximizer - only when budget is entered */}
-                        {hasBudget && (
-                            <button
-                                onClick={applyBudgetMaximizer}
-                                className="group text-left p-8 rounded-2xl border-2 border-green-100 bg-gradient-to-br from-green-50/50 to-white hover:border-green-300 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden"
-                            >
-                                <div className="absolute top-3 right-3 bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">AI Assisted</div>
+                        <>
+                            <div className="booking-choice-card booking-choice-card-budget group text-left p-8 rounded-2xl border-2 border-green-100 bg-white transition-all duration-300 relative overflow-hidden">
                                 <div className="w-14 h-14 bg-green-100 rounded-2xl flex items-center justify-center mb-5 text-green-600 group-hover:bg-green-200 transition-colors">
                                     <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
                                     </svg>
                                 </div>
-                                <h3 className="text-xl font-bold text-gray-900 mb-2">Smart Budget Maximizer</h3>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">Build Around a Budget</h3>
                                 <p className="text-sm text-gray-600 mb-4 leading-relaxed">
-                                    We automatically pick the best combination of dishes to maximize value within your <strong className="text-green-700">₱{parseInt(budget).toLocaleString()}</strong> budget.
+                                    The system will choose dishes that fit within your <strong className="text-green-700">₱{parseInt(budget || 0).toLocaleString()}</strong> target. You can still review and adjust the result.
                                 </p>
+                                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Target budget</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="1000"
+                                    value={budget}
+                                    onChange={(e) => setBudget(e.target.value)}
+                                    placeholder="Example: 50000"
+                                    className="mb-5 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-bold text-gray-900 outline-none focus:border-red-900 focus:ring-4 focus:ring-red-900/10"
+                                />
                                 <ul className="space-y-2 text-xs text-gray-500 mb-5">
                                     <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Auto-selects dishes to fit your budget</li>
                                     <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Evenly spreads across all categories</li>
                                     <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>You can still add, remove, or swap dishes after</li>
                                 </ul>
-                                <div className="text-green-600 font-bold text-sm flex items-center group-hover:translate-x-1 transition-transform">
-                                    Auto-fill my menu
+                                <button
+                                    type="button"
+                                    onClick={applyBudgetMaximizer}
+                                    disabled={!budget || parseInt(budget) <= 0}
+                                    className="text-green-600 font-bold text-sm flex items-center group-hover:translate-x-1 transition-transform disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Build from budget
                                     <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
-                                </div>
-                            </button>
-                        )}
+                                </button>
+                            </div>
+                        </>
 
                         {/* Curated Packages */}
                         <button
                             onClick={() => setPhase('curated')}
-                            className="group text-left p-8 rounded-2xl border-2 border-primary-100 bg-gradient-to-br from-primary-50/30 to-white hover:border-primary-300 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 relative overflow-hidden"
+                            className="booking-choice-card booking-choice-card-package group text-left p-8 rounded-2xl border-2 border-primary-100 bg-white transition-all duration-300 relative overflow-hidden"
                         >
-                            <div className="absolute top-3 right-3 bg-primary-100 text-primary-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">Popular</div>
                             <div className="w-14 h-14 bg-primary-50 rounded-2xl flex items-center justify-center mb-5 text-primary-600 group-hover:bg-primary-100 transition-colors">
                                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
@@ -438,24 +485,24 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                         {/* Blank Canvas */}
                         <button
                             onClick={applyBlankCanvas}
-                            className="group text-left p-8 rounded-2xl border-2 border-gray-100 bg-white hover:border-gray-300 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
+                            className="booking-choice-card booking-choice-card-custom group text-left p-8 rounded-2xl border-2 border-gray-100 bg-white transition-all duration-300"
                         >
                             <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mb-5 text-gray-500 group-hover:bg-gray-100 transition-colors">
                                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
                                 </svg>
                             </div>
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">Blank Canvas</h3>
+                            <h3 className="text-xl font-bold text-gray-900 mb-2">Build My Menu</h3>
                             <p className="text-sm text-gray-600 mb-4 leading-relaxed">
-                                Start from an empty menu and hand-pick every single dish yourself. <strong>Complete creative freedom</strong> to build exactly what you want.
+                                Start from an empty selection and choose each dish yourself, category by category.
                             </p>
                             <ul className="space-y-2 text-xs text-gray-500 mb-5">
                                 <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Browse every dish in our catalog</li>
                                 <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Full control over every category</li>
-                                <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>No budget restrictions</li>
+                                <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Flexible budget</li>
                             </ul>
                             <div className="text-gray-600 font-bold text-sm flex items-center group-hover:translate-x-1 transition-transform">
-                                Start from scratch
+                                Start choosing dishes
                                 <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
                             </div>
                         </button>
@@ -464,7 +511,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
 
                 <div className="flex justify-start pt-12 items-center border-t border-gray-100 mt-8">
                     <button
-                        onClick={() => setPhase('budget')}
+                        onClick={onBack}
                         className="text-gray-500 font-bold hover:text-gray-800 px-6 py-3 transition-colors flex items-center"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -484,7 +531,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
         return (
             <div className="flex flex-col h-full justify-between animate-fadeIn">
                 <div className="space-y-8">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mt-4">
+                    <div className="booking-menu-path booking-curated-grid grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto mt-4">
                         {curatedPackages.length === 0 ? (
                             <div className="col-span-3 text-center py-12">
                                 <p className="text-gray-400">Loading packages...</p>
@@ -511,17 +558,9 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                             return (
                                 <div
                                     key={pkg.id}
-                                    className={`relative bg-white border-2 rounded-2xl overflow-hidden hover:shadow-2xl transition-all duration-300 flex flex-col ${index === 1 ? 'border-primary-200 ring-2 ring-primary-100' : 'border-gray-100 hover:border-primary-200'
-                                        }`}
+                                    className={`booking-choice-card booking-curated-card booking-tier-card-${index} text-left p-8 rounded-2xl border-2 bg-white transition-all duration-300 relative overflow-hidden`}
                                 >
-                                    {index === 1 && (
-                                        <div className="bg-primary-600 text-white text-center py-1.5 text-xs font-bold uppercase tracking-wider">
-                                            Most Popular
-                                        </div>
-                                    )}
-                                    <div className="h-2 w-full bg-gradient-to-r from-primary-500 to-primary-600"></div>
-
-                                    <div className="p-8 flex-1 flex flex-col">
+                                    <div className="booking-curated-content flex-1 flex flex-col">
                                         <h3 className="text-2xl font-bold text-gray-900 mb-1">{pkg.name}</h3>
                                         <p className="text-gray-500 text-sm mb-4">{pkg.description}</p>
                                         <p className="text-primary-600 font-bold text-lg mb-1">₱{displayPrice.toLocaleString()}/head</p>
@@ -545,7 +584,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                                             </div>
                                             <button
                                                 onClick={() => applyCuratedPackage(pkg)}
-                                                className="w-full py-3 rounded-xl font-bold text-sm uppercase tracking-wide transition-all transform active:scale-95 bg-gray-900 text-white hover:bg-red-900 hover:shadow-lg shadow-md"
+                                                className="w-full py-3 rounded-xl font-bold text-sm uppercase tracking-wide transition-all transform active:scale-95 bg-gray-900 text-white hover:bg-red-900"
                                             >
                                                 Select {pkg.name}
                                             </button>
@@ -559,7 +598,10 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
 
                 <div className="flex justify-start pt-12 items-center border-t border-gray-100 mt-8">
                     <button
-                        onClick={() => setPhase('path')}
+                        onClick={() => {
+                            updateBooking({ packageChoiceStage: 'path' });
+                            setPhase('path');
+                        }}
                         className="text-gray-500 font-bold hover:text-gray-800 px-6 py-3 transition-colors flex items-center"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -604,8 +646,19 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                     </div>
                 </div>
             )}
+            {isGuidedMenu && (
+                <div className="booking-menu-guide">
+                    <div>
+                        <p className="booking-step-kicker">Menu category {activeCategoryIndex + 1} of {CATEGORY_TABS.length}</p>
+                        <h3>{activeCategory.label}</h3>
+                        <p>Choose up to {activeCategoryLimit}. You can move through each category and still return to adjust anything.</p>
+                    </div>
+                    <strong>{activeCategoryCount}/{activeCategoryLimit} selected</strong>
+                </div>
+            )}
+
             {/* Category Tabs */}
-            <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl overflow-x-auto mt-2">
+            <div className="booking-category-tabs">
                 {CATEGORY_TABS.map(tab => {
                     const count = selections[tab.key]?.length || 0;
                     const limit = CATEGORY_LIMITS[tab.key] || 5;
@@ -615,21 +668,15 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                         <button
                             key={tab.key}
                             onClick={() => setActiveTab(tab.key)}
-                            className={`flex-1 min-w-fit px-4 py-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${isActive
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700'
+                            className={`booking-category-tab ${isActive
+                                ? 'active'
+                                : ''
                                 }`}
                         >
-                            <TabIcon type={tab.key} className="w-4 h-4 inline-block mr-0.5" />
-                            {tab.label}
-                            <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isFull
-                                ? 'bg-green-100 text-green-700'
-                                : count > 0
-                                    ? (isActive ? 'bg-primary-100 text-primary-700' : 'bg-gray-200 text-gray-600')
-                                    : 'bg-gray-200 text-gray-400'
-                                }`}>
+                            <span>{tab.label}</span>
+                            <strong className={isFull ? 'complete' : count > 0 ? 'started' : ''}>
                                 {count}/{limit}
-                            </span>
+                            </strong>
                         </button>
                     );
                 })}
@@ -721,13 +768,13 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
             {/* Bottom Bar */}
             <div className="flex justify-between pt-8 items-center border-t border-gray-100 mt-8">
                 <button
-                    onClick={() => setPhase('path')}
+                    onClick={goToPreviousCategory}
                     className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
                 >
                     <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
-                    Go Back
+                    {isGuidedMenu && !isFirstCategory ? 'Previous category' : 'Back to packages'}
                 </button>
 
                 <div className="flex items-center gap-4">
@@ -736,14 +783,14 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack }) => {
                         <p className="text-xl font-bold text-gray-900">₱{menuTotal.toLocaleString()}</p>
                     </div>
                     <button
-                        onClick={handleConfirmMenu}
-                        disabled={totalDishCount === 0}
-                        className={`px-8 py-3.5 rounded-xl font-bold shadow-lg transition-all transform active:scale-95 flex items-center text-sm ${totalDishCount > 0
+                        onClick={goToNextCategory}
+                        disabled={!canAdvanceMenu}
+                        className={`px-8 py-3.5 rounded-xl font-bold shadow-lg transition-all transform active:scale-95 flex items-center text-sm ${canAdvanceMenu
                             ? 'bg-red-900 text-white hover:bg-red-800 hover:shadow-xl'
                             : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                             }`}
                     >
-                        Confirm Menu
+                        {isGuidedMenu && !isLastCategory ? 'Next category' : 'Confirm Menu'}
                         <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>

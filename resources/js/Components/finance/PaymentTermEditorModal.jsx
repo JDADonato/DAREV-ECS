@@ -118,10 +118,10 @@ const PaymentTermEditorModal = ({ isOpen, onClose, booking, payment, onSuccess }
             if (res.ok) {
                 onSuccess(data.booking);
             } else {
-                setError(data.error || 'Failed to update payment terms.');
+                setError(data.error || 'We could not save the payment schedule.');
             }
         } catch (err) {
-            setError('Network error occurred.');
+            setError('We could not save the payment schedule. Please try again.');
         } finally {
             setLoading(false);
         }

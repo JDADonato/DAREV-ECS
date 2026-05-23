@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 
 const ToastContext = createContext(null);
 
@@ -6,7 +6,6 @@ let globalIdCounter = 0;
 
 export const ToastProvider = ({ children }) => {
     const [toasts, setToasts] = useState([]);
-    const toastsRef = useRef([]);
 
     const removeToast = useCallback((id) => {
         // Mark as exiting first for animation
@@ -16,10 +15,10 @@ export const ToastProvider = ({ children }) => {
         }, 400);
     }, []);
 
-    const addToast = useCallback((message, type = 'success', duration = 5000) => {
+    const addToast = useCallback((message, type = 'success', duration = 3500) => {
         const id = ++globalIdCounter;
         const newToast = { id, message, type, exiting: false };
-        setToasts(prev => [...prev, newToast]);
+        setToasts(prev => [...prev, newToast].slice(-3));
 
         if (duration > 0) {
             setTimeout(() => removeToast(id), duration);

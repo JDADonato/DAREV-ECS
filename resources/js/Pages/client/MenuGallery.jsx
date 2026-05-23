@@ -51,7 +51,7 @@ const MenuGallery = () => {
             .then(data => setPricingOverrides(data.overrides || {}))
             .catch(console.error);
 
-        // Fetch menu items from database API
+        // Load menu items for the gallery.
         fetchMenuItemsFromAPI().then(organizedDishes => setCustomItems(organizedDishes));
     }, []);
 

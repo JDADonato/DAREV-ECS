@@ -36,10 +36,10 @@ const FoodTasting = () => {
                 if (user) setTimeout(() => router.get('/dashboard/client?tab=tastings'), 1200);
                 else setFormData({ guest_name: '', guest_email: '', guest_phone: '', preferred_date: '', preferred_time: '', notes: '' });
             } else {
-                setMessage({ type: 'error', text: data.message || 'Failed to schedule tasting.' });
+                setMessage({ type: 'error', text: data.message || 'We could not schedule the tasting. Please try again.' });
             }
         } catch (error) {
-            setMessage({ type: 'error', text: 'Network error. Please try again.' });
+            setMessage({ type: 'error', text: 'We could not schedule the tasting. Please try again.' });
         } finally {
             setLoading(false);
         }

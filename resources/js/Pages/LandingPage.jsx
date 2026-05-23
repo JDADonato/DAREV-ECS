@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, router } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
-import ChatBubble from '../Components/common/ChatBubble';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
 import logoImg from '../../images/ECS_LOGO.png';
@@ -297,7 +296,7 @@ const LandingPage = () => {
                             Premium catering for weddings, corporate events, and private celebrations — crafted with precision, served with heart.
                         </p>
                         <p className="text-white/85 text-base md:text-lg leading-relaxed max-w-xl mb-8 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .7s .55s forwards'}}>
-                            Premium menus, polished setup, transparent planning, and service teams prepared for weddings, company events, and private milestones.
+                            Premium menus, polished setup, transparent planning, and service teams prepared for weddings, company events, and private celebrations.
                         </p>
                         <div className="flex flex-col items-center gap-3 sm:flex-row lg:items-start" style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
                             <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
@@ -383,7 +382,7 @@ const LandingPage = () => {
                     <div className="mt-6 grid gap-4 lg:grid-cols-2">
                         {[
                             ['Decision support', 'Availability, estimates, payment schedules, and booking status stay visible so planning does not depend on guesswork.'],
-                            ['Operational safeguards', 'Dietary notes, venue details, schedule changes, and sourcing timelines are handled in the workflow before event day.'],
+                            ['Planning safeguards', 'Dietary notes, venue details, schedule changes, and sourcing timelines are checked early so the team can prepare with confidence.'],
                         ].map(([title,text],i)=>(
                             <Rv key={title} d={`rv-d${i+3}`}>
                                 <div className="rounded-2xl border border-[#720101]/10 bg-white p-6 shadow-sm">
@@ -397,10 +396,10 @@ const LandingPage = () => {
 
                     <div className="hidden">
                         {[
-                            {icon:<IcoBudget c="#f0aa0b"/>,title:'Smart Budget Maximizer',text:'Our system stretches every peso — matching the best dishes to your budget without cutting corners. You set the limit, we maximize the feast.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoMenu c="#f0aa0b"/>,title:'Dynamic Menu Generation',text:'Menus automatically adapt to your event type, headcount, and dietary needs. Every plate feels curated, never cookie-cutter.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=500'},
+                            {icon:<IcoBudget c="#f0aa0b"/>,title:'Budget-Guided Menu Builder',text:'Set a target budget and get a practical dish selection to review, adjust, and confirm before submitting your booking.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=500'},
+                            {icon:<IcoMenu c="#f0aa0b"/>,title:'Guided Menu Selection',text:'Choose from packages or build your own menu with clear dish counts, per-head pricing, and running totals as you decide.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=500'},
                             {icon:<IcoChart c="#f0aa0b"/>,title:'Decision Support',text:'Live availability, transparent pricing, and instant cost estimates — so you book with total confidence, not guesswork.',img:'https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoFilter c="#f0aa0b"/>,title:'Rule-Based Filtering',text:'Dietary restrictions, venue constraints, and seasonal availability are handled automatically. Nothing slips through the cracks.',img:'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?auto=format&fit=crop&q=80&w=500'},
+                            {icon:<IcoFilter c="#f0aa0b"/>,title:'Smart Menu Guidance',text:'Dietary needs, venue details, and seasonal availability are checked as you plan so your choices stay practical.',img:'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?auto=format&fit=crop&q=80&w=500'},
                         ].map((item,i)=>(
                             <div key={i} className={`flex flex-col ${i%2===0?'md:flex-row':'md:flex-row-reverse'} items-center gap-10 md:gap-16`}>
                                 <Rv cls={i%2===0?'rv-left':'rv-right'} d="flex-1">
@@ -434,7 +433,7 @@ const LandingPage = () => {
                         {[
                             {t:'Weddings',img:'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&q=80&w=500',d:'Elegant packages for your dream day'},
                             {t:'Corporate',img:'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=500',d:'Professional business catering'},
-                            {t:'Private Parties',img:'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&q=80&w=500',d:'Celebrate milestones in style'},
+                            {t:'Private Parties',img:'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&q=80&w=500',d:'Celebrate personal moments in style'},
                             {t:'Debut & Baptismal',img:'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?auto=format&fit=crop&q=80&w=500',d:'Handled with care & warmth'},
                         ].map((s,i)=>(
                             <Rv key={i} d={`rv-d${i+1}`}>
@@ -690,9 +689,6 @@ const LandingPage = () => {
             </footer>
 
             <Footer />
-
-            {/* Chat Bubble */}
-            {user && <ChatBubble user={user} />}
         </div>
     );
 };

@@ -3,13 +3,15 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 
 const CATEGORY_LABELS = {
     starter: 'Starter',
-    main: 'Main Course',
+    main: 'Main',
     side: 'Sides',
     dessert: 'Dessert',
-    drink: 'Refreshments'
+    drink: 'Drinks'
 };
 
-const BlueprintPanel = ({ bookingData, currentStep }) => {
+const money = (value) => `₱${Number(value || 0).toLocaleString()}`;
+
+const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
     const {
         eventType,
         eventName,
@@ -26,17 +28,6 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
     const [pricingOverrides, setPricingOverrides] = useState({});
     const [customItems, setCustomItems] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
 
-    // Accordion states
-    const [expandedSections, setExpandedSections] = useState({
-        event: true,
-        menu: true,
-        surcharges: true
-    });
-
-    const toggleSection = (section) => {
-        setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-    };
-
     useEffect(() => {
         const fetchOverrides = async () => {
             try {
@@ -49,14 +40,11 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
                 console.error("Error fetching pricing overrides:", error);
             }
         };
+
         fetchOverrides();
         fetchMenuItemsFromAPI().then(organizedDishes => setCustomItems(organizedDishes));
     }, []);
 
-    // Menu items organized by category (already structured from API)
-    const mergedDishes = customItems;
-
-    // Calculate menu total
     const menuTotal = useMemo(() => {
         if (bookingData.package_base_price) {
             return bookingData.package_base_price * pax;
@@ -66,7 +54,7 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
         Object.keys(selectedDishes).forEach(category => {
             const dishIds = selectedDishes[category] || [];
             dishIds.forEach(id => {
-                const dish = mergedDishes[category]?.find(d => d.id === id);
+                const dish = customItems[category]?.find(d => d.id === id);
                 if (dish) {
                     const overrideId = `dish_${dish.id}`;
                     const customCost = pricingOverrides[overrideId] !== undefined ? pricingOverrides[overrideId] : dish.costPerHead;
@@ -75,243 +63,149 @@ const BlueprintPanel = ({ bookingData, currentStep }) => {
             });
         });
         return total;
-    }, [selectedDishes, pax, pricingOverrides, mergedDishes, bookingData.package_base_price]);
+    }, [selectedDishes, pax, pricingOverrides, customItems, bookingData.package_base_price]);
 
-    // Calculate surcharges
     const transportFee = useMemo(() => {
         if (venueDistance === 'outside-16-30') return 1500;
         if (venueDistance === 'outside-31-50') return 3000;
         return 0;
     }, [venueDistance]);
 
-    const highRiseSurcharge = useMemo(() => {
-        if (isHighRise) return Math.round(menuTotal * 0.03);
-        return 0;
-    }, [isHighRise, menuTotal]);
-
-    const overtimeFee = useMemo(() => {
-        return Math.max(0, duration - 4) * 5000;
-    }, [duration]);
-
+    const highRiseSurcharge = useMemo(() => isHighRise ? Math.round(menuTotal * 0.03) : 0, [isHighRise, menuTotal]);
+    const overtimeFee = useMemo(() => Math.max(0, duration - 4) * 5000, [duration]);
     const totalEstimate = menuTotal + transportFee + highRiseSurcharge + overtimeFee;
+    const totalDishCount = Object.values(selectedDishes).reduce((sum, arr) => sum + (arr?.length || 0), 0);
 
-    // Count total dishes selected
-    const totalDishCount = Object.values(selectedDishes).reduce(
-        (sum, arr) => sum + (arr?.length || 0), 0
-    );
+    const selectedMenuRows = Object.keys(CATEGORY_LABELS).flatMap(category => {
+        const dishIds = selectedDishes[category] || [];
+        return dishIds.map(id => {
+            const dish = customItems[category]?.find(d => d.id === id);
+            if (!dish) return null;
+            const overrideId = `dish_${dish.id}`;
+            const customCost = pricingOverrides[overrideId] !== undefined ? pricingOverrides[overrideId] : dish.costPerHead;
+            return {
+                id: `${category}-${id}`,
+                category: CATEGORY_LABELS[category],
+                name: dish.name,
+                cost: customCost * (pax || 0),
+            };
+        }).filter(Boolean);
+    });
 
-    // Get action button text based on step
-    const getButtonText = () => {
-        switch (currentStep) {
-            case 1: return 'Continue';
-            case 2: return 'Continue';
-            case 3: return 'Continue';
-            case 4: return 'Confirm Menu';
-            case 5: return 'Continue';
-            case 6: return 'Confirm Booking';
-            default: return 'Continue';
-        }
-    };
+    if (collapsed) {
+        return (
+            <aside className="hidden border-l border-[#720101]/10 bg-[#fffaf3] lg:sticky lg:top-[68px] lg:flex lg:h-[calc(100vh-68px)] lg:w-[4.25rem] lg:flex-col lg:items-center lg:justify-between lg:px-3 lg:py-5">
+                <button
+                    type="button"
+                    onClick={onToggle}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-[#720101]/15 bg-white text-[#720101] shadow-sm transition hover:bg-[#720101] hover:text-white"
+                    aria-label="Show booking summary"
+                    title="Show summary"
+                >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+                <div className="flex min-h-0 flex-1 items-center justify-center py-4">
+                    <div className="flex rotate-180 items-center gap-2 [writing-mode:vertical-rl]">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[#9f6500]">Summary</span>
+                        <strong className="font-display text-lg text-[#720101]">{money(totalEstimate)}</strong>
+                    </div>
+                </div>
+                <div className="h-10 w-10" aria-hidden="true" />
+            </aside>
+        );
+    }
 
     return (
-        <div className="w-full lg:w-[380px] flex-shrink-0">
-            <div className="bg-gray-900 rounded-2xl shadow-2xl sticky top-24 overflow-hidden">
-                {/* Header */}
-                <div className="bg-gradient-to-r from-red-900 to-red-950 px-6 py-5 border-b border-gray-700 relative overflow-hidden">
-                    <div className="absolute inset-0 opacity-[.03]" style={{backgroundImage:'radial-gradient(circle at 80% 20%,#f0aa0b,transparent 40%)'}} />
-                    <div className="flex items-center gap-3 relative z-10">
-                        <div className="w-10 h-10 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center border border-white/20">
-                            <svg className="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                            </svg>
-                        </div>
+        <aside className="border-t border-[#720101]/10 bg-[#fffaf3] lg:sticky lg:top-[68px] lg:h-[calc(100vh-68px)] lg:w-[22rem] lg:flex-shrink-0 lg:border-l lg:border-t-0">
+            <div className="flex h-full flex-col">
+                <div className="border-b border-[#720101]/10 px-5 py-4">
+                    <div className="flex items-start justify-between gap-4">
                         <div>
-                            <h3 className="text-white font-display font-bold text-lg tracking-wide">Your Event Plan</h3>
-                            <p className="text-red-100/60 text-xs mt-0.5">Saved as you build</p>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-[#9f6500]">Booking Summary</p>
+                            <h3 className="mt-1 font-display text-xl font-bold text-[#720101]">Your Event Plan</h3>
                         </div>
+                        <button
+                            type="button"
+                            onClick={onToggle}
+                            className="hidden h-9 w-9 items-center justify-center rounded-full border border-[#720101]/15 bg-white text-[#720101] transition hover:bg-[#720101] hover:text-white lg:flex"
+                            aria-label="Collapse booking summary"
+                            title="Collapse summary"
+                        >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-900/50 max-h-[calc(100vh-320px)]">
-                    {/* EVENT DETAILS Section */}
-                    <div className="border-b border-gray-800">
-                        <button 
-                            onClick={() => toggleSection('event')}
-                            className="w-full flex justify-between items-center py-4 px-6 hover:bg-gray-800 transition-colors focus:outline-none"
-                        >
-                            <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-400 flex items-center">
-                                <svg className="w-3.5 h-3.5 mr-2 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Event Details
-                            </h4>
-                            <svg className={`w-4 h-4 text-gray-500 transition-transform duration-300 ${expandedSections.event ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                        </button>
-                        
-                        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedSections.event ? 'max-h-96 opacity-100 pb-5 px-6' : 'max-h-0 opacity-0 px-6'}`}>
-                            <div className="space-y-3 pt-1">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-gray-500 text-sm">Type</span>
-                                    <span className={`text-sm font-medium ${eventType ? 'text-white' : 'text-gray-600 italic'}`}>
-                                        {eventType || '—'}
-                                    </span>
-                                </div>
-                                {eventName && (
-                                    <div className="flex justify-between items-start">
-                                        <span className="text-gray-500 text-sm">Name</span>
-                                        <span className="max-w-[180px] text-right text-sm font-medium text-white">
-                                            {eventName}
-                                        </span>
-                                    </div>
-                                )}
-                                <div className="flex justify-between items-center">
-                                    <span className="text-gray-500 text-sm">Date</span>
-                                    <span className={`text-sm font-medium ${date ? 'text-white' : 'text-gray-600 italic'}`}>
-                                        {date || '—'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-gray-500 text-sm">Guests</span>
-                                    <span className={`text-sm font-medium ${pax ? 'text-white' : 'text-gray-600 italic'}`}>
-                                        {pax ? `${pax} pax` : '—'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-gray-500 text-sm">Time</span>
-                                    <span className={`text-sm font-medium ${time ? 'text-white' : 'text-gray-600 italic'}`}>
-                                        {time || '—'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-start">
-                                    <span className="text-gray-500 text-sm">Dietary</span>
-                                    <span className={`text-sm font-medium text-right max-w-[180px] ${dietaryNotes ? 'text-white' : 'text-gray-600 italic'}`}>
-                                        {dietaryNotes || 'None'}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* MENU SELECTION Section */}
-                    <div className="border-b border-gray-800">
-                        <button 
-                            onClick={() => toggleSection('menu')}
-                            className="w-full flex justify-between items-center py-4 px-6 hover:bg-gray-800 transition-colors focus:outline-none"
-                        >
-                            <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-400 flex items-center">
-                                <svg className="w-3.5 h-3.5 mr-2 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                </svg>
-                                Menu Selection
-                                {totalDishCount > 0 && (
-                                    <span className="ml-2 bg-yellow-500/20 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                                        {totalDishCount} items
-                                    </span>
-                                )}
-                            </h4>
-                            <svg className={`w-4 h-4 text-gray-500 transition-transform duration-300 ${expandedSections.menu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                        </button>
-
-                        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedSections.menu ? 'max-h-[800px] opacity-100 pb-5 px-6' : 'max-h-0 opacity-0 px-6'}`}>
-                            {totalDishCount === 0 ? (
-                                <p className="text-gray-600 text-sm italic pt-1">No dishes selected yet</p>
-                            ) : (
-                                <div className="space-y-5 pt-1">
-                                    {Object.keys(CATEGORY_LABELS).map(category => {
-                                        const dishIds = selectedDishes[category] || [];
-                                        if (dishIds.length === 0) return null;
-
-                                        return (
-                                            <div key={category}>
-                                                <p className="text-gray-500 text-[10px] font-semibold uppercase tracking-widest mb-2 border-b border-gray-800 pb-1">
-                                                    {CATEGORY_LABELS[category]}
-                                                </p>
-                                                <div className="space-y-1.5">
-                                                    {dishIds.map(id => {
-                                                        const dish = mergedDishes[category]?.find(d => d.id === id);
-                                                        if (!dish) return null;
-                                                        const overrideId = `dish_${dish.id}`;
-                                                        const customCost = pricingOverrides[overrideId] !== undefined ? pricingOverrides[overrideId] : dish.costPerHead;
-                                                        const cost = customCost * (pax || 0);
-                                                        return (
-                                                            <div key={id} className="flex justify-between items-center text-sm animate-fadeIn group">
-                                                                <span className="text-gray-300 truncate mr-3 group-hover:text-white transition-colors">
-                                                                    <span className="text-red-900 mr-1.5 opacity-50">•</span>
-                                                                    {dish.name}
-                                                                </span>
-                                                                <span className="text-white font-medium whitespace-nowrap">
-                                                                    ₱{cost.toLocaleString()}
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
+                <div className="custom-scrollbar flex-1 space-y-5 overflow-y-auto px-5 py-5">
+                    <section>
+                        <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Details</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                            <span className="text-slate-500">Type</span>
+                            <strong className="text-right text-slate-900">{eventType || '-'}</strong>
+                            {eventName && (
+                                <>
+                                    <span className="text-slate-500">Name</span>
+                                    <strong className="text-right text-slate-900">{eventName}</strong>
+                                </>
                             )}
+                            <span className="text-slate-500">Date</span>
+                            <strong className="text-right text-slate-900">{date || '-'}</strong>
+                            <span className="text-slate-500">Time</span>
+                            <strong className="text-right text-slate-900">{time || '-'}</strong>
+                            <span className="text-slate-500">Guests</span>
+                            <strong className="text-right text-slate-900">{pax ? `${pax} pax` : '-'}</strong>
+                            <span className="text-slate-500">Dietary</span>
+                            <strong className="text-right text-slate-900">{dietaryNotes || 'None'}</strong>
                         </div>
-                    </div>
+                    </section>
 
-                    {/* Surcharges Section */}
-                    {(transportFee > 0 || highRiseSurcharge > 0 || overtimeFee > 0) && (
-                        <div className="border-b border-gray-800">
-                            <button 
-                                onClick={() => toggleSection('surcharges')}
-                                className="w-full flex justify-between items-center py-4 px-6 hover:bg-gray-800 transition-colors focus:outline-none"
-                            >
-                                <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-400 flex items-center">
-                                    <svg className="w-3.5 h-3.5 mr-2 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    Surcharges
-                                </h4>
-                                <svg className={`w-4 h-4 text-gray-500 transition-transform duration-300 ${expandedSections.surcharges ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                            </button>
-
-                            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedSections.surcharges ? 'max-h-56 opacity-100 pb-5 px-6' : 'max-h-0 opacity-0 px-6'}`}>
-                                <div className="space-y-3 pt-1">
-                                    {transportFee > 0 && (
-                                        <div className="flex justify-between items-center text-sm animate-fadeIn">
-                                            <span className="text-gray-400">Transport Fee</span>
-                                            <span className="text-orange-400 font-medium">+₱{transportFee.toLocaleString()}</span>
-                                        </div>
-                                    )}
-                                    {highRiseSurcharge > 0 && (
-                                        <div className="flex justify-between items-center text-sm animate-fadeIn">
-                                            <span className="text-gray-400">High-Rise Labor (3%)</span>
-                                            <span className="text-orange-400 font-medium">+₱{highRiseSurcharge.toLocaleString()}</span>
-                                        </div>
-                                    )}
-                                    {overtimeFee > 0 && (
-                                        <div className="flex justify-between items-center text-sm animate-fadeIn">
-                                            <span className="text-gray-400">Overtime ({duration - 4} hrs)</span>
-                                            <span className="text-orange-400 font-medium">+₱{overtimeFee.toLocaleString()}</span>
-                                        </div>
-                                    )}
-                                </div>
+                    <section className="border-t border-[#720101]/10 pt-5">
+                        <div className="mb-3 flex items-center justify-between">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Menu</p>
+                            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-[#720101] ring-1 ring-[#720101]/10">{totalDishCount} selected</span>
+                        </div>
+                        {selectedMenuRows.length === 0 ? (
+                            <p className="text-sm font-semibold text-slate-400">No dishes selected yet.</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {selectedMenuRows.slice(0, 8).map(row => (
+                                    <div key={row.id} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+                                        <span className="min-w-0 truncate font-semibold text-slate-700">{row.name}</span>
+                                        <span className="font-bold text-slate-900">{money(row.cost)}</span>
+                                    </div>
+                                ))}
+                                {selectedMenuRows.length > 8 && (
+                                    <p className="text-xs font-bold text-slate-400">+{selectedMenuRows.length - 8} more dishes</p>
+                                )}
                             </div>
-                        </div>
+                        )}
+                    </section>
+
+                    {(transportFee > 0 || highRiseSurcharge > 0 || overtimeFee > 0) && (
+                        <section className="border-t border-[#720101]/10 pt-5">
+                            <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Additional Fees</p>
+                            <div className="space-y-2 text-sm">
+                                {transportFee > 0 && <div className="flex justify-between"><span className="text-slate-500">Travel fee</span><strong>{money(transportFee)}</strong></div>}
+                                {highRiseSurcharge > 0 && <div className="flex justify-between"><span className="text-slate-500">High-rise service</span><strong>{money(highRiseSurcharge)}</strong></div>}
+                                {overtimeFee > 0 && <div className="flex justify-between"><span className="text-slate-500">Extra service hours</span><strong>{money(overtimeFee)}</strong></div>}
+                            </div>
+                        </section>
                     )}
                 </div>
 
-                {/* TOTAL ESTIMATE Section */}
-                <div className="border-t border-gray-700 px-6 py-5 bg-gray-800/50">
-                    <div className="flex justify-between items-center mb-1">
-                        <span className="text-gray-400 text-xs uppercase tracking-wider font-bold">Total Estimate</span>
-                    </div>
-                    <p className="text-3xl font-display font-bold text-white">
-                        ₱{totalEstimate.toLocaleString()}
-                    </p>
+                <div className="border-t border-[#720101]/10 bg-white px-5 py-5">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Estimated Total</p>
+                    <p className="mt-1 font-display text-3xl font-bold text-[#720101]">{money(totalEstimate)}</p>
                     {pax > 0 && totalDishCount > 0 && (
-                        <p className="text-gray-500 text-xs mt-1">
-                            ~₱{Math.round(totalEstimate / pax).toLocaleString()} per head
-                        </p>
+                        <p className="mt-1 text-xs font-bold text-slate-400">About {money(Math.round(totalEstimate / pax))} per guest</p>
                     )}
                 </div>
             </div>
-        </div>
+        </aside>
     );
 };
 

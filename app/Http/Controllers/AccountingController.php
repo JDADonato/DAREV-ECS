@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\PaymentResource;
 use App\Models\Booking;
 use App\Models\Payment;
 use App\Models\User;
 use App\Notifications\PaymentReminderNotification;
 use App\Services\BookingManagementService;
+use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -113,21 +115,28 @@ class AccountingController extends Controller
      * Get pending payments for verification queue.
      * Ported from: accountingController.getPendingPayments()
      */
-    public function getPendingPayments()
+    public function getPendingPayments(Request $request)
     {
-        $payments = Payment::with(['booking:id,event_date,client_full_name,user_id', 'booking.user:id,username'])
+        $query = Payment::with(['booking:id,event_date,client_full_name,user_id', 'booking.user:id,username'])
             ->where('status', 'Pending')
             ->whereHas('booking', function ($q) {
                 $q->where('status', '!=', 'Pending'); // Only payments for approved/confirmed bookings
             })
-            ->orderBy('due_date', 'asc')
-            ->get()
+            ->orderBy('due_date', 'asc');
+
+        if ($request->boolean('paginated')) {
+            $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
+            $payments = $query->paginate($perPage);
+            $data = $payments->getCollection()
+                ->map(fn ($p) => $this->paymentWithBookingContext($p))
+                ->values();
+
+            return ApiResponse::paginated($payments, $data);
+        }
+
+        $payments = $query->get()
             ->map(function ($p) {
-                $data = $p->toArray();
-                $data['event_date'] = $p->booking->event_date ?? null;
-                $data['client_full_name'] = $p->booking->client_full_name ?? null;
-                $data['username'] = $p->booking->user->username ?? null;
-                return $data;
+                return $this->paymentWithBookingContext($p);
             });
 
         return response()->json($payments);
@@ -345,16 +354,20 @@ class AccountingController extends Controller
             $query->where('created_at', '<=', $request->endDate);
         }
 
-        $payments = $query->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($p) {
-                $data = $p->toArray();
-                $data['event_date'] = $p->booking->event_date ?? null;
-                $data['client_full_name'] = $p->booking->client_full_name ?? null;
-                $data['package_id'] = $p->booking->package_id ?? null;
-                $data['username'] = $p->booking->user->username ?? null;
-                return $data;
-            });
+        $query->orderBy('created_at', 'desc');
+
+        if ($request->boolean('paginated')) {
+            $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
+            $payments = $query->paginate($perPage);
+            $data = $payments->getCollection()
+                ->map(fn ($p) => $this->paymentWithBookingContext($p))
+                ->values();
+
+            return ApiResponse::paginated($payments, $data);
+        }
+
+        $payments = $query->get()
+            ->map(fn ($p) => $this->paymentWithBookingContext($p));
 
         return response()->json($payments);
     }
@@ -600,5 +613,16 @@ class AccountingController extends Controller
         ]);
 
         return response()->json(['success' => true, 'message' => $message]);
+    }
+
+    private function paymentWithBookingContext(Payment $payment): array
+    {
+        $data = (new PaymentResource($payment))->resolve();
+        $data['event_date'] = $payment->booking->event_date ?? null;
+        $data['client_full_name'] = $payment->booking->client_full_name ?? null;
+        $data['package_id'] = $payment->booking->package_id ?? null;
+        $data['username'] = $payment->booking?->user?->username;
+
+        return $data;
     }
 }

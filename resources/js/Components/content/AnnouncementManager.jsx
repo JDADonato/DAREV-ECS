@@ -245,8 +245,8 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
-                            <input value={form.cta_label} onChange={(e) => setForm({ ...form, cta_label: e.target.value })} placeholder="CTA label" className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold outline-none" />
-                            <input value={form.cta_url} onChange={(e) => setForm({ ...form, cta_url: e.target.value })} placeholder="CTA URL" className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold outline-none" />
+                            <input value={form.cta_label} onChange={(e) => setForm({ ...form, cta_label: e.target.value })} placeholder="Button text" className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold outline-none" />
+                            <input value={form.cta_url} onChange={(e) => setForm({ ...form, cta_url: e.target.value })} placeholder="Button link" className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold outline-none" />
                         </div>
 
                         <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -299,7 +299,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                                             <p className="mt-1 line-clamp-2 text-sm font-medium leading-6 text-slate-500">{item.summary || item.body || 'No summary yet.'}</p>
                                             <div className="mt-3 flex flex-wrap gap-3 text-xs font-black uppercase tracking-wider text-slate-400">
                                                 <span>{item.sent_count || 0} sent</span>
-                                                <span>{item.failed_count || 0} failed</span>
+                                                <span>{item.failed_count || 0} not sent</span>
                                                 <span>{item.read_count || 0} reads</span>
                                             </div>
                                         </div>

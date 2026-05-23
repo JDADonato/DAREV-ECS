@@ -19,6 +19,7 @@ import {
     getSelectedDishes,
     titleCase,
 } from '../utils/dashboardUtils';
+import { getListData } from '../utils/apiResponses';
 
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
@@ -85,7 +86,7 @@ const DashboardMarketing = () => {
             });
             if (response.ok) {
                 const data = await response.json();
-                setBookings(data);
+                setBookings(getListData(data));
             }
         } catch (error) {
             console.error("Error fetching bookings:", error);
@@ -127,7 +128,7 @@ const DashboardMarketing = () => {
         } catch (error) {
             console.error('Error updating status:', error);
             setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'Pending' } : b));
-            toast.error('Network error. Please check your connection.');
+            toast.error('We could not update the booking. Please check your connection.');
         } finally {
             setUpdatingBookingIds(prev => { const n = { ...prev }; delete n[id]; return n; });
         }
@@ -484,22 +485,22 @@ const DashboardMarketing = () => {
                         </div>
 
                         <div>
-                            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Matrix</h4>
+                            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Summary</h4>
                             <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
                                     <p className="text-xs text-gray-500 font-medium">Headcount (Pax)</p>
                                     <p className="text-lg font-bold text-gray-900">{selectedBooking.pax}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-gray-500 font-medium">Base Contract (PHP)</p>
+                                    <p className="text-xs text-gray-500 font-medium">Event Total (PHP)</p>
                                     <p className="text-lg font-bold text-gray-900">{formatMoney(selectedBooking.total_cost || selectedBooking.budget)}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-gray-500 font-medium">Logistics Toll (PHP)</p>
+                                    <p className="text-xs text-gray-500 font-medium">Travel Fee (PHP)</p>
                                     <p className="text-lg font-bold text-orange-600">{formatMoney(selectedBooking.transport_fee)}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-gray-500 font-medium">Labor Index (PHP)</p>
+                                    <p className="text-xs text-gray-500 font-medium">Extra Service Hours (PHP)</p>
                                     <p className="text-lg font-bold text-orange-600">{formatMoney(selectedBooking.labor_surcharge)}</p>
                                 </div>
                             </div>
@@ -730,7 +731,7 @@ const DashboardMarketing = () => {
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
                     <div className="px-6 py-4 bg-primary-600">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-white">Export Calendar as PDF</h3>
+                            <h3 className="text-lg font-bold text-white">Download Calendar Report</h3>
                             <button onClick={() => setShowExportModal(false)} className="text-white hover:text-gray-200 text-2xl leading-none">&times;</button>
                         </div>
                         <p className="text-sm text-white opacity-80">Select the range to include</p>
@@ -810,7 +811,7 @@ const DashboardMarketing = () => {
                             className="flex-1 bg-primary-600 text-white py-2.5 rounded-lg font-medium hover:bg-primary-700 transition-colors flex items-center justify-center"
                         >
                             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            Export PDF
+                            Download Report
                         </button>
                     </div>
                 </div>
@@ -903,7 +904,9 @@ const DashboardMarketing = () => {
         let menuHTML = '';
         if (type === 'Kitchen Prep List' && booking.selected_menu) {
             try {
-                const menu = JSON.parse(booking.selected_menu);
+                const menu = typeof booking.selected_menu === 'string'
+                    ? JSON.parse(booking.selected_menu)
+                    : booking.selected_menu;
                 const categories = { starters: 'Starters', mains: 'Main Courses', sides: 'Side Dishes', desserts: 'Desserts', drinks: 'Beverages' };
                 let dishList = '';
                 Object.keys(menu).forEach(cat => {
@@ -953,7 +956,7 @@ const DashboardMarketing = () => {
                         <p><strong>Phone:</strong> ${booking.client_phone || 'N/A'}</p>
                         <p><strong>Pax:</strong> ${booking.pax}</p>
                         <p><strong>Venue:</strong> ${[booking.venue_address_line, booking.venue_street, booking.venue_city, booking.venue_province, booking.venue_zip_code].filter(Boolean).join(', ') || 'N/A'}</p>
-                        ${booking.special_instructions ? `<p><strong>Special Instructions/Restrictions:</strong> ${booking.special_instructions}</p>` : ''}
+                        ${booking.special_instructions ? `<p><strong>Special Notes:</strong> ${booking.special_instructions}</p>` : ''}
                         
                         ${type === 'Contract' ? `
                             <p><strong>Total Budget:</strong> ₱${(booking.total_cost || booking.budget || 0).toLocaleString()}</p>
@@ -965,10 +968,10 @@ const DashboardMarketing = () => {
                             </div>
                         ` : `
                             <div style="margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc;">
-                                <h3>Kitchen Prep Required</h3>
+                                <h3>Kitchen Preparation</h3>
                                 <ul>
-                                    <li>Prep for ${booking.pax} pax (${booking.package_id || 'custom'} package)</li>
-                                    <li>Staff allocation: ${Math.ceil(booking.pax / 20)} servers</li>
+                                    <li>Prepare service for ${booking.pax} guests</li>
+                                    <li>Suggested service team: ${Math.ceil(booking.pax / 20)} staff</li>
                                 </ul>
                                 ${menuHTML}
                             </div>
@@ -1105,9 +1108,9 @@ const DashboardMarketing = () => {
                         <form onSubmit={handleEventTypeSubmit} className="border-b border-gray-100 p-6">
                             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                                 <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 <button disabled={settingsSaving} className="lg:col-span-2 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
                                 <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-10 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                                 {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
@@ -1118,7 +1121,7 @@ const DashboardMarketing = () => {
                                 <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
                                     <tr>
                                         <th className="px-6 py-4 text-left">Event Type</th>
-                                        <th className="px-6 py-4 text-left">Slug</th>
+                                        <th className="px-6 py-4 text-left">Short Name</th>
                                         <th className="px-6 py-4 text-left">Icon</th>
                                         <th className="px-6 py-4 text-left">Description</th>
                                         <th className="px-6 py-4 text-right">Actions</th>
@@ -1221,9 +1224,9 @@ const DashboardMarketing = () => {
                     </div>
                     <form onSubmit={handleEventTypeSubmit} className="p-6 grid grid-cols-1 md:grid-cols-6 gap-4">
                         <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
+                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                         <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="md:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
                         <div className="md:col-span-2 flex gap-2">
                             {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="flex-1 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>}
@@ -1353,7 +1356,7 @@ const DashboardMarketing = () => {
                                     className="marketing-primary-btn flex items-center px-4 py-2 text-sm"
                                 >
                                     <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                    Export PDF
+                                    Download Report
                                 </button>
                                 <button
                                     onClick={() => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1))}

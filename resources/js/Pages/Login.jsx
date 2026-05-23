@@ -26,11 +26,11 @@ const Login = () => {
 
             if (!result.success) {
                 setError(result.message);
-                toast.error(`Login Error: ${result.message}`);
+                toast.error(`Sign-in issue: ${result.message}`);
                 setLoading(false);
             }
         } catch (err) {
-            toast.error('An unexpected error occurred during login.');
+            toast.error('We could not sign you in. Please try again.');
             setLoading(false);
         }
     };

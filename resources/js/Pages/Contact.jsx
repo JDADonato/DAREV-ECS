@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
-import ChatBubble from '../Components/common/ChatBubble';
 
 const Contact = () => {
     const { user, logout } = useAuth();
@@ -66,7 +65,6 @@ const Contact = () => {
                 </section>
             </main>
             <Footer />
-            {user && <ChatBubble user={user} />}
         </div>
     );
 };

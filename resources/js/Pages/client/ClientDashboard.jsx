@@ -10,6 +10,12 @@ import CustomerAnnouncements from '../../Components/content/CustomerAnnouncement
 const peso = (value) => `₱${Number(value || 0).toLocaleString()}`;
 const settledStatuses = ['Paid', 'Verified'];
 const isSettledPaymentStatus = (status) => settledStatuses.includes(status);
+const paymentLabel = (type) => ({
+    Reservation: 'Reservation Fee',
+    DownPayment: 'Down Payment',
+    Downpayment: 'Down Payment',
+    Final: 'Final Payment',
+}[type] || type || 'Payment');
 const menuCategories = [
     { id: 'starter', label: 'Starters' },
     { id: 'main', label: 'Main Courses' },
@@ -57,7 +63,7 @@ const buildJourneySteps = (booking, payments) => {
         { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', isPendingGate: !isApproved },
         { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', locked: !isApproved },
         { label: 'Event details', done: eventDetailsDone, action: 'Add timeline, venue notes, and motif' },
-        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${booking.nextPaymentDue.payment_type}` : 'No remaining payment', locked: !isApproved },
+        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${paymentLabel(booking.nextPaymentDue.payment_type)}` : 'No remaining payment', locked: !isApproved },
     ];
 };
 
@@ -256,7 +262,7 @@ const ClientDashboard = () => {
         e.preventDefault();
 
         if (!nextPayment?.id || !activeBookingId) {
-            setToast({ message: 'No payable milestone is available for this booking.', type: 'error' });
+            setToast({ message: 'No payment is due for this booking right now.', type: 'error' });
             return;
         }
 
@@ -323,7 +329,7 @@ const ClientDashboard = () => {
                 setToast({ message: result.error || 'Unable to cancel this booking.', type: 'error' });
             }
         } catch (e) {
-            setToast({ message: 'Network error.', type: 'error' });
+            setToast({ message: 'We could not open checkout. Please try again.', type: 'error' });
         }
     };
 
@@ -343,7 +349,7 @@ const ClientDashboard = () => {
                 setToast({ message: result.error || 'Unable to save event details.', type: 'error' });
             }
         } catch (e) {
-            setToast({ message: 'Network error while saving details.', type: 'error' });
+            setToast({ message: 'We could not save your details. Please try again.', type: 'error' });
         } finally {
             setSavingDetails(false);
         }
@@ -364,7 +370,7 @@ const ClientDashboard = () => {
                 setToast({ message: result.message || 'Image upload failed.', type: 'error' });
             }
         } catch (e) {
-            setToast({ message: 'Network error while uploading image.', type: 'error' });
+            setToast({ message: 'We could not upload the image. Please try again.', type: 'error' });
         } finally {
             setUploadingImage(false);
         }
@@ -429,13 +435,16 @@ const ClientDashboard = () => {
 
             <main className="max-w-7xl mx-auto py-8 px-5 sm:px-8 relative" style={{paddingTop: 100}}>
                 {toast && (
-                    <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 animate-fadeIn shadow-sm border ${toast.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                    <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                        <div className={`pointer-events-auto relative flex max-w-[380px] items-start gap-3 overflow-hidden rounded-2xl border bg-white/95 px-4 py-3.5 text-sm font-semibold text-slate-700 shadow-xl shadow-slate-950/10 ring-1 ring-black/5 backdrop-blur-md ${toast.type === 'success' ? 'border-emerald-100' : 'border-red-100'}`}>
+                        <span className={`absolute inset-y-0 left-0 w-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`} />
                         {toast.type === 'success' ? (
-                            <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100"><svg className="h-4 w-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg></span>
                         ) : (
-                            <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-100"><svg className="h-4 w-4 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg></span>
                         )}
-                        <p className="text-sm font-bold">{toast.message}</p>
+                        <p className="min-w-0 flex-1 leading-5">{toast.message}</p>
+                        </div>
                     </div>
                 )}
 
@@ -833,7 +842,7 @@ const ClientDashboard = () => {
                                             <div className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
                                                 <div className="max-w-2xl">
                                                     <h3 className="text-2xl font-bold font-display text-[#1a1a1a]">Curated Menu</h3>
-                                                    <p className="mt-2 text-sm font-medium leading-relaxed text-gray-500">Fine-tune your culinary journey. Swapping dishes will automatically adjust your event total based on current seasonal pricing.</p>
+                                                    <p className="mt-2 text-sm font-medium leading-relaxed text-gray-500">Fine-tune your menu. Swapping dishes will update your event total based on the current menu prices.</p>
                                                 </div>
                                                 {activeBooking.canEditMenu && !menuEditMode && (
                                                     <button onClick={() => setMenuEditMode(true)} className="group flex items-center gap-2 rounded-2xl bg-[#720101] px-6 py-3.5 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-[#720101]/20 hover:bg-[#5a0101] transition-all active:scale-95">
@@ -1089,14 +1098,14 @@ const ClientDashboard = () => {
                                                                         <div key={payment.id} className={`rounded-2xl border p-4 ${isSettledPayment(payment) ? 'border-green-400/20 bg-green-500/10' : overdue ? 'border-red-400/30 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
                                                                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                                                                 <div>
-                                                                                    <p className="text-sm font-bold text-white">{payment.payment_type}</p>
+                                                                                    <p className="text-sm font-bold text-white">{paymentLabel(payment.payment_type)}</p>
                                                                                     <p className="mt-1 text-xs font-semibold text-white/55">Due {payment.due_date ? new Date(payment.due_date).toLocaleDateString() : 'on confirmation'}</p>
                                                                                 </div>
                                                                                 <div className="text-left sm:text-right">
                                                                                     <p className="text-sm font-bold text-white">{peso(payment.amount)}</p>
                                                                                     <div className="flex flex-col sm:items-end mt-1 gap-1.5">
                                                                                         <p className={`text-xs font-bold uppercase tracking-widest ${isSettledPayment(payment) ? 'text-green-300' : overdue ? 'text-red-300' : 'text-[#f0aa0b]'}`}>
-                                                                                            {isSettledPayment(payment) ? 'Paid' : overdue ? 'Overdue - slot may be cancelled' : 'Pending'}
+                                                                                            {isSettledPayment(payment) ? 'Paid' : overdue ? 'Past due - please contact support' : 'Pending'}
                                                                                         </p>
                                                                                         {isSettledPayment(payment) && (
                                                                                             <button
@@ -1130,20 +1139,20 @@ const ClientDashboard = () => {
                                                                         <div>
                                                                             <p className="text-[11px] font-black uppercase tracking-widest text-[#f0aa0b]">Next Payment Required</p>
                                                                             <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                                                                                <h4 className="font-display text-2xl font-bold text-white">{activeBooking.nextPaymentDue.payment_type}</h4>
+                                                                                <h4 className="font-display text-2xl font-bold text-white">{paymentLabel(activeBooking.nextPaymentDue.payment_type)}</h4>
                                                                                 <p className="text-xl font-black text-[#f0aa0b]">{peso(activeBooking.nextPaymentDue.amount)}</p>
                                                                             </div>
                                                                             {activeBooking.nextPaymentDue.description && (
                                                                                 <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-white/60">{activeBooking.nextPaymentDue.description}</p>
                                                                             )}
                                                                             <div className="mt-4 rounded-xl border border-red-300/20 bg-red-500/10 p-3">
-                                                                                <p className="text-xs font-black uppercase tracking-widest text-red-200">Strict deadline: {new Date(activeBooking.nextPaymentDue.due_date).toLocaleDateString()}</p>
-                                                                                <p className="mt-1 text-xs font-medium leading-5 text-red-100/75">Failure to pay the exact amount by this date can result in automatic cancellation and forfeiture of reservation slots.</p>
+                                                                                <p className="text-xs font-black uppercase tracking-widest text-red-200">Payment due: {new Date(activeBooking.nextPaymentDue.due_date).toLocaleDateString()}</p>
+                                                                                <p className="mt-1 text-xs font-medium leading-5 text-red-100/75">Please complete this payment by the due date to keep your event date reserved.</p>
                                                                             </div>
                                                                         </div>
                                                                         <div className="flex flex-col gap-3 lg:min-w-[220px]">
                                                                             <div className="rounded-xl bg-black/20 p-3 text-xs font-bold text-white/65">
-                                                                                Encrypted checkout opens on the next screen.
+                                                                                Secure checkout opens on the next screen.
                                                                             </div>
                                                                             <button
                                                                                 type="submit"
@@ -1165,7 +1174,7 @@ const ClientDashboard = () => {
                                                 })()}
                                             </div>
 
-                                            {/* Tranche Breakdown */}
+                                            {/* Payment Schedule */}
                                             {false && (() => {
                                                 const tranches = activePayments;
                                                 if (tranches.length === 0) return null;
@@ -1184,7 +1193,7 @@ const ClientDashboard = () => {
                                                                             )}
                                                                         </div>
                                                                         <div>
-                                                                            <p className="font-bold text-gray-900 text-sm">{tranche.payment_type}</p>
+                                                                            <p className="font-bold text-gray-900 text-sm">{paymentLabel(tranche.payment_type)}</p>
                                                                             {!isSettledPayment(tranche) && tranche.due_date && (
                                                                                 <p className="text-xs font-medium text-gray-500">Due: {new Date(tranche.due_date).toLocaleDateString()}</p>
                                                                             )}
@@ -1209,16 +1218,16 @@ const ClientDashboard = () => {
                                                     <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
                                                         <div>
                                                             <p className="text-xs font-bold text-[#720101] uppercase tracking-widest mb-1">Next Payment Required</p>
-                                                            <h3 className="text-xl font-display font-bold text-[#1a1a1a]">{activeBooking.nextPaymentDue.payment_type}</h3>
+                                                            <h3 className="text-xl font-display font-bold text-[#1a1a1a]">{paymentLabel(activeBooking.nextPaymentDue.payment_type)}</h3>
                                                             {activeBooking.nextPaymentDue.description && (
                                                                 <p className="text-sm font-medium text-gray-500 mt-1 max-w-sm">{activeBooking.nextPaymentDue.description}</p>
                                                             )}
                                                             <div className="mt-3 bg-red-50 border border-red-100 p-3 rounded-xl inline-block">
                                                                 <p className="text-xs font-bold text-red-800">
-                                                                    Strict Deadline: {new Date(activeBooking.nextPaymentDue.due_date).toLocaleDateString()}
+                                                                    Payment Due: {new Date(activeBooking.nextPaymentDue.due_date).toLocaleDateString()}
                                                                 </p>
                                                                 <p className="text-[11px] text-red-600 font-medium mt-0.5 max-w-sm">
-                                                                    Failure to pay the exact amount by this date will result in automatic system cancellation and forfeiture of reservation slots.
+                                                                    Please complete this payment by the due date to keep your event date reserved.
                                                                 </p>
                                                             </div>
                                                         </div>
@@ -1234,7 +1243,7 @@ const ClientDashboard = () => {
                                                                 <svg className="mt-0.5 h-5 w-5 text-[#720101]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                                                                 <div>
                                                                     <p className="text-sm font-bold text-gray-900">Checkout</p>
-                                                                    <p className="mt-1 text-sm font-medium text-gray-500">You will choose your payment method on the encrypted checkout screen.</p>
+                                                                    <p className="mt-1 text-sm font-medium text-gray-500">You will choose your payment method on the secure checkout page.</p>
                                                                 </div>
                                                             </div>
                                                         </div>

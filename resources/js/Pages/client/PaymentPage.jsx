@@ -108,7 +108,7 @@ const PaymentPage = () => {
                 setStep(2);
             }
         } catch (err) {
-            setError('Network error. Please try again.');
+            setError('We could not continue to payment. Please try again.');
             setStep(2);
         } finally {
             setProcessing(false);

@@ -3,7 +3,6 @@ import { Link } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
-import ChatBubble from '../Components/common/ChatBubble';
 
 const stats = [
     ['500+', 'events catered'],
@@ -88,7 +87,6 @@ const About = () => {
             </main>
 
             <Footer />
-            {user && <ChatBubble user={user} />}
         </div>
     );
 };

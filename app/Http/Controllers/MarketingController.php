@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\BookingSummaryResource;
 use App\Models\Booking;
+use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -31,17 +33,27 @@ class MarketingController extends Controller
      * Get all bookings with user details.
      * Ported from: marketing bookings list
      */
-    public function getAllBookings()
+    public function getAllBookings(Request $request)
     {
-        $bookings = Booking::with('user:id,username,role')
-            ->orderBy('event_date', 'asc')
-            ->get()
-            ->map(function ($b) {
-                $data = $b->toArray();
-                $data['username'] = $b->user->username ?? null;
-                $data['role'] = $b->user->role ?? null;
-                return $data;
-            });
+        $query = Booking::with('user:id,username,email,phone,role')
+            ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
+            ->when($request->query('search'), function ($q, $search) {
+                $term = '%' . trim((string) $search) . '%';
+                $q->where(fn ($inner) => $inner
+                    ->where('client_full_name', 'like', $term)
+                    ->orWhere('venue_city', 'like', $term)
+                    ->orWhere('event_type', 'like', $term));
+            })
+            ->orderBy('event_date', 'asc');
+
+        if ($request->boolean('paginated')) {
+            $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
+            $bookings = $query->paginate($perPage);
+
+            return ApiResponse::paginated($bookings, BookingSummaryResource::collection($bookings->getCollection())->resolve());
+        }
+
+        $bookings = BookingSummaryResource::collection($query->get())->resolve();
 
         return response()->json($bookings);
     }
@@ -119,4 +131,3 @@ class MarketingController extends Controller
         return response()->json($data);
     }
 }
-

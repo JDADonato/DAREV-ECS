@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, ScatterChart, Scatter, ZAxis } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
 import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import { getListData } from '../utils/apiResponses';
 import {
     formatBookingRef,
     formatCurrency,
@@ -19,6 +20,13 @@ import {
     normalizeStatus,
     paginate,
 } from '../utils/dashboardUtils';
+
+const paymentLabel = (type) => ({
+    Reservation: 'Reservation Fee',
+    DownPayment: 'Down Payment',
+    Downpayment: 'Down Payment',
+    Final: 'Final Payment',
+}[type] || type || 'Payment');
 
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
@@ -91,7 +99,28 @@ const DashboardAdmin = () => {
     // ==========================================
     const [analytics, setAnalytics] = useState(null);
     const [analyticsLoading, setAnalyticsLoading] = useState(false);
-    const [activeAnalyticsCategory, setActiveAnalyticsCategory] = useState('All');
+    const [analyticsFilters, setAnalyticsFilters] = useState({
+        date_from: '',
+        date_to: '',
+        event_type: '',
+        booking_status: '',
+        payment_status: '',
+        city: '',
+        pax_min: '',
+        pax_max: '',
+    });
+    const [reportWidgets, setReportWidgets] = useState([]);
+    const [reportTemplates, setReportTemplates] = useState([]);
+    const [reportTemplateId, setReportTemplateId] = useState('');
+    const [reportBuilder, setReportBuilder] = useState({
+        name: 'Management Snapshot',
+        description: 'Finance, bookings, menu performance, and operational alerts.',
+        widgets: ['revenue_summary', 'payment_breakdown', 'booking_pipeline', 'operational_alerts'],
+        filters: { date_from: '', date_to: '', booking_status: '', payment_status: '', city: '' },
+    });
+    const [reportPreview, setReportPreview] = useState([]);
+    const [reportLoading, setReportLoading] = useState(false);
+    const [reportSaving, setReportSaving] = useState(false);
     const [audits, setAudits] = useState([]);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
@@ -99,9 +128,15 @@ const DashboardAdmin = () => {
 
     const analyticsSummary = analytics?.summary || {};
     const revenueTrendData = analytics?.revenueTrends || [];
-    const revenueForecastData = analytics?.revenueForecast || [];
-    const projectedPaxDemand = analytics?.projectedPaxDemand || [];
-    const salesFrequencyData = analytics?.salesFrequency || { All: [] };
+    const revenueHealth = analytics?.revenueHealth || {};
+    const paymentStatusBreakdown = revenueHealth.paymentStatusBreakdown || [];
+    const paymentAgingData = analytics?.paymentAging || revenueHealth.paymentAging || [];
+    const bookingPipelineData = analytics?.bookingPipeline || [];
+    const upcomingWorkloadData = analytics?.upcomingWorkload || analytics?.projectedPaxDemand || [];
+    const packagePerformanceData = analytics?.packagePerformance || analytics?.topSellers || [];
+    const menuPerformanceData = analytics?.menuPerformance || [];
+    const operationsLoadData = analytics?.operationsLoad || [];
+    const operationalAlerts = analytics?.operationalAlerts || analytics?.alerts || [];
     const topSellerData = analytics?.topSellers || [];
     const peakSeasonData = analytics?.peakSeasons || [];
 
@@ -139,6 +174,9 @@ const DashboardAdmin = () => {
         } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
             bustAdminCache('/api/admin/analytics');
             fetchAnalytics({ silent });
+        } else if (activeTab === 'reports') {
+            fetchReportBuilder({ silent });
+            fetchReportPreview({ silent });
         } else if (activeTab === 'bookings') {
             bustAdminCache('/api/admin/bookings');
             fetchBookings({ silent });
@@ -327,6 +365,9 @@ const DashboardAdmin = () => {
             fetchPackages();
         } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
             fetchAnalytics();
+        } else if (activeTab === 'reports') {
+            fetchReportBuilder();
+            fetchReportPreview();
         } else if (activeTab === 'bookings') {
             fetchBookings();
         } else if (activeTab === 'refunds') {
@@ -337,7 +378,7 @@ const DashboardAdmin = () => {
     }, [activeTab]);
 
     useSmartRefresh({
-        enabled: ['dashboard', 'analytics', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
+        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
         interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
@@ -359,10 +400,10 @@ const DashboardAdmin = () => {
         if (!silent) setEmpLoading(true);
         try {
             const data = await fetchCachedJson('/api/admin/employees', 60000);
-            setEmployees(data);
+            setEmployees(getListData(data));
         } catch (error) {
             console.error(error);
-            showToast("Failed to fetch employees", 'error');
+            showToast("Could not load employees", 'error');
         } finally {
             if (!silent) setEmpLoading(false);
         }
@@ -372,10 +413,10 @@ const DashboardAdmin = () => {
         if (!silent) setCustomerLoading(true);
         try {
             const data = await fetchCachedJson('/api/admin/customers', 60000);
-            setCustomers(data);
+            setCustomers(getListData(data));
         } catch (error) {
             console.error(error);
-            showToast("Failed to fetch customers", 'error');
+            showToast("Could not load customers", 'error');
         } finally {
             if (!silent) setCustomerLoading(false);
         }
@@ -388,7 +429,7 @@ const DashboardAdmin = () => {
             setPricingOverrides(data.overrides || {});
         } catch (error) {
             console.error(error);
-            showToast("Failed to fetch pricing", 'error');
+            showToast("Could not load pricing", 'error');
         } finally {
             if (!silent) setPricingLoading(false);
         }
@@ -418,11 +459,11 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/pricing');
                 fetchPricingOverrides();
             } else {
-                showToast("Failed to update price", 'error');
+                showToast("Could not update price", 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not update price. Please try again.", 'error');
         }
     };
 
@@ -457,11 +498,11 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/packages?per_page=100');
                 fetchPackages();
             } else {
-                showToast(getErrorMessage(data, 'Failed to create package'), 'error');
+                showToast(getErrorMessage(data, 'Could not create package'), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error', 'error');
+            showToast('Could not create package. Please try again.', 'error');
         } finally {
             setPackageSaving(false);
         }
@@ -489,11 +530,11 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/event-types?per_page=100', '/api/packages?per_page=100');
                 fetchPackages();
             } else {
-                showToast(getErrorMessage(data, 'Failed to save event type'), 'error');
+                showToast(getErrorMessage(data, 'Could not save event type'), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error', 'error');
+            showToast('Could not save event type. Please try again.', 'error');
         } finally {
             setPackageSaving(false);
         }
@@ -521,11 +562,11 @@ const DashboardAdmin = () => {
                 fetchPackages();
             } else {
                 const data = await res.json().catch(() => ({}));
-                showToast(getErrorMessage(data, 'Failed to delete event type'), 'error');
+                showToast(getErrorMessage(data, 'Could not delete event type'), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error', 'error');
+            showToast('Could not delete event type. Please try again.', 'error');
         } finally {
             setPackageSaving(false);
         }
@@ -595,11 +636,11 @@ const DashboardAdmin = () => {
                 fetchCustomMenuItems();
             } else {
                 const err = await res.json();
-                showToast(err.message || (isEditing ? 'Failed to update menu item' : 'Failed to add menu item'), 'error');
+                showToast(err.message || (isEditing ? 'Could not update menu item' : 'Could not add menu item'), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error', 'error');
+            showToast('Could not save menu item. Please try again.', 'error');
         } finally {
             setMenuItemFormLoading(false);
         }
@@ -614,15 +655,15 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/menu-items', '/api/admin/analytics');
                 fetchCustomMenuItems();
             } else {
-                showToast('Failed to delete menu item', 'error');
+                showToast('Could not delete menu item', 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error', 'error');
+            showToast('Could not delete menu item. Please try again.', 'error');
         }
     };
 
-    // All menu items now come from the database
+    // Menu items are loaded from the app data source.
     const MENU_CATEGORIES = ['starter', 'main', 'side', 'dessert', 'drink'];
 
     function getMergedDishes(category) {
@@ -645,13 +686,145 @@ const DashboardAdmin = () => {
     const fetchAnalytics = async ({ silent = false } = {}) => {
         if (!silent) setAnalyticsLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/analytics', 30000);
+            const params = new URLSearchParams(Object.entries(analyticsFilters).filter(([, value]) => value !== ''));
+            const path = `/api/admin/analytics${params.toString() ? `?${params.toString()}` : ''}`;
+            const res = await fetch(path);
+            if (!res.ok) throw new Error('Analytics request failed');
+            const data = await res.json();
             setAnalytics(data);
         } catch (error) {
             console.error(error);
         } finally {
             if (!silent) setAnalyticsLoading(false);
         }
+    };
+
+    const fetchReportBuilder = async ({ silent = false } = {}) => {
+        if (!silent) setReportLoading(true);
+        try {
+            const [widgetsRes, templatesRes] = await Promise.all([
+                fetch('/api/admin/report-widgets'),
+                fetch('/api/admin/report-templates'),
+            ]);
+            const [widgets, templates] = await Promise.all([widgetsRes.json(), templatesRes.json()]);
+            setReportWidgets(Array.isArray(widgets) ? widgets : []);
+            setReportTemplates(Array.isArray(templates) ? templates : []);
+        } catch (error) {
+            console.error(error);
+            showToast('Could not load report builder', 'error');
+        } finally {
+            if (!silent) setReportLoading(false);
+        }
+    };
+
+    const fetchReportPreview = async ({ silent = false, builder = reportBuilder } = {}) => {
+        if (!silent) setReportLoading(true);
+        try {
+            const res = await fetch('/api/admin/report-preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    widgets: builder.widgets,
+                    filters: Object.fromEntries(Object.entries(builder.filters || {}).filter(([, value]) => value !== '')),
+                }),
+            });
+            const data = await res.json();
+            setReportPreview(data.widgets || []);
+        } catch (error) {
+            console.error(error);
+            showToast('Could not preview report', 'error');
+        } finally {
+            if (!silent) setReportLoading(false);
+        }
+    };
+
+    const saveReportTemplate = async () => {
+        setReportSaving(true);
+        try {
+            const payload = {
+                name: reportBuilder.name,
+                description: reportBuilder.description,
+                layout_json: reportBuilder.widgets.map((id, index) => ({ id, order: index + 1 })),
+                filters_json: reportBuilder.filters,
+            };
+            const url = reportTemplateId ? `/api/admin/report-templates/${reportTemplateId}` : '/api/admin/report-templates';
+            const res = await fetch(url, {
+                method: reportTemplateId ? 'PATCH' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error('Save failed');
+            const template = await res.json();
+            setReportTemplateId(String(template.id));
+            await fetchReportBuilder({ silent: true });
+            showToast('Report template saved');
+            return template;
+        } catch (error) {
+            console.error(error);
+            showToast('Could not save report template', 'error');
+            return null;
+        } finally {
+            setReportSaving(false);
+        }
+    };
+
+    const runReportExport = async () => {
+        const template = await saveReportTemplate();
+        if (!template?.id) return;
+        try {
+            const res = await fetch(`/api/admin/report-templates/${template.id}/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filters: reportBuilder.filters }),
+            });
+            if (!res.ok) throw new Error('Run failed');
+            const run = await res.json();
+            window.location.href = `/api/admin/report-runs/${run.id}/export`;
+        } catch (error) {
+            console.error(error);
+            showToast('Could not download report', 'error');
+        }
+    };
+
+    const loadReportTemplate = (id) => {
+        setReportTemplateId(id);
+        const template = reportTemplates.find(item => String(item.id) === String(id));
+        if (!template) return;
+
+        const widgets = (template.layout_json || [])
+            .map(item => typeof item === 'string' ? item : item.id)
+            .filter(Boolean);
+        const nextBuilder = {
+            name: template.name || 'Management Snapshot',
+            description: template.description || '',
+            widgets: widgets.length ? widgets : reportBuilder.widgets,
+            filters: template.filters_json || reportBuilder.filters,
+        };
+        setReportBuilder(nextBuilder);
+        fetchReportPreview({ builder: nextBuilder });
+    };
+
+    const moveReportWidget = (index, direction) => {
+        const next = [...reportBuilder.widgets];
+        const target = index + direction;
+        if (target < 0 || target >= next.length) return;
+        [next[index], next[target]] = [next[target], next[index]];
+        const nextBuilder = { ...reportBuilder, widgets: next };
+        setReportBuilder(nextBuilder);
+        fetchReportPreview({ silent: true, builder: nextBuilder });
+    };
+
+    const updateReportFilter = (key, value) => {
+        setReportBuilder({ ...reportBuilder, filters: { ...reportBuilder.filters, [key]: value } });
+    };
+
+    const summarizeReportWidget = (widget) => {
+        const data = widget.data || {};
+        if (Array.isArray(data.rows)) {
+            return `${data.rows.length} rows`;
+        }
+        const numericKeys = Object.keys(data).filter(key => typeof data[key] === 'number');
+        return numericKeys.length ? numericKeys.map(key => `${key}: ${key.toLowerCase().includes('rate') ? `${data[key]}%` : formatCurrency(data[key])}`).join(' | ') : (data.message || 'Ready');
     };
 
     const fetchAudits = async ({ silent = false } = {}) => {
@@ -661,7 +834,7 @@ const DashboardAdmin = () => {
             setAudits(data.data || []);
         } catch (error) {
             console.error(error);
-            showToast(getErrorMessage(error, 'Failed to fetch audit logs'), 'error');
+            showToast(getErrorMessage(error, 'Could not load audit logs'), 'error');
         } finally {
             if (!silent) setAuditLoading(false);
         }
@@ -671,10 +844,10 @@ const DashboardAdmin = () => {
         if (!silent) setBookingsLoading(true);
         try {
             const data = await fetchCachedJson('/api/admin/bookings', 30000);
-            setBookings(Array.isArray(data) ? data : (data.bookings || []));
+            setBookings(getListData(data));
         } catch (error) {
             console.error(error);
-            showToast(getErrorMessage(error, "Failed to fetch bookings"), 'error');
+            showToast(getErrorMessage(error, "Could not load bookings"), 'error');
         } finally {
             if (!silent) setBookingsLoading(false);
         }
@@ -687,7 +860,7 @@ const DashboardAdmin = () => {
             setRefundQueue(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error(error);
-            showToast(getErrorMessage(error, 'Failed to fetch refund queue'), 'error');
+            showToast(getErrorMessage(error, 'Could not load refund requests'), 'error');
         } finally {
             if (!silent) setRefundLoading(false);
         }
@@ -710,11 +883,11 @@ const DashboardAdmin = () => {
                 fetchBookings();
             } else {
                 const err = await res.json().catch(() => ({}));
-                showToast(getErrorMessage(err, "Failed to approve booking"), 'error');
+                showToast(getErrorMessage(err, "Could not approve booking"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not approve booking. Please try again.", 'error');
         } finally {
             setApprovingBookingId(null);
         }
@@ -739,11 +912,11 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
                 fetchBookings();
             } else {
-                showToast("Failed to apply discount", 'error');
+                showToast("Could not apply discount", 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not apply discount. Please try again.", 'error');
         } finally {
             setDiscountLoading(false);
         }
@@ -768,12 +941,12 @@ const DashboardAdmin = () => {
                 fetchRefundQueue();
                 if (bookings.length > 0) fetchBookings({ silent: true });
             } else {
-                const message = data?.details?.[0] || getErrorMessage(data, 'Failed to process refund');
+                const message = data?.details?.[0] || getErrorMessage(data, 'Could not process refund');
                 showToast(message, 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast('Network error while processing refund', 'error');
+            showToast('Could not process refund. Please try again.', 'error');
         } finally {
             setProcessingRefundId(null);
         }
@@ -816,11 +989,11 @@ const DashboardAdmin = () => {
                 fetchCustomers();
             } else {
                 const err = await res.json().catch(() => ({}));
-                showToast(getErrorMessage(err, "Failed to save account"), 'error');
+                showToast(getErrorMessage(err, "Could not save account"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not save account. Please try again.", 'error');
         } finally {
             setEmpFormLoading(false);
         }
@@ -839,11 +1012,11 @@ const DashboardAdmin = () => {
                 bustAdminCache('/api/admin/employees');
                 fetchEmployees();
             } else {
-                showToast("Failed to delete employee", 'error');
+                showToast("Could not delete employee", 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not delete employee. Please try again.", 'error');
         }
     };
 
@@ -860,11 +1033,11 @@ const DashboardAdmin = () => {
                 fetchCustomers();
             } else {
                 const err = await res.json().catch(() => ({}));
-                showToast(getErrorMessage(err, "Failed to delete customer"), 'error');
+                showToast(getErrorMessage(err, "Could not delete customer"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Network error", 'error');
+            showToast("Could not delete customer. Please try again.", 'error');
         }
     };
 
@@ -975,7 +1148,7 @@ const DashboardAdmin = () => {
                                 <div className="max-w-3xl">
                                     <p className="text-xs font-black uppercase text-[#f0aa0b]">Today’s operating picture</p>
                                     <h3 className="mt-2 text-3xl font-black">Keep service decisions tied to actual bookings.</h3>
-                                    <p className="mt-2 max-w-2xl text-sm font-medium text-white/72">Revenue, menu movement, demand intensity, and payment exposure are calculated from the database, then cached briefly for fast dashboard revisits.</p>
+                                    <p className="mt-2 max-w-2xl text-sm font-medium text-white/72">Revenue, menu movement, demand, and payment exposure stay refreshed from current operations.</p>
                                 </div>
                             </section>
 
@@ -1101,115 +1274,188 @@ const DashboardAdmin = () => {
                     )}
                     {activeTab === 'analytics' && (
                         <div className="animate-fadeIn space-y-8">
-                            <div className="flex justify-end">
-                                <button className="admin-button-secondary px-4 py-2 text-sm font-bold transition-colors">
-                                    Download Full Report
-                                </button>
+                            <div className="admin-panel p-5">
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-4 xl:grid-cols-8">
+                                    {[
+                                        ['date_from', 'From', 'date'],
+                                        ['date_to', 'To', 'date'],
+                                        ['event_type', 'Event type', 'text'],
+                                        ['booking_status', 'Booking status', 'text'],
+                                        ['payment_status', 'Payment status', 'text'],
+                                        ['city', 'City', 'text'],
+                                        ['pax_min', 'Min pax', 'number'],
+                                        ['pax_max', 'Max pax', 'number'],
+                                    ].map(([key, label, type]) => (
+                                        <label key={key} className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                            {label}
+                                            <input
+                                                type={type}
+                                                value={analyticsFilters[key]}
+                                                onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, [key]: e.target.value })}
+                                                className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100"
+                                                placeholder={type === 'text' ? 'All' : undefined}
+                                            />
+                                        </label>
+                                    ))}
+                                </div>
+                                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                    <p className="text-sm font-semibold text-gray-500">Collected revenue and pending work are kept separate so decisions stay clear.</p>
+                                    <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary px-5 py-2.5 text-sm font-black">
+                                        {analyticsLoading ? 'Refreshing...' : 'Apply Filters'}
+                                    </button>
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                {/* Revenue Forecast */}
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                                {[
+                                    ['Actual collected', formatCurrency(analyticsSummary.settledRevenue || 0), 'Verified/Paid payments'],
+                                    ['Pending collection', formatCurrency(analyticsSummary.pendingRevenue || 0), 'Unpaid payments'],
+                                    ['Overdue balance', formatCurrency(analyticsSummary.overdueRevenue || 0), 'Past due unpaid'],
+                                    ['Collection rate', `${analyticsSummary.collectionRate || 0}%`, 'Collected vs collectible'],
+                                ].map(([label, value, hint]) => (
+                                    <div key={label} className="admin-panel p-5">
+                                        <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
+                                        <p className="mt-2 text-2xl font-black text-gray-950">{value}</p>
+                                        <p className="mt-1 text-xs font-semibold text-gray-500">{hint}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
                                 <div className="admin-panel p-6">
-                                    <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
-                                        Revenue Forecast (H2 2026)
-                                    </h3>
-                                    <div className="h-64 w-full">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={revenueForecastData}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
-                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(value) => `PHP ${value / 1000}k`} dx={-10} />
-                                                <RechartsTooltip formatter={(value) => formatCurrency(value)} cursor={{ fill: '#F3F4F6' }} />
-                                                <Line type="monotone" dataKey="actual" stroke="#720101" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} name="Actual Revenue" />
-                                                <Line type="monotone" dataKey="forecast" stroke="#f0aa0b" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected Revenue" />
-                                            </LineChart>
-                                        </ResponsiveContainer>
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Collected Revenue Over Time</h3>
+                                    <p className="mb-6 text-sm font-semibold text-gray-500">Only verified or paid payments are counted.</p>
+                                    <div className="h-72">
+                                        {revenueTrendData.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={revenueTrendData}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(value) => `PHP ${Math.round(value / 1000)}k`} />
+                                                    <RechartsTooltip formatter={(value) => formatCurrency(value)} />
+                                                    <Line type="monotone" dataKey="revenue" stroke="#720101" strokeWidth={3} dot={{ r: 4 }} name="Collected" />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No collected revenue for these filters.</div>}
                                     </div>
                                 </div>
 
-                                {/* Projected Pax Demand - Area Chart */}
                                 <div className="admin-panel p-6">
-                                    <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                                        Projected Pax Demand (Upcoming Events)
-                                    </h3>
-                                    <div className="h-64 w-full">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <AreaChart data={projectedPaxDemand}>
-                                                <defs>
-                                                    <linearGradient id="colorPax" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#720101" stopOpacity={0.24} />
-                                                        <stop offset="95%" stopColor="#720101" stopOpacity={0} />
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                                                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
-                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dx={-10} />
-                                                <RechartsTooltip cursor={{ fill: '#F3F4F6' }} />
-                                                <Area type="monotone" dataKey="pax" stroke="#720101" strokeWidth={3} fillOpacity={1} fill="url(#colorPax)" name="Total Guests" />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Payment Status And Aging</h3>
+                                    <p className="mb-6 text-sm font-semibold text-gray-500">Use this to decide which balances need reminders or verification.</p>
+                                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                                        <div className="h-64">
+                                            {paymentStatusBreakdown.length ? (
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart data={paymentStatusBreakdown}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                        <RechartsTooltip formatter={(value, name) => name === 'total' ? formatCurrency(value) : value} />
+                                                        <Bar dataKey="total" fill="#f0aa0b" radius={[6, 6, 0, 0]} name="Amount" />
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No payment rows.</div>}
+                                        </div>
+                                        <div className="space-y-3">
+                                            {paymentAgingData.map((bucket) => (
+                                                <div key={bucket.label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className="text-sm font-black text-gray-800">{bucket.label}</span>
+                                                        <span className="text-sm font-black text-gray-950">{formatCurrency(bucket.value || 0)}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Interactive Sales Frequency Distribution */}
-                            <div className="admin-panel p-6">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-                                    <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                        Sales Frequency Distribution (Best Sellers)
-                                    </h3>
-                                    <select
-                                        value={activeAnalyticsCategory}
-                                        onChange={(e) => setActiveAnalyticsCategory(e.target.value)}
-                                        className="admin-select block p-2 text-sm font-medium outline-none"
-                                    >
-                                        <option value="All">All Categories</option>
-                                        <option value="starter">Starters</option>
-                                        <option value="main">Mains</option>
-                                        <option value="side">Sides</option>
-                                        <option value="dessert">Desserts</option>
-                                        <option value="drink">Drinks</option>
-                                    </select>
-                                </div>
-                                <div className="h-72 w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={salesFrequencyData[activeAnalyticsCategory] || []} layout="vertical" margin={{ top: 0, right: 30, left: 40, bottom: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
-                                            <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
-                                            <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#374151', fontWeight: 600 }} dx={-10} width={120} />
-                                            <RechartsTooltip cursor={{ fill: '#F3F4F6' }} />
-                                            <Bar dataKey="sales" fill="#720101" radius={[0, 4, 4, 0]} barSize={24} name="Total Orders" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-
-                            {/* Peak Season Heatmap Simulation */}
-                            <div className="admin-panel p-6">
-                                <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
-                                    <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                    Peak Season Demand Heatmap (Intensity)
-                                </h3>
-                                <div className="grid grid-cols-6 md:grid-cols-12 gap-3 text-center text-xs">
-                                    {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, i) => {
-                                        const val = peakSeasonData.find(item => item.month === month)?.count || 0;
-                                        const bgColor = val <= 3 ? 'bg-green-100 text-green-800' : val <= 6 ? 'bg-yellow-200 text-yellow-800' : val <= 8 ? 'bg-orange-300 text-orange-900' : 'bg-red-500 text-white font-bold shadow-sm';
-
-                                        return (
-                                            <div key={i} className={`flex flex-col items-center justify-center p-4 rounded-xl ${bgColor} transition-transform hover:scale-105 cursor-default`}>
-                                                <span className="font-bold text-sm mb-1">{month}</span>
+                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
+                                <div className="admin-panel p-6 xl:col-span-2">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Booking Pipeline</h3>
+                                    <p className="mb-5 text-sm font-semibold text-gray-500">Counts and value by current booking status.</p>
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                        {bookingPipelineData.map((row) => (
+                                            <div key={row.label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">{row.label}</p>
+                                                <p className="mt-2 text-2xl font-black text-gray-950">{row.count}</p>
+                                                <p className="text-sm font-bold text-amber-700">{formatCurrency(row.value || 0)}</p>
                                             </div>
-                                        );
-                                    })}
+                                        ))}
+                                        {!bookingPipelineData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No bookings match these filters.</div>}
+                                    </div>
+                                    <div className="mt-6 overflow-hidden rounded-xl border border-gray-100">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-gray-50 text-xs font-black uppercase tracking-widest text-gray-500">
+                                                <tr><th className="px-4 py-3 text-left">Upcoming Event</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Pax</th><th className="px-4 py-3 text-left">Status</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {upcomingWorkloadData.map((event) => (
+                                                    <tr key={event.id || `${event.client}-${event.date}`}>
+                                                        <td className="px-4 py-3 font-bold text-gray-900">{event.client || event.eventType || 'Event'}</td>
+                                                        <td className="px-4 py-3 text-gray-600">{event.date}</td>
+                                                        <td className="px-4 py-3 text-right font-bold text-gray-900">{event.pax}</td>
+                                                        <td className="px-4 py-3 text-gray-600">{event.status || event.eventType}</td>
+                                                    </tr>
+                                                ))}
+                                                {!upcomingWorkloadData.length && <tr><td colSpan="4" className="px-4 py-8 text-center font-bold text-gray-400">No upcoming events for these filters.</td></tr>}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
-                                <div className="mt-6 flex items-center justify-end gap-4 text-xs font-bold text-gray-500 uppercase tracking-widest">
-                                    <span className="flex items-center gap-2"><div className="w-4 h-4 bg-green-100 rounded"></div> Low</span>
-                                    <span className="flex items-center gap-2"><div className="w-4 h-4 bg-yellow-200 rounded"></div> Med</span>
-                                    <span className="flex items-center gap-2"><div className="w-4 h-4 bg-orange-300 rounded"></div> High</span>
-                                    <span className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 rounded"></div> Peak</span>
+
+                                <div className="admin-panel p-6">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Operational Alerts</h3>
+                                    <p className="mb-5 text-sm font-semibold text-gray-500">Queues that should be handled before they become customer issues.</p>
+                                    <div className="space-y-3">
+                                        {operationalAlerts.map((alert) => (
+                                            <div key={alert.label} className={`rounded-2xl border p-4 ${alert.severity === 'danger' ? 'border-red-200 bg-red-50' : alert.severity === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-100 bg-emerald-50'}`}>
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <p className="text-sm font-black text-gray-900">{alert.label}</p>
+                                                    <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-gray-950 shadow-sm">{alert.count}</span>
+                                                </div>
+                                                <button onClick={() => alert.label.includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-gray-900">Open queue</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+                                <div className="admin-panel p-6">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Package Performance</h3>
+                                    <p className="mb-5 text-sm font-semibold text-gray-500">Which packages are producing bookings and value.</p>
+                                    <div className="space-y-3">
+                                        {packagePerformanceData.map((pkg) => (
+                                            <div key={pkg.label || pkg.name} className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                <div>
+                                                    <p className="font-black text-gray-950">{pkg.label || pkg.name}</p>
+                                                    <p className="text-xs font-bold text-gray-500">{pkg.count} bookings</p>
+                                                </div>
+                                                <p className="font-black text-amber-700">{formatCurrency(pkg.revenue || 0)}</p>
+                                            </div>
+                                        ))}
+                                        {!packagePerformanceData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No package data yet.</div>}
+                                    </div>
+                                </div>
+
+                                <div className="admin-panel p-6">
+                                    <h3 className="mb-1 text-lg font-black text-gray-950">Menu Performance</h3>
+                                    <p className="mb-5 text-sm font-semibold text-gray-500">Dish selections from actual booking items.</p>
+                                    <div className="h-72">
+                                        {menuPerformanceData.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={menuPerformanceData} layout="vertical" margin={{ left: 40 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
+                                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                                                    <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#374151', fontWeight: 700 }} width={130} />
+                                                    <RechartsTooltip />
+                                                    <Bar dataKey="selections" fill="#720101" radius={[0, 6, 6, 0]} name="Selections" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No menu selections yet.</div>}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1288,9 +1534,9 @@ const DashboardAdmin = () => {
                                                 <form onSubmit={handleEventTypeSubmit} className="border-b border-gray-100 p-6">
                                                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                                                         <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         <button disabled={packageSaving} className="lg:col-span-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
                                                         <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-10 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                         {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
@@ -1301,7 +1547,7 @@ const DashboardAdmin = () => {
                                                         <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
                                                             <tr>
                                                                 <th className="px-6 py-4 text-left">Event Type</th>
-                                                                <th className="px-6 py-4 text-left">Slug</th>
+                                                                <th className="px-6 py-4 text-left">Short Name</th>
                                                                 <th className="px-6 py-4 text-left">Icon</th>
                                                                 <th className="px-6 py-4 text-left">Description</th>
                                                                 <th className="px-6 py-4 text-right">Actions</th>
@@ -1416,9 +1662,9 @@ const DashboardAdmin = () => {
                                             </div>
                                             <form onSubmit={handleEventTypeSubmit} className="p-6 grid grid-cols-1 md:grid-cols-6 gap-4">
                                                 <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Slug (auto if blank)" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon key" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image URL" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
+                                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="md:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                 <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="md:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
                                                 <div className="md:col-span-2 flex gap-2">
                                                     {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="flex-1 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>}
@@ -1533,50 +1779,141 @@ const DashboardAdmin = () => {
                     )}
                     {
                         activeTab === 'reports' && (
-                            <div className="animate-fadeIn">
+                            <div className="animate-fadeIn space-y-6">
                                 <div className="admin-panel p-6">
-                                    <div className="flex justify-end items-center mb-5">
-                                        <button className="admin-button-secondary px-4 py-2 text-sm font-bold flex items-center gap-2">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                            Generate Snapshot
-                                        </button>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Masterfiles</p>
-                                            <p className="text-2xl font-black text-gray-950">10</p>
+                                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                                        <div className="xl:col-span-4">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Saved template</label>
+                                            <select value={reportTemplateId} onChange={(e) => loadReportTemplate(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100">
+                                                <option value="">New custom report</option>
+                                                {reportTemplates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+                                            </select>
                                         </div>
-                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Users</p>
-                                            <p className="text-2xl font-black text-gray-950">6</p>
+                                        <div className="xl:col-span-4">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Report name</label>
+                                            <input value={reportBuilder.name} onChange={(e) => setReportBuilder({ ...reportBuilder, name: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
                                         </div>
-                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Active Projects</p>
-                                            <p className="text-2xl font-black text-gray-950">6</p>
-                                        </div>
-                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Generated Reports</p>
-                                            <p className="text-2xl font-black text-gray-950">0</p>
+                                        <div className="xl:col-span-4">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Description</label>
+                                            <input value={reportBuilder.description} onChange={(e) => setReportBuilder({ ...reportBuilder, description: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
                                         </div>
                                     </div>
-
-                                    <div className="border-t border-gray-100 pt-5 flex flex-col items-start">
-                                        <div className="flex flex-wrap gap-3 mb-8">
-                                            <button className="admin-button-secondary px-4 py-2 text-xs font-bold flex items-center gap-2">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                                Export Masterfiles CSV
-                                            </button>
-                                            <button className="admin-button-secondary px-4 py-2 text-xs font-bold flex items-center gap-2">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                                Export Users CSV
-                                            </button>
-                                        </div>
-
-                                        <div className="w-full rounded-xl border border-dashed border-gray-200 bg-gray-50 py-8 text-center text-sm font-semibold text-gray-500">
-                                            No reports yet. Click Generate Snapshot.
-                                        </div>
+                                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
+                                        {[
+                                            ['date_from', 'From', 'date'],
+                                            ['date_to', 'To', 'date'],
+                                            ['booking_status', 'Booking status', 'text'],
+                                            ['payment_status', 'Payment status', 'text'],
+                                            ['city', 'City', 'text'],
+                                        ].map(([key, label, type]) => (
+                                            <label key={key} className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                {label}
+                                                <input type={type} value={reportBuilder.filters[key] || ''} onChange={(e) => updateReportFilter(key, e.target.value)} placeholder={type === 'text' ? 'All' : undefined} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100" />
+                                            </label>
+                                        ))}
                                     </div>
+                                    <div className="mt-5 flex flex-wrap gap-3">
+                                        <button onClick={() => fetchReportPreview()} disabled={reportLoading} className="admin-button-primary px-5 py-2.5 text-sm font-black">{reportLoading ? 'Building...' : 'Preview Report'}</button>
+                                        <button onClick={saveReportTemplate} disabled={reportSaving} className="admin-button-secondary px-5 py-2.5 text-sm font-black">{reportSaving ? 'Saving...' : 'Save Template'}</button>
+                                        <button onClick={runReportExport} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download Spreadsheet</button>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+                                    <aside className="admin-panel p-5 xl:col-span-3">
+                                        <h3 className="text-lg font-black text-gray-950">Widget Library</h3>
+                                        <p className="mt-1 text-sm font-semibold text-gray-500">Add only the blocks the admin wants to see.</p>
+                                        <div className="mt-5 space-y-3">
+                                            {reportWidgets.map(widget => {
+                                                const selected = reportBuilder.widgets.includes(widget.id);
+                                                return (
+                                                    <button
+                                                        key={widget.id}
+                                                        type="button"
+                                                        disabled={selected}
+                                                        onClick={() => {
+                                                            const nextBuilder = { ...reportBuilder, widgets: [...reportBuilder.widgets, widget.id] };
+                                                            setReportBuilder(nextBuilder);
+                                                            fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                        }}
+                                                        className={`w-full rounded-2xl border p-4 text-left transition ${selected ? 'border-emerald-100 bg-emerald-50 opacity-75' : 'border-gray-100 bg-white hover:border-amber-200 hover:bg-amber-50'}`}
+                                                    >
+                                                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">{widget.category}</span>
+                                                        <span className="mt-1 block text-sm font-black text-gray-950">{widget.name}</span>
+                                                        <span className="mt-1 block text-xs font-semibold text-gray-500">{widget.description}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </aside>
+
+                                    <section className="admin-panel p-5 xl:col-span-5">
+                                        <h3 className="text-lg font-black text-gray-950">Report Layout</h3>
+                                        <p className="mt-1 text-sm font-semibold text-gray-500">Reorder the report blocks before saving or exporting.</p>
+                                        <div className="mt-5 space-y-3">
+                                            {reportBuilder.widgets.map((id, index) => {
+                                                const meta = reportWidgets.find(widget => widget.id === id) || { name: id, category: 'Custom' };
+                                                return (
+                                                    <div key={`${id}-${index}`} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div>
+                                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Block {index + 1} · {meta.category}</p>
+                                                                <p className="mt-1 font-black text-gray-950">{meta.name}</p>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => moveReportWidget(index, -1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Up</button>
+                                                                <button onClick={() => moveReportWidget(index, 1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Down</button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const nextBuilder = { ...reportBuilder, widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== index) };
+                                                                        setReportBuilder(nextBuilder);
+                                                                        fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                                    }}
+                                                                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100"
+                                                                >
+                                                                    Remove
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            {!reportBuilder.widgets.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Choose at least one widget to build a report.</div>}
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-panel p-5 xl:col-span-4">
+                                        <h3 className="text-lg font-black text-gray-950">Live Preview</h3>
+                                        <p className="mt-1 text-sm font-semibold text-gray-500">Previewed from the latest matching activity.</p>
+                                        <div className="mt-5 space-y-3">
+                                            {reportPreview.map(widget => {
+                                                const meta = reportWidgets.find(item => item.id === widget.id) || { name: widget.id };
+                                                const rows = widget.data?.rows || [];
+                                                return (
+                                                    <div key={widget.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div>
+                                                                <p className="font-black text-gray-950">{meta.name}</p>
+                                                                <p className="mt-1 text-xs font-semibold text-gray-500">{widget.data?.action || summarizeReportWidget(widget)}</p>
+                                                            </div>
+                                                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-700 shadow-sm">{summarizeReportWidget(widget)}</span>
+                                                        </div>
+                                                        {rows.length > 0 && (
+                                                            <div className="mt-4 max-h-48 overflow-y-auto rounded-xl bg-white">
+                                                                {rows.slice(0, 8).map((row, i) => (
+                                                                    <div key={i} className="flex items-center justify-between gap-3 border-b border-gray-50 px-3 py-2 last:border-b-0">
+                                                                        <span className="text-xs font-bold text-gray-700">{row.label || row.client || row.date || 'Row'}</span>
+                                                                        <span className="text-xs font-black text-gray-950">{row.total ? formatCurrency(row.total) : row.value ? formatCurrency(row.value) : row.revenue ? formatCurrency(row.revenue) : row.count ?? row.selections ?? row.pax ?? ''}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                            {!reportPreview.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Preview your report to see results here.</div>}
+                                        </div>
+                                    </section>
                                 </div>
                             </div>
                         )
@@ -2286,21 +2623,21 @@ const DashboardAdmin = () => {
                                             <p className="text-lg font-bold text-gray-900">{eventDetailsModal.data?.pax}</p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-gray-500 font-medium">Base Contract (₱)</p>
+                                            <p className="text-xs text-gray-500 font-medium">Event Total (₱)</p>
                                             <p className="text-lg font-bold text-gray-900">{eventDetailsModal.data?.total_cost?.toLocaleString()}</p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-gray-500 font-medium">Logistics Toll (₱)</p>
+                                            <p className="text-xs text-gray-500 font-medium">Travel Fee (₱)</p>
                                             <p className="text-lg font-bold text-orange-600">{eventDetailsModal.data?.transport_fee?.toLocaleString() || '0'}</p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-gray-500 font-medium">Labor Index (₱)</p>
+                                            <p className="text-xs text-gray-500 font-medium">Extra Service Hours (₱)</p>
                                             <p className="text-lg font-bold text-orange-600">{eventDetailsModal.data?.labor_surcharge?.toLocaleString() || '0'}</p>
                                         </div>
                                     </div>
                                 </div>
                                 <div>
-                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Payment Tranches</h4>
+                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Payment Schedule</h4>
                                     <div className="overflow-x-auto rounded-lg border border-gray-100">
                                         <table className="w-full text-sm">
                                             <thead className="bg-gray-50">
@@ -2315,7 +2652,7 @@ const DashboardAdmin = () => {
                                             <tbody className="divide-y divide-gray-100 bg-white">
                                                 {(eventDetailsModal.data?.payments || []).map(payment => (
                                                     <tr key={payment.id}>
-                                                        <td className="px-4 py-3 font-semibold text-gray-900">{payment.payment_type}</td>
+                                                        <td className="px-4 py-3 font-semibold text-gray-900">{paymentLabel(payment.payment_type)}</td>
                                                         <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(payment.amount)}</td>
                                                         <td className="px-4 py-3 text-center text-gray-600">{formatDate(payment.due_date)}</td>
                                                         <td className="px-4 py-3 text-center text-gray-600">{payment.status}</td>
@@ -2330,7 +2667,7 @@ const DashboardAdmin = () => {
                                                 ))}
                                                 {(eventDetailsModal.data?.payments || []).length === 0 && (
                                                     <tr>
-                                                        <td colSpan="5" className="px-4 py-6 text-center text-sm text-gray-500">No payment tranches found.</td>
+                                                        <td colSpan="5" className="px-4 py-6 text-center text-sm text-gray-500">No payment schedule found.</td>
                                                     </tr>
                                                 )}
                                             </tbody>
@@ -2438,9 +2775,9 @@ const DashboardAdmin = () => {
                                 </div>
                             </div>
 
-                            {/* Image URL */}
+                            {/* Image Link */}
                             <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1.5">Image URL</label>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">Image Link</label>
                                 <input
                                     type="url"
                                     value={menuItemForm.image}
@@ -2448,7 +2785,7 @@ const DashboardAdmin = () => {
                                     placeholder="https://images.unsplash.com/..."
                                     className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-sm"
                                 />
-                                <p className="text-xs text-gray-400 mt-1">Leave blank for a default placeholder image.</p>
+                                <p className="text-xs text-gray-400 mt-1">Leave blank to use a standard menu image.</p>
                             </div>
 
                             {/* Description */}
@@ -2499,14 +2836,15 @@ const DashboardAdmin = () => {
             {/* Toast */}
             {
                 toast && (
-                    <div className="fixed bottom-6 right-6 z-50 animate-slideUp">
-                        <div className={`flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-white font-medium text-sm ${toast.type === 'success' ? 'bg-gray-900 border border-gray-700' : 'bg-red-600'}`}>
+                    <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                        <div className={`pointer-events-auto relative flex max-w-[380px] items-start gap-3 overflow-hidden rounded-2xl border bg-white/95 px-4 py-3.5 text-sm font-semibold text-slate-700 shadow-xl shadow-slate-950/10 ring-1 ring-black/5 backdrop-blur-md ${toast.type === 'success' ? 'border-emerald-100' : 'border-red-100'}`}>
+                            <span className={`absolute inset-y-0 left-0 w-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`} />
                             {toast.type === 'success' ? (
-                                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100"><svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
                             ) : (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-100"><svg className="h-4 w-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
                             )}
-                            <span>{toast.message}</span>
+                            <span className="leading-5">{toast.message}</span>
                         </div>
                     </div>
                 )

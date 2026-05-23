@@ -3,7 +3,6 @@ import { Link } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
-import ChatBubble from '../Components/common/ChatBubble';
 
 const standardSetup = [
     'Complete sets of elegant dinnerware, flatware, and glassware.',
@@ -150,7 +149,7 @@ const Amenities = () => {
                             Added value for debuts and large celebrations.
                         </h2>
                         <p className="mt-5 text-sm font-medium leading-7 text-gray-600">
-                            Some milestones come with occasion-specific details. Availability and final choices are confirmed during booking review.
+                            Some celebrations come with occasion-specific details. Availability and final choices are confirmed during booking review.
                         </p>
                     </div>
 
@@ -185,7 +184,6 @@ const Amenities = () => {
             </main>
 
             <Footer />
-            {user && <ChatBubble user={user} />}
         </div>
     );
 };

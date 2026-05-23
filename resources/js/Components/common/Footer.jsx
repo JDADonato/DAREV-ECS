@@ -9,7 +9,7 @@ const Footer = () => {
                 <div>
                     <img src={logoImg} alt="Eloquente Catering Services" className="h-12 w-auto opacity-90" />
                     <p className="mt-5 max-w-sm text-sm font-medium leading-6 text-white/55">
-                        Premium event catering for weddings, corporate gatherings, private milestones, and tasting-led planning across Metro Manila.
+                        Premium event catering for weddings, corporate gatherings, private celebrations, and tasting-led planning across Metro Manila.
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
                         <Link href="/book" className="rounded-full bg-[#f0aa0b] px-5 py-2.5 text-xs font-black uppercase tracking-widest text-[#1a1a1a] transition-colors hover:bg-[#d99a08]">

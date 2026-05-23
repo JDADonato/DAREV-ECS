@@ -61,6 +61,8 @@ class Booking extends Model
             'discount_value' => 'decimal:2',
             'pax' => 'integer',
             'budget' => 'integer',
+            'outsourced_services' => 'array',
+            'selected_menu' => 'array',
         ];
     }
 
@@ -103,7 +105,7 @@ class Booking extends Model
      */
     public function getSelectedMenuArrayAttribute(): ?array
     {
-        return $this->selected_menu ? json_decode($this->selected_menu, true) : null;
+        return is_array($this->selected_menu) ? $this->selected_menu : ($this->selected_menu ? json_decode($this->selected_menu, true) : null);
     }
 
     /**
@@ -111,6 +113,6 @@ class Booking extends Model
      */
     public function getOutsourcedServicesArrayAttribute(): ?array
     {
-        return $this->outsourced_services ? json_decode($this->outsourced_services, true) : null;
+        return is_array($this->outsourced_services) ? $this->outsourced_services : ($this->outsourced_services ? json_decode($this->outsourced_services, true) : null);
     }
 }

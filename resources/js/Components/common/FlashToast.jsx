@@ -2,16 +2,40 @@ import React, { useState, useEffect } from 'react';
 import { usePage } from '@inertiajs/react';
 import { useToast } from '../../context/ToastContext';
 
-/**
- * FlashToast — Shows flash messages from the Laravel session AND
- * client-side toasts as animated notifications in the Eloquente theme.
- * Positioned at bottom-right. Red/maroon + gold accent colors.
- */
+const typeConfig = {
+    success: {
+        title: 'Done',
+        accent: 'bg-emerald-500',
+        iconWrap: 'bg-emerald-50 ring-emerald-100',
+        icon: 'M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+        iconClass: 'text-emerald-600',
+    },
+    error: {
+        title: 'Needs Attention',
+        accent: 'bg-red-500',
+        iconWrap: 'bg-red-50 ring-red-100',
+        icon: 'M12 9v3.75m0 3.75h.008v.008H12V16.5Zm9-4.5a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+        iconClass: 'text-red-600',
+    },
+    warning: {
+        title: 'Notice',
+        accent: 'bg-amber-500',
+        iconWrap: 'bg-amber-50 ring-amber-100',
+        icon: 'M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 4.5h.008v.008H12v-.008Z',
+        iconClass: 'text-amber-600',
+    },
+    info: {
+        title: 'Update',
+        accent: 'bg-sky-500',
+        iconWrap: 'bg-sky-50 ring-sky-100',
+        icon: 'M11.25 11.25h1.5v5.25h-1.5v-5.25Zm0-3h1.5v1.5h-1.5v-1.5ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+        iconClass: 'text-sky-600',
+    },
+};
+
 const FlashToast = () => {
     const { flash } = usePage().props;
     const { toasts, removeToast } = useToast();
-
-    // Flash messages from Laravel
     const [flashVisible, setFlashVisible] = useState(false);
     const [flashMessage, setFlashMessage] = useState('');
     const [flashType, setFlashType] = useState('success');
@@ -32,16 +56,17 @@ const FlashToast = () => {
     }, [flash?.message, flash?.error]);
 
     useEffect(() => {
-        if (flashVisible) {
-            const timer = setTimeout(() => {
-                setFlashExiting(true);
-                setTimeout(() => {
-                    setFlashVisible(false);
-                    setFlashExiting(false);
-                }, 400);
-            }, 5000);
-            return () => clearTimeout(timer);
-        }
+        if (!flashVisible) return undefined;
+
+        const timer = setTimeout(() => {
+            setFlashExiting(true);
+            setTimeout(() => {
+                setFlashVisible(false);
+                setFlashExiting(false);
+            }, 220);
+        }, 3500);
+
+        return () => clearTimeout(timer);
     }, [flashVisible, flashMessage]);
 
     const dismissFlash = () => {
@@ -49,262 +74,48 @@ const FlashToast = () => {
         setTimeout(() => {
             setFlashVisible(false);
             setFlashExiting(false);
-        }, 400);
+        }, 220);
     };
 
-    const getTypeConfig = (type) => {
-        switch (type) {
-            case 'success':
-                return {
-                    bg: 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)',
-                    border: '1px solid rgba(234, 179, 8, 0.25)',
-                    shadow: '0 20px 50px rgba(127, 29, 29, 0.4), 0 8px 20px rgba(0,0,0,0.2), 0 0 0 1px rgba(234, 179, 8, 0.2) inset',
-                    iconBg: 'linear-gradient(135deg, #eab308, #f59e0b)',
-                    iconColor: '#7f1d1d',
-                    icon: '✓',
-                    iconShadow: '0 2px 8px rgba(234, 179, 8, 0.4)',
-                    textColor: '#fef3c7',
-                    closeColor: '#fde68a',
-                    progressBg: 'rgba(127, 29, 29, 0.5)',
-                    progressFill: 'linear-gradient(90deg, #eab308, #f59e0b, #fbbf24)',
-                    shimmer: true,
-                };
-            case 'error':
-                return {
-                    bg: 'linear-gradient(135deg, #1e1e1e 0%, #374151 100%)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    shadow: '0 20px 50px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.15)',
-                    iconBg: 'rgba(239, 68, 68, 0.2)',
-                    iconColor: '#fca5a5',
-                    icon: '✕',
-                    iconShadow: 'none',
-                    textColor: '#f9fafb',
-                    closeColor: '#d1d5db',
-                    progressBg: 'rgba(55, 65, 81, 0.5)',
-                    progressFill: 'rgba(239, 68, 68, 0.6)',
-                    shimmer: false,
-                };
-            case 'warning':
-                return {
-                    bg: 'linear-gradient(135deg, #78350f 0%, #92400e 50%, #78350f 100%)',
-                    border: '1px solid rgba(251, 191, 36, 0.3)',
-                    shadow: '0 20px 50px rgba(120, 53, 15, 0.4), 0 8px 20px rgba(0,0,0,0.2)',
-                    iconBg: 'linear-gradient(135deg, #fbbf24, #f59e0b)',
-                    iconColor: '#78350f',
-                    icon: '⚠',
-                    iconShadow: '0 2px 8px rgba(251, 191, 36, 0.4)',
-                    textColor: '#fef3c7',
-                    closeColor: '#fde68a',
-                    progressBg: 'rgba(120, 53, 15, 0.5)',
-                    progressFill: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
-                    shimmer: false,
-                };
-            case 'info':
-            default:
-                return {
-                    bg: 'linear-gradient(135deg, #1e3a5f 0%, #1e40af 50%, #1e3a5f 100%)',
-                    border: '1px solid rgba(96, 165, 250, 0.3)',
-                    shadow: '0 20px 50px rgba(30, 58, 95, 0.4), 0 8px 20px rgba(0,0,0,0.2)',
-                    iconBg: 'linear-gradient(135deg, #60a5fa, #3b82f6)',
-                    iconColor: '#1e3a5f',
-                    icon: 'ℹ',
-                    iconShadow: '0 2px 8px rgba(96, 165, 250, 0.4)',
-                    textColor: '#dbeafe',
-                    closeColor: '#bfdbfe',
-                    progressBg: 'rgba(30, 58, 95, 0.5)',
-                    progressFill: 'linear-gradient(90deg, #60a5fa, #3b82f6)',
-                    shimmer: false,
-                };
-        }
-    };
+    const renderToast = (message, type, isExiting, onDismiss, key) => {
+        const config = typeConfig[type] || typeConfig.info;
 
-    const renderToast = (message, type, isExiting, onDismiss, key, index = 0) => {
-        const cfg = getTypeConfig(type);
         return (
             <div
                 key={key}
-                style={{
-                    animation: isExiting
-                        ? 'toast-slide-out-br 0.4s ease-in forwards'
-                        : 'toast-slide-in-br 0.5s cubic-bezier(0.21, 1.02, 0.73, 1) forwards',
-                    marginBottom: '12px',
-                }}
+                className={`pointer-events-auto relative flex w-[min(380px,calc(100vw-2rem))] items-start gap-3 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 px-4 py-3.5 text-slate-800 shadow-xl shadow-slate-950/10 ring-1 ring-black/5 backdrop-blur-md transition-all duration-200 ${isExiting ? 'translate-y-2 opacity-0' : 'translate-y-0 opacity-100'}`}
             >
-                <div
-                    style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '14px',
-                        padding: '18px 22px',
-                        minWidth: '340px',
-                        maxWidth: '460px',
-                        borderRadius: '14px',
-                        background: cfg.bg,
-                        color: '#fff',
-                        boxShadow: cfg.shadow,
-                        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-                        border: cfg.border,
-                        position: 'relative',
-                        overflow: 'hidden',
-                    }}
-                >
-                    {/* Shimmer overlay for success */}
-                    {cfg.shimmer && (
-                        <div
-                            style={{
-                                position: 'absolute',
-                                top: 0, left: 0, right: 0, bottom: 0,
-                                background: 'linear-gradient(105deg, transparent 40%, rgba(234, 179, 8, 0.06) 50%, transparent 60%)',
-                                pointerEvents: 'none',
-                            }}
-                        />
-                    )}
-
-                    {/* Icon */}
-                    <div
-                        style={{
-                            flexShrink: 0,
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: cfg.iconBg,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '14px',
-                            fontWeight: 700,
-                            color: cfg.iconColor,
-                            boxShadow: cfg.iconShadow,
-                            position: 'relative',
-                            zIndex: 1,
-                        }}
-                    >
-                        {cfg.icon}
-                    </div>
-
-                    {/* Message */}
-                    <div style={{ flex: 1, minWidth: 0, position: 'relative', zIndex: 1 }}>
-                        <div
-                            style={{
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                lineHeight: 1.6,
-                                wordBreak: 'break-word',
-                                color: cfg.textColor,
-                                letterSpacing: '0.01em',
-                            }}
-                        >
-                            {message}
-                        </div>
-                    </div>
-
-                    {/* Close button */}
-                    <button
-                        onClick={onDismiss}
-                        style={{
-                            flexShrink: 0,
-                            background: 'rgba(255,255,255,0.1)',
-                            border: 'none',
-                            borderRadius: '8px',
-                            color: cfg.closeColor,
-                            cursor: 'pointer',
-                            width: '26px',
-                            height: '26px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '12px',
-                            transition: 'all 0.2s',
-                            position: 'relative',
-                            zIndex: 1,
-                        }}
-                        onMouseEnter={(e) => {
-                            e.target.style.background = 'rgba(255,255,255,0.2)';
-                            e.target.style.transform = 'scale(1.1)';
-                        }}
-                        onMouseLeave={(e) => {
-                            e.target.style.background = 'rgba(255,255,255,0.1)';
-                            e.target.style.transform = 'scale(1)';
-                        }}
-                        aria-label="Dismiss notification"
-                    >
-                        ✕
-                    </button>
+                <span className={`absolute inset-y-0 left-0 w-1 ${config.accent}`} />
+                <span className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ring-1 ${config.iconWrap}`}>
+                    <svg className={`h-4 w-4 ${config.iconClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d={config.icon} />
+                    </svg>
+                </span>
+                <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{config.title}</p>
+                    <p className="mt-0.5 text-sm font-semibold leading-5 text-slate-700">{message}</p>
                 </div>
-
-                {/* Progress bar */}
-                <div
-                    style={{
-                        marginTop: '0',
-                        height: '3px',
-                        borderRadius: '0 0 14px 14px',
-                        overflow: 'hidden',
-                        background: cfg.progressBg,
-                    }}
+                <button
+                    type="button"
+                    onClick={onDismiss}
+                    className="-mr-1 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Dismiss notification"
                 >
-                    <div
-                        style={{
-                            height: '100%',
-                            background: cfg.progressFill,
-                            animation: 'toast-progress 5.4s linear forwards',
-                            borderRadius: '0 0 14px 14px',
-                        }}
-                    />
-                </div>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
         );
     };
 
     return (
-        <>
-            <div
-                style={{
-                    position: 'fixed',
-                    bottom: '24px',
-                    right: '24px',
-                    zIndex: 99999,
-                    display: 'flex',
-                    flexDirection: 'column-reverse',
-                    alignItems: 'flex-end',
-                }}
-            >
-                {/* Laravel Flash Toast */}
-                {flashVisible && renderToast(flashMessage, flashType, flashExiting, dismissFlash, 'flash-toast')}
-
-                {/* Client-side Toasts */}
-                {toasts.map((t, i) =>
-                    renderToast(t.message, t.type, t.exiting, () => removeToast(t.id), `toast-${t.id}`, i)
-                )}
-            </div>
-
-            {/* Keyframe animations — bottom-right slide */}
-            <style>{`
-                @keyframes toast-slide-in-br {
-                    0% {
-                        opacity: 0;
-                        transform: translateY(20px) translateX(20px) scale(0.96);
-                    }
-                    100% {
-                        opacity: 1;
-                        transform: translateY(0) translateX(0) scale(1);
-                    }
-                }
-                @keyframes toast-slide-out-br {
-                    0% {
-                        opacity: 1;
-                        transform: translateY(0) translateX(0) scale(1);
-                    }
-                    100% {
-                        opacity: 0;
-                        transform: translateY(20px) translateX(20px) scale(0.96);
-                    }
-                }
-                @keyframes toast-progress {
-                    0% { width: 100%; }
-                    100% { width: 0%; }
-                }
-            `}</style>
-        </>
+        <div className="pointer-events-none fixed bottom-5 left-5 z-[99999] flex max-w-[calc(100vw-2rem)] flex-col-reverse gap-2">
+            {flashVisible && renderToast(flashMessage, flashType, flashExiting, dismissFlash, 'flash-toast')}
+            {toasts.map((toast) => (
+                renderToast(toast.message, toast.type, toast.exiting, () => removeToast(toast.id), `toast-${toast.id}`)
+            ))}
+        </div>
     );
 };
 

@@ -4,6 +4,7 @@ import { router } from '@inertiajs/react';
 import ReceiptModal from '../Components/common/ReceiptModal';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import { getListData, getPaginationMeta } from '../utils/apiResponses';
 
 const PAYMENT_TYPE_LABELS = {
     Reservation: { label: 'Reservation Fee', pct: '10%', icon: 'R' },
@@ -85,14 +86,8 @@ const DashboardAccounting = () => {
                 headers: { }
             });
             const data = await res.json();
-            setBookings(Array.isArray(data) ? data : (data.data || []));
-            setBookingPagination(Array.isArray(data) ? null : {
-                currentPage: data.current_page,
-                lastPage: data.last_page,
-                total: data.total,
-                from: data.from,
-                to: data.to,
-            });
+            setBookings(getListData(data));
+            setBookingPagination(getPaginationMeta(data));
         } catch (error) {
             console.error("Error fetching bookings:", error);
         } finally {
@@ -109,7 +104,7 @@ const DashboardAccounting = () => {
                 headers: { }
             });
             const data = await res.json();
-            setLedgerPayments(data);
+            setLedgerPayments(getListData(data));
         } catch (error) {
             console.error("Error fetching ledger:", error);
         } finally {
@@ -183,7 +178,7 @@ const DashboardAccounting = () => {
             }
         } catch (error) {
             console.error('Error sending reminder:', error);
-            setToast({ message: 'Network error while sending reminder.', type: 'error' });
+            setToast({ message: 'We could not send the reminder. Please try again.', type: 'error' });
         } finally {
             setRemindingPaymentId(null);
         }
@@ -798,7 +793,7 @@ const DashboardAccounting = () => {
                                 <table className="w-full text-sm">
                                     <thead className="bg-white border-b border-amber-100">
                                         <tr>
-                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs w-20">Booking ID</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs w-20">Booking No.</th>
                                             <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Client Name</th>
                                             <th className="px-6 py-4 text-center font-bold text-slate-500 uppercase tracking-wider text-xs">Event Date</th>
                                             <th className="px-6 py-4 text-right font-bold text-slate-500 uppercase tracking-wider text-xs hidden md:table-cell">Total Paid</th>
@@ -868,16 +863,17 @@ const DashboardAccounting = () => {
             />
 
             {toast && (
-                <div className="fixed bottom-6 right-6 z-50 animate-slideUp">
-                    <div className={'flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-white font-medium text-sm ' + (toast.type === 'success' ? 'bg-green-600' : 'bg-red-600')}>
+                <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                    <div className={'pointer-events-auto relative flex max-w-[380px] items-start gap-3 overflow-hidden rounded-2xl border bg-white/95 px-4 py-3.5 text-sm font-semibold text-slate-700 shadow-xl shadow-slate-950/10 ring-1 ring-black/5 backdrop-blur-md ' + (toast.type === 'success' ? 'border-emerald-100' : 'border-red-100')}>
+                        <span className={'absolute inset-y-0 left-0 w-1 ' + (toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500')} />
                         {toast.type === 'success' ? (
-                            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100"><svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
                         ) : (
-                            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-100"><svg className="h-4 w-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
                         )}
-                        <span>{toast.message}</span>
-                        <button onClick={function () { setToast(null); }} className="ml-2 text-white/70 hover:text-white">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        <span className="min-w-0 flex-1 leading-5">{toast.message}</span>
+                        <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>
                 </div>
