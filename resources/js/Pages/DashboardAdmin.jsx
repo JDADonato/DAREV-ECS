@@ -117,6 +117,15 @@ const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('dashboard');
+    const [profileForm, setProfileForm] = useState({
+        username: user?.username || '',
+        email: user?.email || '',
+        phone: user?.phone || '',
+        current_password: '',
+        new_password: '',
+    });
+    const [profileProcessing, setProfileProcessing] = useState(false);
+    const [profileErrors, setProfileErrors] = useState({});
 
     // ==========================================
     // EMPLOYEE MANAGEMENT STATE
@@ -213,6 +222,14 @@ const DashboardAdmin = () => {
         filters: { date_from: '', date_to: '', booking_status: '', payment_status: '', city: '' },
     });
     const [reportPreview, setReportPreview] = useState([]);
+    const [reportView, setReportView] = useState('build');
+    const [reportDraggedIndex, setReportDraggedIndex] = useState(null);
+    const [reportDraggedWidgetId, setReportDraggedWidgetId] = useState(null);
+    const [reportDropIndex, setReportDropIndex] = useState(null);
+    const [reportLibraryCollapsed, setReportLibraryCollapsed] = useState(false);
+    const [reportLibraryExpanded, setReportLibraryExpanded] = useState(false);
+    const [reportSetupOpen, setReportSetupOpen] = useState(false);
+    const [reportLibraryDropActive, setReportLibraryDropActive] = useState(false);
     const [reportLoading, setReportLoading] = useState(false);
     const [reportSaving, setReportSaving] = useState(false);
     const [audits, setAudits] = useState([]);
@@ -283,6 +300,20 @@ const DashboardAdmin = () => {
         operationalAlerts.filter(alert => alertFilters.severity === 'all' || alert.severity === alertFilters.severity)
     ), [operationalAlerts, alertFilters.severity]);
     const maxPackageRevenue = Math.max(...visiblePackagePerformanceData.map(pkg => Number(pkg.revenue || 0)), 1);
+    const visibleReportWidgetIds = reportBuilder.widgets;
+    const reportCanvasOffset = 0;
+    const visibleReportLibraryWidgets = reportLibraryExpanded ? reportWidgets : reportWidgets.slice(0, 6);
+    const reportBookingStatusOptions = useMemo(() => {
+        const statuses = bookings.map(booking => booking.status).filter(Boolean);
+        return Array.from(new Set(['Pending', 'Confirmed', 'Reserved', 'Completed', 'Cancelled', ...statuses]));
+    }, [bookings]);
+    const reportPaymentStatusOptions = useMemo(() => {
+        const statuses = bookings.flatMap(booking => (booking.payments || []).map(payment => payment.status)).filter(Boolean);
+        return Array.from(new Set(['Pending', 'Paid', 'Verified', 'Refunded', 'Overdue', ...statuses]));
+    }, [bookings]);
+    const reportCityOptions = useMemo(() => (
+        Array.from(new Set(bookings.map(booking => booking.venue_city || booking.city).filter(Boolean))).sort()
+    ), [bookings]);
 
     // Toast notification
     const [toast, setToast] = useState(null);
@@ -296,8 +327,40 @@ const DashboardAdmin = () => {
     const [auditPage, setAuditPage] = useState(1);
     const rowsPerPage = 8;
 
+    useEffect(() => {
+        setProfileForm(prev => ({
+            ...prev,
+            username: user?.username || '',
+            email: user?.email || '',
+            phone: user?.phone || '',
+        }));
+    }, [user?.username, user?.email, user?.phone]);
+
     const handleLogout = () => {
         router.post('/logout');
+    };
+
+    const updateProfileField = (field, value) => {
+        setProfileForm(prev => ({ ...prev, [field]: value }));
+        setProfileErrors(prev => ({ ...prev, [field]: undefined }));
+    };
+
+    const submitProfile = (event) => {
+        event.preventDefault();
+        setProfileProcessing(true);
+        router.put('/profile', profileForm, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setProfileForm(prev => ({ ...prev, current_password: '', new_password: '' }));
+                setProfileErrors({});
+                showToast('Profile updated.');
+            },
+            onError: (errors) => {
+                setProfileErrors(errors || {});
+                showToast('Please review the profile fields.', 'error');
+            },
+            onFinish: () => setProfileProcessing(false),
+        });
     };
 
     const showToast = (message, type = 'success') => {
@@ -360,9 +423,14 @@ const DashboardAdmin = () => {
             description: 'Maintain packages, event types, and menu pricing without touching code.',
         },
         reports: {
-            eyebrow: 'Governance',
-            title: 'Reports Center',
-            description: 'Operational exports and management snapshots.',
+            eyebrow: 'Admin reporting',
+            title: 'Report Builder',
+            description: 'Choose the exact information to preview, save, or export.',
+        },
+        profile: {
+            eyebrow: 'Admin profile',
+            title: 'My Account',
+            description: 'Update your admin contact details and password.',
         },
         content: {
             eyebrow: 'Customer communications',
@@ -935,6 +1003,11 @@ const DashboardAdmin = () => {
         }
     };
 
+    const previewReport = async () => {
+        setReportView('preview');
+        await fetchReportPreview();
+    };
+
     const saveReportTemplate = async () => {
         setReportSaving(true);
         try {
@@ -954,18 +1027,56 @@ const DashboardAdmin = () => {
             const template = await res.json();
             setReportTemplateId(String(template.id));
             await fetchReportBuilder({ silent: true });
-            showToast('Report template saved');
+            showToast('Saved report updated');
             return template;
         } catch (error) {
             console.error(error);
-            showToast('Could not save report template', 'error');
+            showToast('Could not save report', 'error');
             return null;
         } finally {
             setReportSaving(false);
         }
     };
 
-    const runReportExport = async () => {
+    const createNewSavedReport = () => {
+        setReportTemplateId('');
+        setReportBuilder({
+            name: 'Management Snapshot',
+            description: 'Finance, bookings, menu performance, and operational alerts.',
+            widgets: ['revenue_summary', 'payment_breakdown', 'booking_pipeline', 'operational_alerts'],
+            filters: { date_from: '', date_to: '', booking_status: '', payment_status: '', city: '' },
+        });
+        setReportView('build');
+        setReportSetupOpen(true);
+    };
+
+    const duplicateSavedReport = () => {
+        setReportTemplateId('');
+        setReportBuilder(prev => ({
+            ...prev,
+            name: `${prev.name || 'Report'} Copy`,
+        }));
+        setReportSetupOpen(true);
+        showToast('Editing a new copy. Save it when ready.');
+    };
+
+    const deleteSavedReport = async () => {
+        if (!reportTemplateId) return;
+        if (!window.confirm('Delete this saved report?')) return;
+
+        try {
+            const res = await fetch(`/api/admin/report-templates/${reportTemplateId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Delete failed');
+            setReportTemplateId('');
+            await fetchReportBuilder({ silent: true });
+            showToast('Saved report deleted');
+        } catch (error) {
+            console.error(error);
+            showToast('Could not delete saved report', 'error');
+        }
+    };
+
+    const runReportExport = async (format = 'csv') => {
         const template = await saveReportTemplate();
         if (!template?.id) return;
         try {
@@ -976,7 +1087,7 @@ const DashboardAdmin = () => {
             });
             if (!res.ok) throw new Error('Run failed');
             const run = await res.json();
-            window.location.href = `/api/admin/report-runs/${run.id}/export`;
+            window.location.href = `/api/admin/report-runs/${run.id}/export?format=${format}`;
         } catch (error) {
             console.error(error);
             showToast('Could not download report', 'error');
@@ -998,18 +1109,86 @@ const DashboardAdmin = () => {
             filters: template.filters_json || reportBuilder.filters,
         };
         setReportBuilder(nextBuilder);
+        setReportView('build');
         fetchReportPreview({ builder: nextBuilder });
     };
 
-    const moveReportWidget = (index, direction) => {
+    const reorderReportWidgets = (fromIndex, toIndex) => {
         const next = [...reportBuilder.widgets];
-        const target = index + direction;
-        if (target < 0 || target >= next.length) return;
-        [next[index], next[target]] = [next[target], next[index]];
+        if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return;
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= next.length || toIndex >= next.length || fromIndex === toIndex) return;
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
         const nextBuilder = { ...reportBuilder, widgets: next };
         setReportBuilder(nextBuilder);
         fetchReportPreview({ silent: true, builder: nextBuilder });
     };
+
+    const addReportWidgetAt = (widgetId, index = reportBuilder.widgets.length) => {
+        if (!widgetId || reportBuilder.widgets.includes(widgetId)) return;
+        const next = [...reportBuilder.widgets];
+        next.splice(Math.max(0, Math.min(index, next.length)), 0, widgetId);
+        const nextBuilder = { ...reportBuilder, widgets: next };
+        setReportBuilder(nextBuilder);
+        setReportView('build');
+        fetchReportPreview({ silent: true, builder: nextBuilder });
+    };
+
+    const handleReportDrop = (index) => {
+        if (reportDraggedWidgetId) {
+            addReportWidgetAt(reportDraggedWidgetId, index);
+        } else if (Number.isInteger(reportDraggedIndex)) {
+            reorderReportWidgets(reportDraggedIndex, index);
+        }
+        setReportDraggedWidgetId(null);
+        setReportDraggedIndex(null);
+        setReportDropIndex(null);
+    };
+
+    const removeDraggedReportWidget = () => {
+        if (!Number.isInteger(reportDraggedIndex)) return;
+        const nextBuilder = {
+            ...reportBuilder,
+            widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== reportDraggedIndex),
+        };
+        setReportBuilder(nextBuilder);
+        fetchReportPreview({ silent: true, builder: nextBuilder });
+        setReportDraggedIndex(null);
+        setReportDraggedWidgetId(null);
+        setReportDropIndex(null);
+        setReportLibraryDropActive(false);
+    };
+
+    const moveReportWidget = (index, direction) => {
+        reorderReportWidgets(index, index + direction);
+    };
+
+    const formatReportPreviewValue = (key, value) => {
+        if (value === null || value === undefined || value === '') return 'None';
+        if (typeof value === 'number') {
+            const lowerKey = String(key).toLowerCase();
+            if (lowerKey.includes('revenue') || lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('value') || lowerKey.includes('balance')) {
+                return formatCurrency(value);
+            }
+            if (lowerKey.includes('rate') || lowerKey.includes('percent')) {
+                return `${Number(value || 0).toLocaleString()}%`;
+            }
+            return Number(value).toLocaleString();
+        }
+        return String(value);
+    };
+
+    const humanizeReportKey = (key) => String(key || '')
+        .replace(/[_-]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, char => char.toUpperCase());
+
+    const getReportSummaryMetrics = (data = {}) => Object.entries(data)
+        .filter(([key, value]) => key !== 'action' && !Array.isArray(value) && value !== null && typeof value !== 'object')
+        .map(([key, value]) => ({
+            label: humanizeReportKey(key),
+            value: formatReportPreviewValue(key, value),
+        }));
 
     const updateReportFilter = (key, value) => {
         setReportBuilder({ ...reportBuilder, filters: { ...reportBuilder.filters, [key]: value } });
@@ -1303,19 +1482,17 @@ const DashboardAdmin = () => {
         <div className="admin-page min-h-screen overflow-hidden">
             {/* Sidebar Navigation */}
             <aside className="fixed inset-y-0 left-0 z-30 flex w-72 admin-sidebar flex-col">
-                <div className="p-5 pb-3">
-                    <div className="admin-brand-mark flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#720101] flex items-center justify-center">
-                            <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
-                        </div>
+                <div className="p-5 pb-2">
+                    <div className="admin-brand-mark">
                         <div>
-                            <h1 className="text-xl font-bold font-display tracking-wide text-[#241612]">Eloquente</h1>
-                            <p className="text-xs font-bold uppercase text-[#720101]/55">Service Control</p>
+                            <p className="admin-kicker">Eloquente Catering</p>
+                            <h1 className="text-2xl font-black font-display tracking-wide text-[#720101]">Admin Console</h1>
+                            <p className="mt-1 text-xs font-bold uppercase text-[#5c4b45]">Operations workspace</p>
                         </div>
                     </div>
                 </div>
 
-                <nav className="absolute left-0 right-0 top-[4.75rem] bottom-[9.75rem] space-y-1.5 overflow-y-auto px-4 py-3">
+                <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-2">
                         {[
                             { id: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Dashboard' },
                             { id: 'analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'Analytics' },
@@ -1326,6 +1503,7 @@ const DashboardAdmin = () => {
                             { id: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Bookings' },
                             { id: 'refunds', icon: 'M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 12H6L5 9zm7 4v4m-3-2h6', label: 'Refunds' },
                             { id: 'audits', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z', label: 'Audits' },
+                            { id: 'profile', icon: 'M5.121 17.804A9 9 0 1118.88 17.8M15 11a3 3 0 11-6 0 3 3 0 016 0z', label: 'Profile' },
                         ].map(item => (
                             <button
                                 key={item.id}
@@ -1340,7 +1518,7 @@ const DashboardAdmin = () => {
                         ))}
                 </nav>
 
-                <div className="absolute inset-x-0 bottom-0 border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
+                <div className="border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-[#720101] flex items-center justify-center text-[#f0aa0b] font-bold">
                             {user?.username?.charAt(0).toUpperCase() || 'A'}
@@ -1364,10 +1542,6 @@ const DashboardAdmin = () => {
                         <p className="admin-kicker">{currentPage.eyebrow}</p>
                         <h2 className="text-2xl font-bold text-[#1a1a1a]">{currentPage.title}</h2>
                         <p className="mt-1 text-sm font-medium text-slate-500">{currentPage.description}</p>
-                    </div>
-                    <div className="hidden items-center gap-3 rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-bold text-[#720101] shadow-sm md:flex">
-                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-                        Live records
                     </div>
                 </header>
 
@@ -2618,6 +2792,319 @@ const DashboardAdmin = () => {
                     )}
                     {
                         activeTab === 'reports' && (
+                            <div className="animate-fadeIn admin-report-page">
+                                <section className="admin-report-setup admin-report-setup-compact">
+                                    <div className="admin-report-setup-summary">
+                                        <div>
+                                            <p className="admin-kicker">Report setup</p>
+                                            <h3 className="mt-1 text-lg font-black text-gray-950">{reportBuilder.name || 'Untitled report'}</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">{reportBuilder.description || 'Choose blocks, apply filters, then export.'}</p>
+                                        </div>
+                                        <div className="admin-report-filter-chips">
+                                            {Object.entries(reportBuilder.filters || {}).filter(([, value]) => value).slice(0, 3).map(([key, value]) => (
+                                                <span key={key}>{humanizeReportKey(key)}: {value}</span>
+                                            ))}
+                                            {!Object.values(reportBuilder.filters || {}).some(Boolean) && <span>No filters applied</span>}
+                                        </div>
+                                        <div className="admin-report-summary-actions">
+                                            <button type="button" onClick={() => setReportSetupOpen(open => !open)} className="admin-button-secondary px-4 py-2 text-sm font-black">
+                                                {reportSetupOpen ? 'Hide Details' : 'Edit Report'}
+                                            </button>
+                                            <button type="button" onClick={createNewSavedReport} className="admin-button-secondary px-4 py-2 text-sm font-black">New Report</button>
+                                        </div>
+                                    </div>
+
+                                    {reportSetupOpen && (
+                                    <div className="mt-5">
+                                    <div className="grid gap-4 xl:grid-cols-[1fr_1fr_1.5fr]">
+                                        <label className="admin-field-label">
+                                            Saved report
+                                            <select value={reportTemplateId} onChange={(e) => loadReportTemplate(e.target.value)} className="admin-input mt-2">
+                                                <option value="">Unsaved report</option>
+                                                {reportTemplates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+                                            </select>
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Report name
+                                            <input value={reportBuilder.name} onChange={(e) => setReportBuilder({ ...reportBuilder, name: e.target.value })} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Short description
+                                            <input value={reportBuilder.description} onChange={(e) => setReportBuilder({ ...reportBuilder, description: e.target.value })} className="admin-input mt-2" />
+                                        </label>
+                                    </div>
+                                    <div className="admin-report-manage-actions">
+                                        <button type="button" onClick={createNewSavedReport} className="admin-mini-button">Start New</button>
+                                        <button type="button" onClick={duplicateSavedReport} className="admin-mini-button" disabled={!reportTemplateId}>Save As Copy</button>
+                                        <button type="button" onClick={deleteSavedReport} className="admin-mini-button admin-mini-button-danger" disabled={!reportTemplateId}>Delete Saved Report</button>
+                                    </div>
+                                    <div className="admin-report-filter-grid">
+                                        <label className="admin-field-label">
+                                            From
+                                            <input type="date" value={reportBuilder.filters.date_from || ''} onChange={(e) => updateReportFilter('date_from', e.target.value)} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            To
+                                            <input type="date" value={reportBuilder.filters.date_to || ''} onChange={(e) => updateReportFilter('date_to', e.target.value)} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Booking status
+                                            <input list="report-booking-status-options" value={reportBuilder.filters.booking_status || ''} onChange={(e) => updateReportFilter('booking_status', e.target.value)} placeholder="All booking statuses" className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Payment status
+                                            <input list="report-payment-status-options" value={reportBuilder.filters.payment_status || ''} onChange={(e) => updateReportFilter('payment_status', e.target.value)} placeholder="All payment statuses" className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            City
+                                            <input list="report-city-options" value={reportBuilder.filters.city || ''} onChange={(e) => updateReportFilter('city', e.target.value)} placeholder="All cities" className="admin-input mt-2" />
+                                        </label>
+                                        <datalist id="report-booking-status-options">
+                                            {reportBookingStatusOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
+                                        <datalist id="report-payment-status-options">
+                                            {reportPaymentStatusOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
+                                        <datalist id="report-city-options">
+                                            {reportCityOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
+                                    </div>
+                                    </div>
+                                    )}
+                                </section>
+
+                                <div className="admin-report-actions">
+                                    <div className="admin-report-view-toggle">
+                                        <button type="button" onClick={() => setReportView('build')} className={reportView === 'build' ? 'is-active' : ''}>Build</button>
+                                        <button type="button" onClick={previewReport} className={reportView === 'preview' ? 'is-active' : ''}>Preview</button>
+                                    </div>
+                                    <button onClick={saveReportTemplate} disabled={reportSaving} className="admin-button-secondary px-5 py-2.5 text-sm font-black">{reportSaving ? 'Saving...' : 'Save Report'}</button>
+                                    <button onClick={() => runReportExport('csv')} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download Spreadsheet</button>
+                                    <button onClick={() => runReportExport('pdf')} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download PDF</button>
+                                </div>
+
+                                <div className={`admin-report-workspace ${reportLibraryCollapsed ? 'is-library-collapsed' : ''}`}>
+                                    <aside
+                                        className={`admin-report-rail ${reportLibraryCollapsed ? 'is-collapsed' : ''} ${reportLibraryDropActive ? 'is-drop-active' : ''}`}
+                                        onDragOver={(event) => {
+                                            if (Number.isInteger(reportDraggedIndex)) {
+                                                event.preventDefault();
+                                                setReportLibraryDropActive(true);
+                                            }
+                                        }}
+                                        onDragLeave={() => setReportLibraryDropActive(false)}
+                                        onDrop={(event) => {
+                                            event.preventDefault();
+                                            removeDraggedReportWidget();
+                                        }}
+                                    >
+                                        <div className="admin-report-rail-head">
+                                            <div>
+                                                <p className="admin-kicker">1. Choose blocks</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Report Library</h3>
+                                                {!reportLibraryCollapsed && <p className="mt-1 text-sm font-semibold text-gray-500">Drag blocks into the report canvas.</p>}
+                                            </div>
+                                            <button type="button" onClick={() => setReportLibraryCollapsed(collapsed => !collapsed)} className="admin-mini-button">
+                                                {reportLibraryCollapsed ? 'Open' : 'Collapse'}
+                                            </button>
+                                        </div>
+                                        {!reportLibraryCollapsed && (
+                                        <div className="admin-report-library-drop">Drop used blocks here to remove them</div>
+                                        )}
+                                        {!reportLibraryCollapsed && (
+                                        <div className="mt-4 grid gap-2">
+                                            {visibleReportLibraryWidgets.map(widget => {
+                                                const selected = reportBuilder.widgets.includes(widget.id);
+                                                return (
+                                                    <button
+                                                        key={widget.id}
+                                                        type="button"
+                                                        draggable={!selected}
+                                                        disabled={selected}
+                                                        onDragStart={() => {
+                                                            if (!selected) {
+                                                                setReportDraggedWidgetId(widget.id);
+                                                                setReportDraggedIndex(null);
+                                                            }
+                                                        }}
+                                                        onDragEnd={() => {
+                                                            setReportDraggedWidgetId(null);
+                                                            setReportDropIndex(null);
+                                                        }}
+                                                        onClick={() => {
+                                                            const nextBuilder = { ...reportBuilder, widgets: [...reportBuilder.widgets, widget.id] };
+                                                            setReportBuilder(nextBuilder);
+                                                            fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                        }}
+                                                        className={`admin-report-widget ${selected ? 'admin-report-widget-selected' : ''}`}
+                                                    >
+                                                        <span>
+                                                            {widget.name}
+                                                            <small>{widget.category}</small>
+                                                        </span>
+                                                        <strong>{selected ? 'Used' : 'Drag'}</strong>
+                                                    </button>
+                                                );
+                                            })}
+                                            {reportWidgets.length > 6 && (
+                                                <button type="button" onClick={() => setReportLibraryExpanded(expanded => !expanded)} className="admin-report-library-more">
+                                                    {reportLibraryExpanded ? 'Show less' : `See all ${reportWidgets.length} blocks`}
+                                                </button>
+                                            )}
+                                        </div>
+                                        )}
+                                    </aside>
+
+                                    <section className="admin-report-main">
+                                        <div className="admin-report-canvas-head">
+                                            <div>
+                                                <p className="admin-kicker">{reportView === 'preview' ? 'Report preview' : 'Report canvas'}</p>
+                                                <h3 className="mt-1 text-xl font-black text-gray-950">{reportView === 'preview' ? reportBuilder.name || 'Preview' : 'Arrange Selected Blocks'}</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">
+                                                    {reportView === 'preview'
+                                                        ? 'This is how the report will read before you download or save it.'
+                                                        : 'Drag blocks to reorder them, or use the move buttons for precise control.'}
+                                                </p>
+                                            </div>
+                                            <div className="admin-report-canvas-tools">
+                                                <span>{reportBuilder.widgets.length} blocks</span>
+                                            </div>
+                                        </div>
+
+                                        {reportView === 'build' ? (
+                                        <div
+                                            className={`admin-report-canvas-body ${reportDraggedWidgetId !== null || reportDraggedIndex !== null ? 'is-drop-ready' : ''}`}
+                                            onDragOver={(event) => {
+                                                event.preventDefault();
+                                                if (!reportBuilder.widgets.length) setReportDropIndex(0);
+                                            }}
+                                            onDrop={() => handleReportDrop(reportBuilder.widgets.length)}
+                                        >
+                                            <div className="mt-4 space-y-2">
+                                                <div
+                                                    className={`admin-report-drop-zone ${reportDropIndex === 0 ? 'is-active' : ''}`}
+                                                    onDragOver={(event) => {
+                                                        event.preventDefault();
+                                                        setReportDropIndex(0);
+                                                    }}
+                                                    onDrop={(event) => {
+                                                        event.stopPropagation();
+                                                        handleReportDrop(0);
+                                                    }}
+                                                />
+                                                {visibleReportWidgetIds.map((id, visibleIndex) => {
+                                                    const index = reportCanvasOffset + visibleIndex;
+                                                    const meta = reportWidgets.find(widget => widget.id === id) || { name: id, category: 'Custom' };
+                                                    return (
+                                                        <React.Fragment key={`${id}-${index}`}>
+                                                        <div
+                                                            className={`admin-report-selected-row ${reportDraggedIndex === index ? 'is-dragging' : ''}`}
+                                                            draggable
+                                                            onDragStart={() => {
+                                                                setReportDraggedIndex(index);
+                                                                setReportDraggedWidgetId(null);
+                                                            }}
+                                                            onDragOver={(event) => {
+                                                                event.preventDefault();
+                                                                setReportDropIndex(index);
+                                                            }}
+                                                            onDrop={(event) => {
+                                                                event.stopPropagation();
+                                                                handleReportDrop(index);
+                                                            }}
+                                                            onDragEnd={() => {
+                                                                setReportDraggedIndex(null);
+                                                                setReportDropIndex(null);
+                                                            }}
+                                                        >
+                                                            <div>
+                                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Block {index + 1} - {meta.category}</p>
+                                                                <p className="mt-1 font-black text-gray-950">{meta.name}</p>
+                                                                {meta.description && <p className="mt-1 text-sm font-semibold text-gray-500">{meta.description}</p>}
+                                                            </div>
+                                                            <div className="flex flex-wrap justify-end gap-2">
+                                                                <button onClick={() => moveReportWidget(index, -1)} className="admin-mini-button">Up</button>
+                                                                <button onClick={() => moveReportWidget(index, 1)} className="admin-mini-button">Down</button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const nextBuilder = { ...reportBuilder, widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== index) };
+                                                                        setReportBuilder(nextBuilder);
+                                                                        fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                                    }}
+                                                                    className="admin-mini-button admin-mini-button-danger"
+                                                                >
+                                                                    Remove
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            className={`admin-report-drop-zone ${reportDropIndex === index + 1 ? 'is-active' : ''}`}
+                                                            onDragOver={(event) => {
+                                                                event.preventDefault();
+                                                                setReportDropIndex(index + 1);
+                                                            }}
+                                                            onDrop={(event) => {
+                                                                event.stopPropagation();
+                                                                handleReportDrop(index + 1);
+                                                            }}
+                                                        />
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                                {!reportBuilder.widgets.length && <div className="admin-empty-state">Choose at least one block to build a report.</div>}
+                                            </div>
+                                        </div>
+                                        ) : (
+                                        <div className="admin-report-preview-canvas">
+                                            <div className="space-y-4">
+                                                {reportPreview.map(widget => {
+                                                    const meta = reportWidgets.find(item => item.id === widget.id) || { name: widget.id };
+                                                    const data = widget.data || {};
+                                                    const rows = widget.data?.rows || [];
+                                                    const summaryMetrics = getReportSummaryMetrics(data);
+                                                    return (
+                                                        <div key={widget.id} className="admin-report-preview-block">
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div>
+                                                                    <p className="font-black text-gray-950">{meta.name}</p>
+                                                                    <p className="mt-1 text-xs font-semibold text-gray-500">{widget.data?.action || summarizeReportWidget(widget)}</p>
+                                                                </div>
+                                                                {!!rows.length && <span className="text-xs font-black uppercase tracking-wider text-[#9f6500]">{summarizeReportWidget(widget)}</span>}
+                                                            </div>
+                                                            {summaryMetrics.length > 0 && (
+                                                                <div className="admin-report-metric-grid">
+                                                                    {summaryMetrics.map(metric => (
+                                                                        <div key={`${widget.id}-${metric.label}`} className="admin-report-metric">
+                                                                            <span>{metric.label}</span>
+                                                                            <strong>{metric.value}</strong>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {rows.length > 0 && (
+                                                                <div className="mt-3 divide-y divide-gray-100">
+                                                                    {rows.slice(0, 12).map((row, i) => (
+                                                                        <div key={i} className="flex items-center justify-between gap-3 py-2">
+                                                                            <span className="text-xs font-bold text-gray-700">{row.label || row.client || row.date || 'Row'}</span>
+                                                                            <span className="text-xs font-black text-gray-950">{row.total ? formatCurrency(row.total) : row.value ? formatCurrency(row.value) : row.revenue ? formatCurrency(row.revenue) : row.count ?? row.selections ?? row.pax ?? ''}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                                {!reportPreview.length && <div className="admin-empty-state">Preview your report to check the result before saving or downloading.</div>}
+                                            </div>
+                                        </div>
+                                        )}
+                                    </section>
+                                </div>
+                            </div>
+                        )
+                    }
+                    {
+                        activeTab === 'reports_legacy' && (
                             <div className="animate-fadeIn space-y-6">
                                 <div className="admin-panel p-6">
                                     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -2759,6 +3246,64 @@ const DashboardAdmin = () => {
                     }
                     {activeTab === 'content' && (
                         <AnnouncementManager variant="admin" user={user} />
+                    )}
+                    {activeTab === 'profile' && (
+                        <div className="animate-fadeIn admin-profile-page">
+                            <section className="admin-profile-identity">
+                                <div className="admin-profile-avatar">
+                                    {user?.username?.charAt(0).toUpperCase() || 'A'}
+                                </div>
+                                <div>
+                                    <p className="admin-kicker">Administrator</p>
+                                    <h3 className="mt-1 text-2xl font-black text-gray-950">{user?.username || 'Admin user'}</h3>
+                                    <p className="mt-1 text-sm font-semibold text-gray-500">{user?.email || 'No email saved'}</p>
+                                </div>
+                            </section>
+
+                            <form onSubmit={submitProfile} className="admin-profile-form">
+                                <div>
+                                    <p className="admin-kicker">Account details</p>
+                                    <h3 className="mt-1 text-xl font-black text-gray-950">Profile Configuration</h3>
+                                    <p className="mt-1 text-sm font-semibold text-gray-500">Keep the admin contact information accurate for system records.</p>
+                                </div>
+
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <label className="admin-field-label">
+                                        Username
+                                        <input value={profileForm.username} onChange={(event) => updateProfileField('username', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.username && <span className="admin-field-error">{profileErrors.username}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        Email address
+                                        <input type="email" value={profileForm.email} onChange={(event) => updateProfileField('email', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.email && <span className="admin-field-error">{profileErrors.email}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        Phone number
+                                        <input value={profileForm.phone} onChange={(event) => updateProfileField('phone', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.phone && <span className="admin-field-error">{profileErrors.phone}</span>}
+                                    </label>
+                                    <div className="hidden md:block" />
+                                    <label className="admin-field-label">
+                                        Current password
+                                        <input type="password" value={profileForm.current_password} onChange={(event) => updateProfileField('current_password', event.target.value)} placeholder="Only needed to change password" className="admin-input mt-2" />
+                                        {profileErrors.current_password && <span className="admin-field-error">{profileErrors.current_password}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        New password
+                                        <input type="password" value={profileForm.new_password} onChange={(event) => updateProfileField('new_password', event.target.value)} placeholder="Leave blank to keep current" className="admin-input mt-2" />
+                                        {profileErrors.new_password && <span className="admin-field-error">{profileErrors.new_password}</span>}
+                                    </label>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#720101]/10 pt-5">
+                                    <p className="text-sm font-semibold text-gray-500">Password fields can stay blank if you are only updating contact details.</p>
+                                    <button type="submit" disabled={profileProcessing} className="admin-button-primary px-5 py-2.5 text-sm font-black">
+                                        {profileProcessing ? 'Saving...' : 'Save Profile'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     )}
                     {
                         activeTab === 'users' && (
@@ -3675,7 +4220,7 @@ const DashboardAdmin = () => {
             {/* Toast */}
             {
                 toast && (
-                    <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                    <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                         <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                             <span className={`min-w-0 flex-1 font-semibold leading-5 ${toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]'}`}>{toast.message}</span>
                         </div>

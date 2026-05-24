@@ -435,7 +435,7 @@ const ClientDashboard = () => {
 
             <main className="max-w-7xl mx-auto py-8 px-5 sm:px-8 relative" style={{paddingTop: 100}}>
                 {toast && (
-                    <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                    <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                         <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                         <p className={`min-w-0 flex-1 font-semibold leading-5 ${toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]'}`}>{toast.message}</p>
                         </div>

@@ -70,7 +70,7 @@ const FlashToast = () => {
     };
 
     return (
-        <div className="pointer-events-none fixed bottom-5 left-5 z-[99999] flex max-w-[calc(100vw-2rem)] flex-col-reverse gap-2">
+        <div className="pointer-events-none fixed bottom-5 right-5 z-[99999] flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2">
             {flashVisible && renderToast(flashMessage, flashType, flashExiting, dismissFlash, 'flash-toast')}
             {toasts.map((toast) => (
                 renderToast(toast.message, toast.type, toast.exiting, () => removeToast(toast.id), `toast-${toast.id}`)

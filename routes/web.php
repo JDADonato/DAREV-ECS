@@ -181,10 +181,12 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::put('/api/settings/menu-items/{id}/pricing', [SettingsController::class, 'updateDishPricing']);
     Route::get('/api/admin/announcements', [AnnouncementController::class, 'index']);
     Route::post('/api/admin/announcements', [AnnouncementController::class, 'store']);
+    Route::get('/api/admin/announcement-audience-users', [AnnouncementController::class, 'audienceUsers']);
     Route::patch('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'update']);
     Route::post('/api/admin/announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
     Route::post('/api/admin/announcements/{announcement}/archive', [AnnouncementController::class, 'archive']);
     Route::post('/api/admin/announcements/{announcement}/send-test', [AnnouncementController::class, 'sendTest']);
+    Route::delete('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'destroy']);
 });
 
 // ─── Accounting Routes ───

@@ -863,7 +863,7 @@ const DashboardAccounting = () => {
             />
 
             {toast && (
-                <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                     <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                         <span className={'min-w-0 flex-1 font-semibold leading-5 ' + (toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]')}>{toast.message}</span>
                         <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-[#8a6a46] transition hover:bg-[#f5eadb] hover:text-[#720101]">
