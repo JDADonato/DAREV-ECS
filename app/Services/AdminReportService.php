@@ -5,10 +5,13 @@ namespace App\Services;
 use App\Models\Booking;
 use App\Models\Payment;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class AdminReportService
 {
+    private array $memo = [];
+
     public function widgetDefinitions(): array
     {
         return [
@@ -39,7 +42,7 @@ class AdminReportService
 
     public function widgetData(string $id, array $filters = []): array
     {
-        return match ($id) {
+        return $this->cachedPart('report-widget.' . $id, $filters, 120, fn () => match ($id) {
             'revenue_summary' => $this->revenueSummary($filters),
             'payment_breakdown' => $this->paymentBreakdown($filters),
             'payment_aging' => ['rows' => $this->paymentAging($filters), 'action' => 'Oldest unpaid balances should be followed up first.'],
@@ -51,52 +54,174 @@ class AdminReportService
             'refunds_cancellations' => $this->refundsAndCancellations($filters),
             'operational_alerts' => ['rows' => $this->operationalAlerts($filters), 'action' => 'Resolve danger and warning items before daily operations start.'],
             default => ['message' => 'Unknown widget.'],
-        };
+        });
     }
 
     public function analytics(array $filters = []): array
     {
-        $summary = $this->revenueSummary($filters);
+        return $this->cachedPart('full', $filters, 60, function () use ($filters) {
+            $summary = $this->memo('revenueSummary', $filters, fn () => $this->revenueSummary($filters));
+            $trend = $this->memo('settledRevenueTrend', $filters, fn () => $this->settledRevenueTrend($filters));
+            $paymentBreakdown = $this->memo('paymentBreakdown', $filters, fn () => $this->paymentBreakdown($filters));
+            $paymentAging = $this->memo('paymentAging', $filters, fn () => $this->paymentAging($filters));
+            $bookingPipeline = $this->memo('bookingPipeline', $filters, fn () => $this->bookingPipeline($filters));
+            $upcomingWorkload = $this->memo('upcomingWorkload', $filters, fn () => $this->upcomingWorkload($filters));
+            $packagePerformance = $this->memo('packagePerformance', $filters, fn () => $this->packagePerformance($filters));
+            $menuPerformance = $this->memo('menuPerformance', $filters, fn () => $this->menuPerformance($filters));
+            $customerGrowth = $this->memo('customerGrowth', $filters, fn () => $this->customerGrowth($filters));
+            $operationsLoad = $this->memo('operationsLoad', $filters, fn () => $this->operationsLoad($filters));
+            $operationalAlerts = $this->memo('operationalAlerts', $filters, fn () => $this->operationalAlerts($filters));
+            $revenueForecast = $this->memo('revenueForecast', $filters, fn () => $this->revenueForecast($filters));
+            $paxDemandProjection = $this->memo('paxDemandProjection', $filters, fn () => $this->paxDemandProjection($filters));
 
-        return [
-            'summary' => [
-                'settledRevenue' => $summary['settledRevenue'],
-                'pendingRevenue' => $summary['pendingRevenue'],
-                'overdueRevenue' => $summary['overdueRevenue'],
-                'totalRevenue' => $summary['settledRevenue'] + $summary['pendingRevenue'],
-                'collectionRate' => $summary['collectionRate'],
-                'averageBookingValue' => $this->averageBookingValue($filters),
-                'pendingBookings' => $this->countBookings($filters, ['Pending']),
-                'activeBookings' => $this->countBookings($filters, ['Confirmed', 'Reserved']),
-                'completedBookings' => $this->countBookings($filters, ['Completed']),
-                'totalPax' => $this->bookingQuery($filters)->sum('pax') ?: 0,
-            ],
-            'businessSnapshot' => $this->businessSnapshot($filters),
-            'revenueTrends' => $this->settledRevenueTrend($filters),
-            'revenueHealth' => [
-                'settledRevenueOverTime' => $this->settledRevenueTrend($filters),
-                'paymentStatusBreakdown' => $this->paymentBreakdown($filters)['rows'],
-                'paymentAging' => $this->paymentAging($filters),
-            ],
-            'paymentAging' => $this->paymentAging($filters),
-            'bookingPipeline' => $this->bookingPipeline($filters)['rows'],
-            'upcomingWorkload' => $this->upcomingWorkload($filters)['rows'],
-            'packagePerformance' => $this->packagePerformance($filters)['rows'],
-            'menuPerformance' => $this->menuPerformance($filters)['rows'],
-            'customerExperience' => [
-                'customerGrowth' => $this->customerGrowth($filters)['rows'],
+            return [
+                'summary' => $this->summary($filters, $summary),
+                'businessSnapshot' => $this->memo('businessSnapshot', $filters, fn () => $this->businessSnapshot($filters)),
+                'revenueTrends' => $trend,
+                'revenueHealth' => [
+                    'settledRevenueOverTime' => $trend,
+                    'paymentStatusBreakdown' => $paymentBreakdown['rows'],
+                    'paymentAging' => $paymentAging,
+                ],
+                'paymentAging' => $paymentAging,
+                'bookingPipeline' => $bookingPipeline['rows'],
+                'upcomingWorkload' => $upcomingWorkload['rows'],
+                'packagePerformance' => $packagePerformance['rows'],
+                'menuPerformance' => $menuPerformance['rows'],
+                'customerExperience' => [
+                    'customerGrowth' => $customerGrowth['rows'],
+                    'feedbackSignals' => [],
+                ],
+                'operationsLoad' => $operationsLoad,
+                'alerts' => $operationalAlerts,
+                'operationalAlerts' => $operationalAlerts,
+                'revenueForecast' => $revenueForecast,
+                'paxDemandProjection' => $paxDemandProjection,
+                'projectedPaxDemand' => $paxDemandProjection['rows'],
+                'salesFrequency' => $this->legacySalesFrequency($filters),
+                'topSellers' => $packagePerformance['rows'],
+                'peakSeasons' => $operationsLoad,
+            ];
+        });
+    }
+
+    public function analyticsSummary(array $filters = []): array
+    {
+        return $this->cachedPart('summary', $filters, 60, function () use ($filters) {
+            $summary = $this->memo('revenueSummary', $filters, fn () => $this->revenueSummary($filters));
+
+            return [
+                'summary' => $this->summary($filters, $summary),
+                'businessSnapshot' => $this->memo('businessSnapshot', $filters, fn () => $this->businessSnapshot($filters)),
+                'alerts' => $this->memo('operationalAlerts', $filters, fn () => $this->operationalAlerts($filters)),
+            ];
+        });
+    }
+
+    public function analyticsRevenue(array $filters = []): array
+    {
+        return $this->cachedPart('revenue', $filters, 180, function () use ($filters) {
+            return [
+                'settledRevenueOverTime' => $this->memo('settledRevenueTrend', $filters, fn () => $this->settledRevenueTrend($filters)),
+                'paymentStatusBreakdown' => $this->memo('paymentBreakdown', $filters, fn () => $this->paymentBreakdown($filters))['rows'],
+                'paymentAging' => $this->memo('paymentAging', $filters, fn () => $this->paymentAging($filters)),
+            ];
+        });
+    }
+
+    public function analyticsPipeline(array $filters = []): array
+    {
+        return $this->cachedPart('pipeline', $filters, 90, function () use ($filters) {
+            return [
+                'bookingPipeline' => $this->memo('bookingPipeline', $filters, fn () => $this->bookingPipeline($filters))['rows'],
+                'upcomingWorkload' => $this->memo('upcomingWorkload', $filters, fn () => $this->upcomingWorkload($filters))['rows'],
+            ];
+        });
+    }
+
+    public function analyticsMenuPerformance(array $filters = []): array
+    {
+        return $this->cachedPart('menu', $filters, 300, function () use ($filters) {
+            return [
+                'packagePerformance' => $this->memo('packagePerformance', $filters, fn () => $this->packagePerformance($filters))['rows'],
+                'menuPerformance' => $this->memo('menuPerformance', $filters, fn () => $this->menuPerformance($filters))['rows'],
+            ];
+        });
+    }
+
+    public function analyticsCustomerExperience(array $filters = []): array
+    {
+        return $this->cachedPart('customer', $filters, 300, function () use ($filters) {
+            return [
+                'customerGrowth' => $this->memo('customerGrowth', $filters, fn () => $this->customerGrowth($filters))['rows'],
                 'feedbackSignals' => [],
-            ],
-            'operationsLoad' => $this->operationsLoad($filters),
-            'alerts' => $this->operationalAlerts($filters),
-            'operationalAlerts' => $this->operationalAlerts($filters),
-            'revenueForecast' => $this->revenueForecast($filters),
-            'paxDemandProjection' => $this->paxDemandProjection($filters),
-            'projectedPaxDemand' => $this->paxDemandProjection($filters)['rows'],
-            'salesFrequency' => $this->legacySalesFrequency($filters),
-            'topSellers' => $this->packagePerformance($filters)['rows'],
-            'peakSeasons' => $this->operationsLoad($filters),
+            ];
+        });
+    }
+
+    public function analyticsOperations(array $filters = []): array
+    {
+        return $this->cachedPart('operations', $filters, 60, function () use ($filters) {
+            return [
+                'operationsLoad' => $this->memo('operationsLoad', $filters, fn () => $this->operationsLoad($filters)),
+                'alerts' => $this->memo('operationalAlerts', $filters, fn () => $this->operationalAlerts($filters)),
+            ];
+        });
+    }
+
+    public function analyticsForecasts(array $filters = []): array
+    {
+        return $this->cachedPart('forecasts', $filters, 180, function () use ($filters) {
+            $paxDemandProjection = $this->memo('paxDemandProjection', $filters, fn () => $this->paxDemandProjection($filters));
+
+            return [
+                'revenueForecast' => $this->memo('revenueForecast', $filters, fn () => $this->revenueForecast($filters)),
+                'paxDemandProjection' => $paxDemandProjection,
+                'projectedPaxDemand' => $paxDemandProjection['rows'],
+            ];
+        });
+    }
+
+    private function summary(array $filters, array $summary): array
+    {
+        return [
+            'settledRevenue' => $summary['settledRevenue'],
+            'pendingRevenue' => $summary['pendingRevenue'],
+            'overdueRevenue' => $summary['overdueRevenue'],
+            'totalRevenue' => $summary['settledRevenue'] + $summary['pendingRevenue'],
+            'collectionRate' => $summary['collectionRate'],
+            'averageBookingValue' => $this->memo('averageBookingValue', $filters, fn () => $this->averageBookingValue($filters)),
+            'pendingBookings' => $this->memo('pendingBookings', $filters, fn () => $this->countBookings($filters, ['Pending'])),
+            'activeBookings' => $this->memo('activeBookings', $filters, fn () => $this->countBookings($filters, ['Confirmed', 'Reserved'])),
+            'completedBookings' => $this->memo('completedBookings', $filters, fn () => $this->countBookings($filters, ['Completed'])),
+            'totalPax' => $this->memo('totalPax', $filters, fn () => $this->bookingQuery($filters)->sum('pax') ?: 0),
         ];
+    }
+
+    private function cachedPart(string $part, array $filters, int $ttlSeconds, callable $callback): array
+    {
+        $version = Cache::get('admin.analytics.version', 1);
+        $key = 'admin.analytics.v5.' . $version . '.' . $part . '.' . $this->filterHash($filters);
+
+        return Cache::remember($key, now()->addSeconds($ttlSeconds), $callback);
+    }
+
+    private function memo(string $name, array $filters, callable $callback): mixed
+    {
+        $key = $name . ':' . $this->filterHash($filters);
+
+        if (!array_key_exists($key, $this->memo)) {
+            $this->memo[$key] = $callback();
+        }
+
+        return $this->memo[$key];
+    }
+
+    private function filterHash(array $filters): string
+    {
+        ksort($filters);
+
+        return md5(json_encode($filters));
     }
 
     private function businessSnapshot(array $filters): array

@@ -278,7 +278,7 @@ class AdminController extends Controller
         }
 
         $booking->update(['status' => $request->status]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
         $booking->refresh();
 
         try {
@@ -372,7 +372,7 @@ class AdminController extends Controller
             'discount_type'  => $discountType,
             'total_cost'     => $newTotalCost,
         ]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json([
             'message'        => 'Discount applied successfully',
@@ -393,44 +393,37 @@ class AdminController extends Controller
 
     public function getAnalyticsSummary(Request $request, AdminReportService $reports)
     {
-        return response()->json(['summary' => $reports->analytics($this->analyticsFilters($request))['summary']]);
+        return response()->json($reports->analyticsSummary($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsRevenue(Request $request, AdminReportService $reports)
     {
-        return response()->json($reports->analytics($this->analyticsFilters($request))['revenueHealth']);
+        return response()->json($reports->analyticsRevenue($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsPipeline(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'bookingPipeline' => $analytics['bookingPipeline'],
-            'upcomingWorkload' => $analytics['upcomingWorkload'],
-        ]);
+        return response()->json($reports->analyticsPipeline($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsMenuPerformance(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'packagePerformance' => $analytics['packagePerformance'],
-            'menuPerformance' => $analytics['menuPerformance'],
-        ]);
+        return response()->json($reports->analyticsMenuPerformance($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsCustomerExperience(Request $request, AdminReportService $reports)
     {
-        return response()->json($reports->analytics($this->analyticsFilters($request))['customerExperience']);
+        return response()->json($reports->analyticsCustomerExperience($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsOperations(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'operationsLoad' => $analytics['operationsLoad'],
-            'alerts' => $analytics['alerts'],
-        ]);
+        return response()->json($reports->analyticsOperations($this->analyticsFilters($request)));
+    }
+
+    public function getAnalyticsForecasts(Request $request, AdminReportService $reports)
+    {
+        return response()->json($reports->analyticsForecasts($this->analyticsFilters($request)));
     }
 
     private function analyticsFilters(Request $request): array
@@ -512,7 +505,7 @@ class AdminController extends Controller
             'description'    => $request->description ?? '',
             'is_best_seller' => $request->is_best_seller ?? false,
         ]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json($item, 201);
     }
@@ -538,7 +531,7 @@ class AdminController extends Controller
             'name', 'category', 'cost_per_head', 'price_adj',
             'image', 'description', 'is_best_seller',
         ]));
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json($item);
     }
@@ -551,7 +544,7 @@ class AdminController extends Controller
         }
 
         $item->delete();
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
         return response()->json(['message' => 'Menu item deleted successfully']);
     }
 }

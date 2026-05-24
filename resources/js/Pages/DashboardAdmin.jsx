@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
-import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
-import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import { getListData } from '../utils/apiResponses';
@@ -21,6 +19,9 @@ import {
     normalizeStatus,
     paginate,
 } from '../utils/dashboardUtils';
+
+const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
+const PaymentTermEditorModal = lazy(() => import('../Components/finance/PaymentTermEditorModal'));
 
 const paymentLabel = (type) => ({
     Reservation: 'Reservation Fee',
@@ -232,6 +233,7 @@ const DashboardAdmin = () => {
     const [reportLibraryDropActive, setReportLibraryDropActive] = useState(false);
     const [reportLoading, setReportLoading] = useState(false);
     const [reportSaving, setReportSaving] = useState(false);
+    const reportPreviewTimerRef = useRef(null);
     const [audits, setAudits] = useState([]);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
@@ -408,19 +410,19 @@ const DashboardAdmin = () => {
     };
     const pageMeta = {
         dashboard: {
-            eyebrow: 'Command overview',
-            title: 'Service Operations',
-            description: 'Revenue, demand, and booking movement from live records.',
+            eyebrow: 'Daily work',
+            title: 'Overview',
+            description: 'Priority bookings, payments, refunds, and activity that need attention.',
         },
         analytics: {
-            eyebrow: 'Decision support',
-            title: 'Business Intelligence',
-            description: 'Forecast demand, inspect sales velocity, and spot peak capacity windows.',
+            eyebrow: 'Business insight',
+            title: 'Analytics',
+            description: 'Understand revenue, bookings, menu demand, and operational workload.',
         },
         configuration: {
-            eyebrow: 'Catalog control',
-            title: 'Menu & Pricing Studio',
-            description: 'Maintain packages, event types, and menu pricing without touching code.',
+            eyebrow: 'Management',
+            title: 'Business Setup',
+            description: 'Maintain packages, event types, pricing, and operating rules.',
         },
         reports: {
             eyebrow: 'Admin reporting',
@@ -434,7 +436,7 @@ const DashboardAdmin = () => {
         },
         content: {
             eyebrow: 'Customer communications',
-            title: 'Content Studio',
+            title: 'Announcements',
             description: 'Publish customer announcements, advisories, promos, and email-ready updates.',
         },
         users: {
@@ -443,8 +445,8 @@ const DashboardAdmin = () => {
             description: 'Staff credentials, client accounts, and booking activity.',
         },
         bookings: {
-            eyebrow: 'Booking desk',
-            title: 'Event Pipeline',
+            eyebrow: 'Daily work',
+            title: 'Bookings',
             description: 'Approve requests, review payment exposure, and manage adjustments.',
         },
         refunds: {
@@ -454,10 +456,37 @@ const DashboardAdmin = () => {
         },
         audits: {
             eyebrow: 'Control history',
-            title: 'Audit Trail',
+            title: 'Audits',
             description: 'Monitor staff and admin activity across Eloquente operations.',
         },
     };
+    const adminNavGroups = [
+        {
+            label: 'Daily Work',
+            items: [
+                { id: 'dashboard', label: 'Overview' },
+                { id: 'bookings', label: 'Bookings' },
+                { id: 'refunds', label: 'Refunds' },
+            ],
+        },
+        {
+            label: 'Business Insight',
+            items: [
+                { id: 'analytics', label: 'Analytics' },
+                { id: 'reports', label: 'Reports' },
+            ],
+        },
+        {
+            label: 'Management',
+            items: [
+                { id: 'content', label: 'Announcements' },
+                { id: 'users', label: 'Users' },
+                { id: 'configuration', label: 'Business Setup' },
+                { id: 'audits', label: 'Audits' },
+                { id: 'profile', label: 'Profile' },
+            ],
+        },
+    ];
     const currentPage = pageMeta[activeTab] || pageMeta.dashboard;
     const bookingStats = useMemo(() => {
         const activeBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'confirmed');
@@ -604,6 +633,12 @@ const DashboardAdmin = () => {
         idleAfter: 180000,
         refresh: refreshCurrentTab,
     });
+
+    useEffect(() => () => {
+        if (reportPreviewTimerRef.current) {
+            clearTimeout(reportPreviewTimerRef.current);
+        }
+    }, []);
 
     useEffect(() => {
         setMenuItemPage(1);
@@ -952,11 +987,42 @@ const DashboardAdmin = () => {
         if (!silent) setAnalyticsLoading(true);
         try {
             const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''));
-            const path = `/api/admin/analytics${params.toString() ? `?${params.toString()}` : ''}`;
-            const res = await fetch(path);
-            if (!res.ok) throw new Error('Analytics request failed');
-            const data = await res.json();
-            setAnalytics(data);
+            const query = params.toString() ? `?${params.toString()}` : '';
+            const fetchPart = async (path) => {
+                const res = await fetch(`${path}${query}`);
+                if (!res.ok) throw new Error(`Analytics request failed: ${path}`);
+                return res.json();
+            };
+            const [summary, revenueHealth, pipeline, menu, customerExperience, operations, forecasts] = await Promise.all([
+                fetchPart('/api/admin/analytics/summary'),
+                fetchPart('/api/admin/analytics/revenue'),
+                fetchPart('/api/admin/analytics/pipeline'),
+                fetchPart('/api/admin/analytics/menu-performance'),
+                fetchPart('/api/admin/analytics/customer-experience'),
+                fetchPart('/api/admin/analytics/operations'),
+                fetchPart('/api/admin/analytics/forecasts'),
+            ]);
+
+            setAnalytics({
+                summary: summary.summary || {},
+                businessSnapshot: summary.businessSnapshot || {},
+                revenueTrends: revenueHealth.settledRevenueOverTime || [],
+                revenueHealth,
+                paymentAging: revenueHealth.paymentAging || [],
+                bookingPipeline: pipeline.bookingPipeline || [],
+                upcomingWorkload: pipeline.upcomingWorkload || [],
+                packagePerformance: menu.packagePerformance || [],
+                menuPerformance: menu.menuPerformance || [],
+                customerExperience,
+                operationsLoad: operations.operationsLoad || [],
+                alerts: operations.alerts || [],
+                operationalAlerts: operations.alerts || [],
+                revenueForecast: forecasts.revenueForecast || {},
+                paxDemandProjection: forecasts.paxDemandProjection || {},
+                projectedPaxDemand: forecasts.projectedPaxDemand || [],
+                topSellers: menu.packagePerformance || [],
+                peakSeasons: operations.operationsLoad || [],
+            });
         } catch (error) {
             console.error(error);
         } finally {
@@ -1001,6 +1067,16 @@ const DashboardAdmin = () => {
         } finally {
             if (!silent) setReportLoading(false);
         }
+    };
+
+    const scheduleReportPreview = ({ builder = reportBuilder, delay = 350 } = {}) => {
+        if (reportPreviewTimerRef.current) {
+            clearTimeout(reportPreviewTimerRef.current);
+        }
+
+        reportPreviewTimerRef.current = setTimeout(() => {
+            fetchReportPreview({ silent: true, builder });
+        }, delay);
     };
 
     const previewReport = async () => {
@@ -1110,7 +1186,7 @@ const DashboardAdmin = () => {
         };
         setReportBuilder(nextBuilder);
         setReportView('build');
-        fetchReportPreview({ builder: nextBuilder });
+        scheduleReportPreview({ builder: nextBuilder });
     };
 
     const reorderReportWidgets = (fromIndex, toIndex) => {
@@ -1121,7 +1197,7 @@ const DashboardAdmin = () => {
         next.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
         const nextBuilder = { ...reportBuilder, widgets: next };
         setReportBuilder(nextBuilder);
-        fetchReportPreview({ silent: true, builder: nextBuilder });
+        scheduleReportPreview({ builder: nextBuilder });
     };
 
     const addReportWidgetAt = (widgetId, index = reportBuilder.widgets.length) => {
@@ -1131,7 +1207,7 @@ const DashboardAdmin = () => {
         const nextBuilder = { ...reportBuilder, widgets: next };
         setReportBuilder(nextBuilder);
         setReportView('build');
-        fetchReportPreview({ silent: true, builder: nextBuilder });
+        scheduleReportPreview({ builder: nextBuilder });
     };
 
     const handleReportDrop = (index) => {
@@ -1152,7 +1228,7 @@ const DashboardAdmin = () => {
             widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== reportDraggedIndex),
         };
         setReportBuilder(nextBuilder);
-        fetchReportPreview({ silent: true, builder: nextBuilder });
+        scheduleReportPreview({ builder: nextBuilder });
         setReportDraggedIndex(null);
         setReportDraggedWidgetId(null);
         setReportDropIndex(null);
@@ -1487,35 +1563,28 @@ const DashboardAdmin = () => {
                         <div>
                             <p className="admin-kicker">Eloquente Catering</p>
                             <h1 className="text-2xl font-black font-display tracking-wide text-[#720101]">Admin Console</h1>
-                            <p className="mt-1 text-xs font-bold uppercase text-[#5c4b45]">Operations workspace</p>
+                            <p className="mt-1 text-xs font-bold uppercase text-[#5c4b45]">Owner operations</p>
                         </div>
                     </div>
                 </div>
 
-                <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-2">
-                        {[
-                            { id: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Dashboard' },
-                            { id: 'analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'Analytics' },
-                            { id: 'configuration', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM12 15a3 3 0 100-6 3 3 0 000 6z', label: 'Configuration' },
-                            { id: 'reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', label: 'Reports' },
-                            { id: 'content', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v8a2 2 0 01-2 2zM14 4v6h6M8 13h8M8 17h5', label: 'Content' },
-                            { id: 'users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', label: 'Users' },
-                            { id: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Bookings' },
-                            { id: 'refunds', icon: 'M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 12H6L5 9zm7 4v4m-3-2h6', label: 'Refunds' },
-                            { id: 'audits', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z', label: 'Audits' },
-                            { id: 'profile', icon: 'M5.121 17.804A9 9 0 1118.88 17.8M15 11a3 3 0 11-6 0 3 3 0 016 0z', label: 'Profile' },
-                        ].map(item => (
-                            <button
-                                key={item.id}
-                                onClick={() => setActiveTab(item.id)}
-                                className={`admin-nav-item w-full flex items-center gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
-                            >
-                                <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                                </svg>
-                                <span className="font-medium text-sm">{item.label}</span>
-                            </button>
-                        ))}
+                <nav className="flex-1 overflow-y-auto px-4 py-3">
+                    {adminNavGroups.map((group) => (
+                        <div key={group.label} className="staff-nav-group">
+                            <p className="staff-nav-section-label">{group.label}</p>
+                            <div className="mt-2 space-y-1">
+                                {group.items.map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setActiveTab(item.id)}
+                                        className={`admin-nav-item w-full flex items-center justify-between gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
+                                    >
+                                        <span className="font-bold text-sm">{item.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
                 </nav>
 
                 <div className="border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
@@ -1525,7 +1594,7 @@ const DashboardAdmin = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-[#241612] truncate">{user?.username}</p>
-                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Top Admin</p>
+                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Administrator</p>
                         </div>
                     </div>
                     <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#720101] hover:bg-[#5f0101] text-white rounded-lg transition-colors text-sm font-bold">
@@ -1552,9 +1621,9 @@ const DashboardAdmin = () => {
                                 <section className="admin-panel overflow-hidden">
                                     <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 xl:flex-row xl:items-center xl:justify-between">
                                         <div>
-                                            <p className="admin-kicker">Command overview</p>
-                                            <h3 className="mt-1 text-2xl font-black text-gray-950">Overall Business & System Performance</h3>
-                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A one-view pulse of revenue, demand, collections, bookings, alerts, and sales mix from live records.</p>
+                                            <p className="admin-kicker">Daily work</p>
+                                            <h3 className="mt-1 text-2xl font-black text-gray-950">What needs attention today</h3>
+                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A focused view of bookings, collections, refunds, and activity that may need staff action.</p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             {renderDashboardFilterButton('dashboardSnapshot', businessSnapshot.label || 'Timeframe')}
@@ -2934,7 +3003,7 @@ const DashboardAdmin = () => {
                                                         onClick={() => {
                                                             const nextBuilder = { ...reportBuilder, widgets: [...reportBuilder.widgets, widget.id] };
                                                             setReportBuilder(nextBuilder);
-                                                            fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                            scheduleReportPreview({ builder: nextBuilder });
                                                         }}
                                                         className={`admin-report-widget ${selected ? 'admin-report-widget-selected' : ''}`}
                                                     >
@@ -3029,7 +3098,7 @@ const DashboardAdmin = () => {
                                                                     onClick={() => {
                                                                         const nextBuilder = { ...reportBuilder, widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== index) };
                                                                         setReportBuilder(nextBuilder);
-                                                                        fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                                        scheduleReportPreview({ builder: nextBuilder });
                                                                     }}
                                                                     className="admin-mini-button admin-mini-button-danger"
                                                                 >
@@ -3103,149 +3172,10 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
-                    {
-                        activeTab === 'reports_legacy' && (
-                            <div className="animate-fadeIn space-y-6">
-                                <div className="admin-panel p-6">
-                                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Saved template</label>
-                                            <select value={reportTemplateId} onChange={(e) => loadReportTemplate(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100">
-                                                <option value="">New custom report</option>
-                                                {reportTemplates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Report name</label>
-                                            <input value={reportBuilder.name} onChange={(e) => setReportBuilder({ ...reportBuilder, name: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
-                                        </div>
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Description</label>
-                                            <input value={reportBuilder.description} onChange={(e) => setReportBuilder({ ...reportBuilder, description: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
-                                        </div>
-                                    </div>
-                                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
-                                        {[
-                                            ['date_from', 'From', 'date'],
-                                            ['date_to', 'To', 'date'],
-                                            ['booking_status', 'Booking status', 'text'],
-                                            ['payment_status', 'Payment status', 'text'],
-                                            ['city', 'City', 'text'],
-                                        ].map(([key, label, type]) => (
-                                            <label key={key} className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                                {label}
-                                                <input type={type} value={reportBuilder.filters[key] || ''} onChange={(e) => updateReportFilter(key, e.target.value)} placeholder={type === 'text' ? 'All' : undefined} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100" />
-                                            </label>
-                                        ))}
-                                    </div>
-                                    <div className="mt-5 flex flex-wrap gap-3">
-                                        <button onClick={() => fetchReportPreview()} disabled={reportLoading} className="admin-button-primary px-5 py-2.5 text-sm font-black">{reportLoading ? 'Building...' : 'Preview Report'}</button>
-                                        <button onClick={saveReportTemplate} disabled={reportSaving} className="admin-button-secondary px-5 py-2.5 text-sm font-black">{reportSaving ? 'Saving...' : 'Save Template'}</button>
-                                        <button onClick={runReportExport} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download Spreadsheet</button>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-                                    <aside className="admin-panel p-5 xl:col-span-3">
-                                        <h3 className="text-lg font-black text-gray-950">Widget Library</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Add only the blocks the admin wants to see.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportWidgets.map(widget => {
-                                                const selected = reportBuilder.widgets.includes(widget.id);
-                                                return (
-                                                    <button
-                                                        key={widget.id}
-                                                        type="button"
-                                                        disabled={selected}
-                                                        onClick={() => {
-                                                            const nextBuilder = { ...reportBuilder, widgets: [...reportBuilder.widgets, widget.id] };
-                                                            setReportBuilder(nextBuilder);
-                                                            fetchReportPreview({ silent: true, builder: nextBuilder });
-                                                        }}
-                                                        className={`w-full rounded-2xl border p-4 text-left transition ${selected ? 'border-emerald-100 bg-emerald-50 opacity-75' : 'border-gray-100 bg-white hover:border-amber-200 hover:bg-amber-50'}`}
-                                                    >
-                                                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">{widget.category}</span>
-                                                        <span className="mt-1 block text-sm font-black text-gray-950">{widget.name}</span>
-                                                        <span className="mt-1 block text-xs font-semibold text-gray-500">{widget.description}</span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </aside>
-
-                                    <section className="admin-panel p-5 xl:col-span-5">
-                                        <h3 className="text-lg font-black text-gray-950">Report Layout</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Reorder the report blocks before saving or exporting.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportBuilder.widgets.map((id, index) => {
-                                                const meta = reportWidgets.find(widget => widget.id === id) || { name: id, category: 'Custom' };
-                                                return (
-                                                    <div key={`${id}-${index}`} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                                                        <div className="flex items-start justify-between gap-4">
-                                                            <div>
-                                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Block {index + 1} · {meta.category}</p>
-                                                                <p className="mt-1 font-black text-gray-950">{meta.name}</p>
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                <button onClick={() => moveReportWidget(index, -1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Up</button>
-                                                                <button onClick={() => moveReportWidget(index, 1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Down</button>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const nextBuilder = { ...reportBuilder, widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== index) };
-                                                                        setReportBuilder(nextBuilder);
-                                                                        fetchReportPreview({ silent: true, builder: nextBuilder });
-                                                                    }}
-                                                                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                            {!reportBuilder.widgets.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Choose at least one widget to build a report.</div>}
-                                        </div>
-                                    </section>
-
-                                    <section className="admin-panel p-5 xl:col-span-4">
-                                        <h3 className="text-lg font-black text-gray-950">Live Preview</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Previewed from the latest matching activity.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportPreview.map(widget => {
-                                                const meta = reportWidgets.find(item => item.id === widget.id) || { name: widget.id };
-                                                const rows = widget.data?.rows || [];
-                                                return (
-                                                    <div key={widget.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                        <div className="flex items-start justify-between gap-3">
-                                                            <div>
-                                                                <p className="font-black text-gray-950">{meta.name}</p>
-                                                                <p className="mt-1 text-xs font-semibold text-gray-500">{widget.data?.action || summarizeReportWidget(widget)}</p>
-                                                            </div>
-                                                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-700 shadow-sm">{summarizeReportWidget(widget)}</span>
-                                                        </div>
-                                                        {rows.length > 0 && (
-                                                            <div className="mt-4 max-h-48 overflow-y-auto rounded-xl bg-white">
-                                                                {rows.slice(0, 8).map((row, i) => (
-                                                                    <div key={i} className="flex items-center justify-between gap-3 border-b border-gray-50 px-3 py-2 last:border-b-0">
-                                                                        <span className="text-xs font-bold text-gray-700">{row.label || row.client || row.date || 'Row'}</span>
-                                                                        <span className="text-xs font-black text-gray-950">{row.total ? formatCurrency(row.total) : row.value ? formatCurrency(row.value) : row.revenue ? formatCurrency(row.revenue) : row.count ?? row.selections ?? row.pax ?? ''}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                            {!reportPreview.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Preview your report to see results here.</div>}
-                                        </div>
-                                    </section>
-                                </div>
-                            </div>
-                        )
-                    }
                     {activeTab === 'content' && (
-                        <AnnouncementManager variant="admin" user={user} />
+                        <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
+                            <AnnouncementManager variant="admin" user={user} />
+                        </Suspense>
                     )}
                     {activeTab === 'profile' && (
                         <div className="animate-fadeIn admin-profile-page">
@@ -3263,7 +3193,7 @@ const DashboardAdmin = () => {
                             <form onSubmit={submitProfile} className="admin-profile-form">
                                 <div>
                                     <p className="admin-kicker">Account details</p>
-                                    <h3 className="mt-1 text-xl font-black text-gray-950">Profile Configuration</h3>
+                                    <h3 className="mt-1 text-xl font-black text-gray-950">Profile Settings</h3>
                                     <p className="mt-1 text-sm font-semibold text-gray-500">Keep the admin contact information accurate for system records.</p>
                                 </div>
 
@@ -4073,18 +4003,22 @@ const DashboardAdmin = () => {
                 )
             }
 
-            <PaymentTermEditorModal
-                isOpen={editPaymentModal.isOpen}
-                onClose={() => setEditPaymentModal({ isOpen: false, payment: null, booking: null })}
-                booking={editPaymentModal.booking}
-                payment={editPaymentModal.payment}
-                onSuccess={() => {
-                    setEditPaymentModal({ isOpen: false, payment: null, booking: null });
-                    setEventDetailsModal({ open: false, data: null });
-                    showToast('Payment terms updated');
-                    fetchBookings();
-                }}
-            />
+            {editPaymentModal.isOpen && (
+                <Suspense fallback={null}>
+                    <PaymentTermEditorModal
+                        isOpen={editPaymentModal.isOpen}
+                        onClose={() => setEditPaymentModal({ isOpen: false, payment: null, booking: null })}
+                        booking={editPaymentModal.booking}
+                        payment={editPaymentModal.payment}
+                        onSuccess={() => {
+                            setEditPaymentModal({ isOpen: false, payment: null, booking: null });
+                            setEventDetailsModal({ open: false, data: null });
+                            showToast('Payment terms updated');
+                            fetchBookings();
+                        }}
+                    />
+                </Suspense>
+            )}
 
             {/* Add New Menu Item Modal */}
             {menuItemModal.open && (

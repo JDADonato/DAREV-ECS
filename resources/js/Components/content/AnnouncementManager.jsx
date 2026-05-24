@@ -393,7 +393,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                     <div className="p-5 lg:p-6">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <p className="marketing-kicker">Content Studio</p>
+                                <p className="marketing-kicker">Announcements</p>
                                 <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">
                                     Draft, schedule, publish, and email customer announcements from one place.
                                 </p>

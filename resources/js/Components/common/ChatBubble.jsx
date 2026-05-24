@@ -12,7 +12,11 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
  *
  * Preserves existing floating bubble UI design and Tailwind classes.
  */
+const CHAT_CACHE_TTL_MS = 60000;
+const BOOKING_CACHE_TTL_MS = 180000;
+
 const ChatBubble = ({ user }) => {
+    const hasRealtime = typeof window !== 'undefined' && Boolean(window.Echo);
     const [isOpen, setIsOpen] = useState(false);
     const [conversation, setConversation] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -23,13 +27,21 @@ const ChatBubble = ({ user }) => {
     const [showBookingPicker, setShowBookingPicker] = useState(false);
     const [staffTyping, setStaffTyping] = useState(false);
     const [loadingConv, setLoadingConv] = useState(false);
+    const [hasOlderMessages, setHasOlderMessages] = useState(false);
+    const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
     const messagesEndRef = useRef(null);
     const typingTimeoutRef = useRef(null);
     const echoChannelRef = useRef(null);
     const conversationRef = useRef(null);
+    const messagesRef = useRef([]);
+    const lastConversationLoadedAtRef = useRef(0);
+    const lastMessagesLoadedAtRef = useRef(0);
+    const messagesLoadedForRef = useRef(null);
+    const lastBookingsLoadedAtRef = useRef(0);
 
     // Keep ref in sync
     useEffect(() => { conversationRef.current = conversation; }, [conversation]);
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
 
     // ─── Fetch Data ───
 
@@ -40,12 +52,20 @@ const ChatBubble = ({ user }) => {
         } catch (e) { /* silent */ }
     }, []);
 
-    const fetchConversation = useCallback(async () => {
+    const fetchConversation = useCallback(async ({ force = false } = {}) => {
+        const cachedConversation = conversationRef.current;
+        const isFresh = Date.now() - lastConversationLoadedAtRef.current < CHAT_CACHE_TTL_MS;
+
+        if (!force && cachedConversation && isFresh) {
+            return cachedConversation;
+        }
+
         try {
-            const res = await fetch('/api/chat/conversations');
+            const res = await fetch('/api/chat/conversations?limit=1');
             if (res.ok) {
                 const d = await res.json();
                 const convList = d.conversations || [];
+                lastConversationLoadedAtRef.current = Date.now();
                 if (convList.length > 0) {
                     setConversation(convList[0]); // Client has one active conversation
                     return convList[0];
@@ -55,23 +75,71 @@ const ChatBubble = ({ user }) => {
         return null;
     }, []);
 
-    const fetchMessages = useCallback(async (convId) => {
+    const normalizeMessagesResponse = (payload) => {
+        if (Array.isArray(payload)) {
+            return { data: payload, pagination: { has_more: false } };
+        }
+
+        return {
+            data: Array.isArray(payload?.data) ? payload.data : [],
+            pagination: payload?.pagination || { has_more: false },
+        };
+    };
+
+    const fetchMessages = useCallback(async (convId, { force = false } = {}) => {
+        const isSameConversation = messagesLoadedForRef.current === convId;
+        const isFresh = Date.now() - lastMessagesLoadedAtRef.current < CHAT_CACHE_TTL_MS;
+
+        if (!force && isSameConversation && messagesRef.current.length > 0 && isFresh) {
+            return messagesRef.current;
+        }
+
         try {
-            const res = await fetch(`/api/chat/conversations/${convId}/messages`);
+            const res = await fetch(`/api/chat/conversations/${convId}/messages?limit=30`);
             if (res.ok) {
-                const d = await res.json();
-                setMessages(d);
+                const d = normalizeMessagesResponse(await res.json());
+                setMessages(d.data);
+                setHasOlderMessages(Boolean(d.pagination?.has_more));
+                messagesLoadedForRef.current = convId;
+                lastMessagesLoadedAtRef.current = Date.now();
                 fetchUnreadCount();
+                return d.data;
             }
         } catch (e) { /* silent */ }
+        return [];
     }, [fetchUnreadCount]);
 
-    const fetchBookings = async () => {
+    const loadOlderMessages = useCallback(async () => {
+        if (!conversation?.id || !messages.length || loadingOlderMessages) return;
+        setLoadingOlderMessages(true);
+
+        try {
+            const res = await fetch(`/api/chat/conversations/${conversation.id}/messages?limit=30&before_id=${messages[0].id}`);
+            if (res.ok) {
+                const d = normalizeMessagesResponse(await res.json());
+                setMessages(prev => [...d.data, ...prev]);
+                setHasOlderMessages(Boolean(d.pagination?.has_more));
+            }
+        } catch (e) { /* silent */ }
+        finally { setLoadingOlderMessages(false); }
+    }, [conversation?.id, messages, loadingOlderMessages]);
+
+    const fetchBookings = useCallback(async ({ force = false } = {}) => {
+        if (!force && bookings.length > 0 && Date.now() - lastBookingsLoadedAtRef.current < BOOKING_CACHE_TTL_MS) {
+            return bookings;
+        }
+
         try {
             const res = await fetch('/api/chat/my-bookings');
-            if (res.ok) setBookings(await res.json());
+            if (res.ok) {
+                const data = await res.json();
+                setBookings(data);
+                lastBookingsLoadedAtRef.current = Date.now();
+                return data;
+            }
         } catch (e) { /* silent */ }
-    };
+        return [];
+    }, [bookings]);
 
     // ─── Unread Count Poll (global, even when closed) ───
 
@@ -82,7 +150,7 @@ const ChatBubble = ({ user }) => {
 
     useSmartRefresh({
         enabled: Boolean(user),
-        interval: isOpen ? 15000 : 30000,
+        interval: hasRealtime ? (isOpen ? 60000 : 120000) : (isOpen ? 15000 : 30000),
         idleAfter: 180000,
         refresh: fetchUnreadCount,
     });
@@ -148,13 +216,26 @@ const ChatBubble = ({ user }) => {
 
     const handleOpen = async () => {
         setIsOpen(true);
-        setLoadingConv(true);
         setShowBookingPicker(false);
+
+        const cachedConversation = conversationRef.current;
+        const hasCachedMessages = messagesRef.current.length > 0;
+        const messagesAreFresh = Date.now() - lastMessagesLoadedAtRef.current < CHAT_CACHE_TTL_MS;
+
         fetchBookings();
 
-        const conv = await fetchConversation();
+        if (cachedConversation && hasCachedMessages) {
+            setLoadingConv(false);
+            if (!messagesAreFresh) {
+                fetchMessages(cachedConversation.id, { force: true });
+            }
+            return;
+        }
+
+        setLoadingConv(true);
+        const conv = await fetchConversation({ force: !cachedConversation });
         if (conv) {
-            await fetchMessages(conv.id);
+            await fetchMessages(conv.id, { force: true });
         }
         setLoadingConv(false);
     };
@@ -281,45 +362,48 @@ const ChatBubble = ({ user }) => {
 
             {/* Chat Panel */}
             {isOpen && (
-                <div className="fixed bottom-5 right-5 w-[calc(100%-2rem)] max-w-[370px] h-[min(520px,calc(100vh-2.5rem))] bg-white rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden border border-gray-200" style={{ animation: 'fadeIn .25s ease' }}>
+                <div className="fixed bottom-5 right-5 z-50 flex h-[min(560px,calc(100vh-2.5rem))] w-[calc(100%-2rem)] max-w-[390px] flex-col overflow-hidden rounded-[22px] border border-[#ead8cc] bg-[#fffaf3] shadow-xl shadow-slate-950/20" style={{ animation: 'fadeIn .2s ease' }}>
                     {/* Header */}
-                    <div className="px-4 py-4 flex items-center justify-between flex-shrink-0 text-white border-b border-[#5a0101]" style={{ background: 'linear-gradient(90deg, #720101 0%, #3a0101 100%)' }}>
-                        <div className="flex items-center gap-2">
-                            <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    <div className="flex flex-shrink-0 items-center justify-between border-b border-[#ead8cc] bg-white px-4 py-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fff4df] text-[#720101]">
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                            </div>
                             <div>
-                                <h3 className="text-sm font-bold" style={{ color: '#ffffff' }}>Eloquente Support</h3>
-                                <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.72)' }}>
+                                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#9f6500]">Support</p>
+                                <h3 className="text-base font-black leading-tight text-[#720101]">Eloquente Catering</h3>
+                                <p className="text-xs font-semibold text-slate-500">
                                     {conversation?.staff_name
-                                        ? `Chatting with ${conversation.staff_name}`
+                                        ? `Currently with ${conversation.staff_name}`
                                         : (conversation ? 'Waiting for staff...' : 'Send a message to get started')}
                                 </p>
                             </div>
                         </div>
-                        <button onClick={handleClose} className="text-white/80 hover:text-white p-1.5 hover:bg-white/10 rounded transition-colors" aria-label="Minimize chat">
+                        <button onClick={handleClose} className="rounded-full border border-[#ead8cc] bg-[#fffaf3] p-2 text-[#720101] transition-colors hover:bg-[#fff4df]" aria-label="Minimize chat">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M20 12H4" /></svg>
                         </button>
                     </div>
 
                     {/* Messages Body */}
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto bg-[#fffaf3]">
                         {loadingConv ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="text-center">
-                                    <div className="animate-spin w-6 h-6 border-2 border-[#720101] border-t-transparent rounded-full mx-auto mb-2"></div>
-                                    <p className="text-xs text-gray-400">Loading...</p>
+                                    <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[#720101] border-t-transparent"></div>
+                                    <p className="text-xs font-bold text-slate-500">Opening chat...</p>
                                 </div>
                             </div>
                         ) : (
                             <div className="flex flex-col h-full">
-                                <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: 'calc(520px - 130px)' }}>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: 'calc(560px - 142px)' }}>
                                     {/* Status Indicator */}
                                     {!conversation && (
                                         <div className="text-center py-6">
                                             <div className="w-16 h-16 bg-[#720101]/5 rounded-full flex items-center justify-center mx-auto mb-3">
                                                 <svg className="w-8 h-8 text-[#720101]/30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                                             </div>
-                                            <p className="text-sm font-medium text-gray-600">How can we help you?</p>
-                                            <p className="text-xs text-gray-400 mt-1">Send a message and our team will respond shortly</p>
+                                            <p className="text-sm font-black text-slate-800">How can we help?</p>
+                                            <p className="mt-1 text-xs font-semibold text-slate-500">Send a message and our team will respond shortly.</p>
                                         </div>
                                     )}
 
@@ -330,16 +414,29 @@ const ChatBubble = ({ user }) => {
                                         </div>
                                     )}
 
+                                    {conversation && hasOlderMessages && (
+                                        <div className="flex justify-center">
+                                            <button
+                                                type="button"
+                                                onClick={loadOlderMessages}
+                                                disabled={loadingOlderMessages}
+                                                className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-bold text-[#720101] transition-colors hover:bg-[#fff8ec] disabled:text-gray-400"
+                                            >
+                                                {loadingOlderMessages ? 'Loading...' : 'Load earlier messages'}
+                                            </button>
+                                        </div>
+                                    )}
+
                                     {messages.map(msg => (
                                         <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${msg.is_mine ? 'bg-[#720101] text-white rounded-br-md' : 'bg-gray-100 text-gray-800 rounded-bl-md'}`}>
+                                            <div className={`max-w-[82%] rounded-2xl border px-3.5 py-2.5 ${msg.is_mine ? 'rounded-br-md border-[#720101] bg-[#720101] text-white' : 'rounded-bl-md border-[#ead8cc] bg-white text-slate-800'}`}>
                                                 {!msg.is_mine && msg.sender_name && (
                                                     <p className="text-[10px] font-bold text-[#720101] mb-0.5">{msg.sender_name}</p>
                                                 )}
                                                 {isBookingCard(msg.message) ? renderBookingCard(msg.message, msg.is_mine) : (
                                                     <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.message}</p>
                                                 )}
-                                                <p className={`text-[10px] mt-1 ${msg.is_mine ? 'text-white/50' : 'text-gray-400'}`}>{msg.time}</p>
+                                                <p className={`mt-1 text-[10px] font-semibold ${msg.is_mine ? 'text-white/60' : 'text-slate-400'}`}>{msg.time}</p>
                                             </div>
                                         </div>
                                     ))}
@@ -395,20 +492,20 @@ const ChatBubble = ({ user }) => {
                     </div>
 
                     {/* Input bar — always visible (no staff picker needed) */}
-                    <form onSubmit={handleSend} className="border-t border-gray-200 px-3 py-2 flex items-center gap-2 bg-white flex-shrink-0">
+                    <form onSubmit={handleSend} className="flex flex-shrink-0 items-center gap-2 border-t border-[#ead8cc] bg-white px-3 py-3">
                         {bookings.length > 0 && (
                             <button type="button" onClick={() => { fetchBookings(); setShowBookingPicker(!showBookingPicker); }}
                                 title="Share booking details"
-                                className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${showBookingPicker ? 'bg-[#720101] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${showBookingPicker ? 'border-[#720101] bg-[#720101] text-white' : 'border-[#ead8cc] bg-[#fffaf3] text-slate-500 hover:bg-[#fff4df]'}`}>
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             </button>
                         )}
                         <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
                             placeholder="Type a message..."
-                            className="flex-1 text-sm px-3 py-2 rounded-full bg-gray-100 focus:bg-white focus:ring-2 focus:ring-[#720101]/20 border border-gray-200 focus:border-[#720101]/30 outline-none transition-all"
+                            className="flex-1 rounded-full border border-[#ead8cc] bg-[#fffaf3] px-3 py-2.5 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#720101]/40 focus:bg-white focus:ring-2 focus:ring-[#720101]/10"
                             maxLength={2000} autoFocus />
                         <button type="submit" disabled={!newMessage.trim() || sending}
-                            className="w-9 h-9 bg-[#720101] hover:bg-[#5a0101] disabled:bg-gray-300 text-white rounded-full flex items-center justify-center transition-colors flex-shrink-0">
+                            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[#720101] text-white transition-colors hover:bg-[#5a0101] disabled:bg-slate-300">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                         </button>
                     </form>

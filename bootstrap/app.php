@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             \App\Http\Middleware\SetPostgresSessionContext::class,
+            \App\Http\Middleware\RecordPerformanceTiming::class,
             \App\Http\Middleware\RecordStaffAuditLog::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);

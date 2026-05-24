@@ -16,6 +16,7 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
  */
 const StaffMessaging = () => {
     const { user } = useAuth();
+    const hasRealtime = typeof window !== 'undefined' && Boolean(window.Echo);
     const [sidebarTab, setSidebarTab] = useState('unassigned'); // 'unassigned' | 'my-chats'
     const [unassigned, setUnassigned] = useState([]);
     const [myChats, setMyChats] = useState([]);
@@ -28,6 +29,8 @@ const StaffMessaging = () => {
     const [availableStaff, setAvailableStaff] = useState([]);
     const [showTransfer, setShowTransfer] = useState(false);
     const [transferring, setTransferring] = useState(false);
+    const [hasOlderMessages, setHasOlderMessages] = useState(false);
+    const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
     const messagesEndRef = useRef(null);
     const echoChannelsRef = useRef({});
     const selectedConvRef = useRef(null);
@@ -49,12 +52,42 @@ const StaffMessaging = () => {
         finally { setLoading(false); }
     }, []);
 
+    const normalizeMessagesResponse = (payload) => {
+        if (Array.isArray(payload)) {
+            return { data: payload, pagination: { has_more: false } };
+        }
+
+        return {
+            data: Array.isArray(payload?.data) ? payload.data : [],
+            pagination: payload?.pagination || { has_more: false },
+        };
+    };
+
     const fetchMessages = useCallback(async (conversationId) => {
         try {
-            const res = await fetch(`/api/chat/conversations/${conversationId}/messages`);
-            if (res.ok) { const d = await res.json(); setMessages(d); }
+            const res = await fetch(`/api/chat/conversations/${conversationId}/messages?limit=30`);
+            if (res.ok) {
+                const d = normalizeMessagesResponse(await res.json());
+                setMessages(d.data);
+                setHasOlderMessages(Boolean(d.pagination?.has_more));
+            }
         } catch (e) { /* silent */ }
     }, []);
+
+    const loadOlderMessages = useCallback(async () => {
+        if (!selectedConv?.id || !messages.length || loadingOlderMessages) return;
+        setLoadingOlderMessages(true);
+
+        try {
+            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/messages?limit=30&before_id=${messages[0].id}`);
+            if (res.ok) {
+                const d = normalizeMessagesResponse(await res.json());
+                setMessages(prev => [...d.data, ...prev]);
+                setHasOlderMessages(Boolean(d.pagination?.has_more));
+            }
+        } catch (e) { /* silent */ }
+        finally { setLoadingOlderMessages(false); }
+    }, [selectedConv?.id, messages, loadingOlderMessages]);
 
     // ─── Initial Load + Echo Setup ───
 
@@ -81,7 +114,7 @@ const StaffMessaging = () => {
 
     useSmartRefresh({
         enabled: true,
-        interval: 15000,
+        interval: hasRealtime ? 60000 : 15000,
         idleAfter: 180000,
         refresh: fetchConversations,
     });
@@ -133,6 +166,7 @@ const StaffMessaging = () => {
 
     const selectConversation = (conv) => {
         setSelectedConv(conv);
+        setHasOlderMessages(false);
         fetchMessages(conv.id);
     };
 
@@ -391,6 +425,19 @@ const StaffMessaging = () => {
 
                             {/* Messages */}
                             <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-gray-50/30">
+                                {hasOlderMessages && (
+                                    <div className="flex justify-center">
+                                        <button
+                                            type="button"
+                                            onClick={loadOlderMessages}
+                                            disabled={loadingOlderMessages}
+                                            className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold text-primary-700 transition-colors hover:bg-primary-50 disabled:text-gray-400"
+                                        >
+                                            {loadingOlderMessages ? 'Loading...' : 'Load earlier messages'}
+                                        </button>
+                                    </div>
+                                )}
+
                                 {messages.length === 0 ? (
                                     <div className="text-center py-12">
                                         <p className="text-sm text-gray-400">No messages yet</p>

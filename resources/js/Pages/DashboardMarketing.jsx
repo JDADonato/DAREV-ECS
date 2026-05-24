@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { router } from '@inertiajs/react';
-import StaffMessaging from '../Components/common/StaffMessaging';
 import NotificationBell from '../Components/common/NotificationBell';
 import FlashToast from '../Components/common/FlashToast';
-import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
     formatDate,
@@ -19,6 +17,9 @@ import {
     getSelectedDishes,
     titleCase,
 } from '../utils/dashboardUtils';
+
+const StaffMessaging = lazy(() => import('../Components/common/StaffMessaging'));
+const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
 import { getListData } from '../utils/apiResponses';
 
 const PACKAGE_CATEGORY_OPTIONS = [
@@ -433,10 +434,10 @@ const DashboardMarketing = () => {
 
     const tabMeta = {
         calendar: 'Calendar',
-        inquiries: 'Inquiries',
-        documents: 'Documents',
-        content: 'Content',
-        settings: 'Catalog',
+        inquiries: 'Booking Review',
+        documents: 'Event Documents',
+        content: 'Announcements',
+        settings: 'Menu And Packages',
         messages: 'Messages',
     };
 
@@ -1131,7 +1132,7 @@ const DashboardMarketing = () => {
             <>
             <div className="marketing-panel overflow-hidden">
                 <div className="border-b border-amber-100/80 bg-[#fffaf3] px-6 pt-5">
-                    <p className="marketing-kicker">Client-Facing Catalog</p>
+                    <p className="marketing-kicker">Menu And Packages</p>
                     <h2 className="mt-1 text-xl font-bold text-slate-950">Packages, event types, and dish pricing</h2>
                     <nav className="flex gap-2 overflow-x-auto">
                         {[
@@ -1425,7 +1426,7 @@ const DashboardMarketing = () => {
             <div className="marketing-panel w-full max-w-md p-8 text-center">
                 <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-amber-100 border-t-primary-700"></div>
                 <p className="marketing-kicker">Marketing Workspace</p>
-                <h1 className="mt-2 text-2xl font-bold text-slate-950">Loading campaign operations</h1>
+                <h1 className="mt-2 text-2xl font-bold text-slate-950">Loading marketing workspace</h1>
                 <p className="mt-2 text-sm font-medium text-slate-500">Pulling event schedules, lead queues, and catalog controls.</p>
             </div>
         </div>
@@ -1438,10 +1439,10 @@ const DashboardMarketing = () => {
                     <div className="flex min-h-16 flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
                         <div>
                             <p className="marketing-kicker">Eloquente</p>
-                            <h1 className="text-xl font-bold font-display text-slate-950">Marketing Executive Dashboard</h1>
+                            <h1 className="text-xl font-bold font-display text-slate-950">Marketing Workspace</h1>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
-                            <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-800">Live workspace</div>
+                            <div className="staff-role-chip">Marketing team</div>
                             <NotificationBell variant="dark" />
                             <span className="text-sm font-bold text-slate-700">{user?.username}</span>
                             <button onClick={handleLogout} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 hover:text-slate-900">Logout</button>
@@ -1452,8 +1453,8 @@ const DashboardMarketing = () => {
             <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
                 <section className="marketing-command mb-5">
                     <div>
-                        <p className="marketing-kicker">Marketing Operations</p>
-                        <h2 className="mt-1 text-2xl font-bold text-slate-950">Event pipeline</h2>
+                        <p className="marketing-kicker">Today</p>
+                        <h2 className="mt-1 text-2xl font-bold text-slate-950">Booking workbench</h2>
                     </div>
                     <div className="marketing-metrics">
                         <div><span>Upcoming</span><strong>{dashboardSummary.upcoming}</strong></div>
@@ -1525,9 +1526,17 @@ const DashboardMarketing = () => {
 
                 {activeTab === 'inquiries' && renderInquiries()}
                 {activeTab === 'documents' && renderDocuments()}
-                {activeTab === 'content' && <AnnouncementManager user={user} />}
+                {activeTab === 'content' && (
+                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
+                        <AnnouncementManager user={user} />
+                    </Suspense>
+                )}
                 {activeTab === 'settings' && renderSettings()}
-                {activeTab === 'messages' && <StaffMessaging />}
+                {activeTab === 'messages' && (
+                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading messages...</div>}>
+                        <StaffMessaging />
+                    </Suspense>
+                )}
 
             </main>
             {renderBookingModal()}
