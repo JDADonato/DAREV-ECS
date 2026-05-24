@@ -277,7 +277,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
     const { pax, selectedDishes: existingDishes } = bookingData;
     const [phase, setPhase] = useState(() => {
         if (mode === 'menu') return 'menu';
-        if (mode === 'packages') return 'path';
+        if (mode === 'packages') return bookingData.packageChoiceStage === 'curated' ? 'curated' : 'path';
         return bookingData.packageChoiceStage === 'curated' ? 'curated' : 'path';
     }); // 'path' | 'curated' | 'menu'
     const [budget, setBudget] = useState(bookingData.budget || '');
@@ -295,6 +295,11 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
     const [customItems, setCustomItems] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
     const [curatedPackages, setCuratedPackages] = useState([]);
     const [lightboxDish, setLightboxDish] = useState(null);
+    const [menuSearch, setMenuSearch] = useState('');
+    const [menuFilter, setMenuFilter] = useState('all');
+    const [menuSort, setMenuSort] = useState('recommended');
+    const [menuPage, setMenuPage] = useState(1);
+    const dishesPerPage = 6;
 
     useEffect(() => {
         const fetchOverrides = async () => {
@@ -359,10 +364,6 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         packageCategory.pricingNote,
         packageCategory.security.label,
     ];
-    const categoryAmenities = [
-        ...packageCategory.amenities,
-        ...(isDebutEvent(bookingData.eventType) ? packageCategory.debutExclusives || [] : []),
-    ];
     const packageContextFields = {
         package_category: packageCategoryKey,
         package_category_label: packageCategory.title,
@@ -403,7 +404,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
             const includedLimit = allowances?.[category] ?? CATEGORY_LIMITS[category] ?? 0;
             const extraIds = (nextSelections[category] || []).slice(includedLimit);
             extraIds.forEach(id => {
-                const dish = mergedDishes[category]?.find(d => d.id === id);
+                const dish = findDishById(category, id);
                 if (!dish) return;
                 const costPerHead = getDishCost(dish);
                 rows.push({
@@ -440,7 +441,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         let total = 0;
         Object.keys(nextSelections).forEach(category => {
             nextSelections[category].forEach(id => {
-                const dish = mergedDishes[category]?.find(d => d.id === id);
+                const dish = findDishById(category, id);
                 if (dish) total += getDishCost(dish) * (pax || 0);
             });
         });
@@ -463,8 +464,13 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         setPhase('menu');
     };
 
+    const findDishById = (category, id) => {
+        return (mergedDishes[category] || []).find(dish => String(dish.id) === String(id));
+    };
+
     // Get effective cost per head for a dish
     function getDishCost(dish) {
+        if (!dish) return 0;
         const overrideId = `dish_${dish.id}`;
         if (pricingOverrides[overrideId] !== undefined) {
             return pricingOverrides[overrideId];
@@ -481,7 +487,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         let total = 0;
         Object.keys(selections).forEach(category => {
             selections[category].forEach(id => {
-                const dish = mergedDishes[category]?.find(d => d.id === id);
+                const dish = findDishById(category, id);
                 if (dish) total += getDishCost(dish) * (pax || 0);
             });
         });
@@ -624,7 +630,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         const record = pkg.packageRecord || {};
         const securityType = record.security_type || packageContextFields.package_security_type;
         advanceFromPackageChoice(newSelections, {
-            package_id: pkg.id || pkg.code,
+            package_id: String(pkg.id || pkg.code),
             ...packageContextFields,
             package_category: record.package_category || packageContextFields.package_category,
             package_amenities: record.amenities?.length ? record.amenities : packageContextFields.package_amenities,
@@ -671,10 +677,14 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
 
         // Build full menu selection with dish objects for submission, including any pricing overrides
         const fullMenuSelection = {};
+        const sanitizedSelections = {};
         Object.keys(selections).forEach(cat => {
-            fullMenuSelection[cat] = selections[cat].map(id => {
-                const dish = mergedDishes[cat].find(d => d.id === id);
-                const categoryIds = selections[cat] || [];
+            sanitizedSelections[cat] = [];
+            const validCategoryIds = (selections[cat] || []).filter(id => Boolean(findDishById(cat, id)));
+            sanitizedSelections[cat] = validCategoryIds;
+            fullMenuSelection[cat] = validCategoryIds.map(id => {
+                const dish = findDishById(cat, id);
+                const categoryIds = validCategoryIds;
                 const includedLimit = bookingData.package_allowances?.[cat] ?? CATEGORY_LIMITS[cat] ?? 0;
                 const selectionIndex = categoryIds.indexOf(id);
                 const isExtraSelection = hasPackagePricing && selectionIndex >= includedLimit;
@@ -689,7 +699,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         });
 
         updateBooking({
-            selectedDishes: selections,
+            selectedDishes: sanitizedSelections,
             customMenu: fullMenuSelection,
             totalCost: menuTotal,
             menuExtraFee: hasPackagePricing ? getExtraSelectionFee(selections) : 0,
@@ -727,6 +737,54 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         }
         setActiveTab(CATEGORY_TABS[activeCategoryIndex + 1].key);
     };
+    useEffect(() => {
+        setMenuPage(1);
+    }, [activeTab, menuSearch, menuFilter, menuSort]);
+
+    const activeDishes = useMemo(() => {
+        const normalizedSearch = menuSearch.trim().toLowerCase();
+        return [...(mergedDishes[activeTab] || [])]
+            .filter(dish => {
+                const isSelected = selections[activeTab]?.includes(dish.id);
+                if (menuFilter === 'selected' && !isSelected) return false;
+                if (menuFilter === 'best' && !dish.isBestSeller) return false;
+                if (normalizedSearch) {
+                    const searchableText = `${dish.name || ''} ${dish.description || ''}`.toLowerCase();
+                    if (!searchableText.includes(normalizedSearch)) return false;
+                }
+                return true;
+            })
+            .sort((a, b) => {
+                const aSelected = selections[activeTab]?.includes(a.id);
+                const bSelected = selections[activeTab]?.includes(b.id);
+                if (menuSort === 'price-low') return getDishCost(a) - getDishCost(b);
+                if (menuSort === 'price-high') return getDishCost(b) - getDishCost(a);
+                if (menuSort === 'name') return String(a.name || '').localeCompare(String(b.name || ''));
+                if (aSelected !== bSelected) return aSelected ? -1 : 1;
+                if (a.isBestSeller !== b.isBestSeller) return b.isBestSeller ? 1 : -1;
+                return getDishCost(a) - getDishCost(b);
+            });
+    }, [mergedDishes, activeTab, menuSearch, menuFilter, menuSort, selections, pricingOverrides]);
+
+    const totalMenuPages = Math.max(1, Math.ceil(activeDishes.length / dishesPerPage));
+    const currentMenuPage = Math.min(menuPage, totalMenuPages);
+    const pagedDishes = activeDishes.slice((currentMenuPage - 1) * dishesPerPage, currentMenuPage * dishesPerPage);
+    const packageSubSteps = phase === 'curated'
+        ? ['Choose method', 'Select package']
+        : ['Choose method'];
+    const currentPackageSubStep = phase === 'curated' ? 1 : 0;
+    const MiniStepProgress = ({ steps, activeIndex }) => (
+        <div className="booking-mini-progress" aria-label="Current step progress">
+            {steps.map((step, index) => (
+                <span
+                    key={step}
+                    className={index < activeIndex ? 'done' : index === activeIndex ? 'active' : ''}
+                >
+                    {step}
+                </span>
+            ))}
+        </div>
+    );
 
     // ==========================================
     // PHASE: BUDGET ENTRY
@@ -816,29 +874,11 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         return (
             <div className="flex flex-col h-full justify-between animate-fadeIn">
                 <div className="space-y-8">
-                    <section className="booking-package-hero">
-                        <div>
-                            <p className="booking-step-kicker">{packageCategory.eyebrow}</p>
-                            <h3>{packageCategory.title}</h3>
-                            <p>{packageCategory.description}</p>
-                        </div>
-                        <div className="booking-package-security">
-                            <span>Security term</span>
-                            <strong>{packageCategory.security.label}</strong>
-                            <p>{packageCategory.security.description}</p>
-                        </div>
-                    </section>
-
-                    <section className="booking-package-terms">
-                        {GLOBAL_PAYMENT_TERMS.map(term => (
-                            <span key={term}>{term}</span>
-                        ))}
-                    </section>
-
                     <div className="text-center mb-2">
                         <h3 className="text-2xl font-black text-gray-950">How would you like to build your menu?</h3>
                         <p className="mt-2 text-sm font-semibold text-gray-500">Choose a starting point. You can review and adjust dishes before continuing.</p>
                     </div>
+                    <MiniStepProgress steps={packageSubSteps} activeIndex={currentPackageSubStep} />
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto booking-menu-path">
                         {/* Budget Maximizer - only when budget is entered */}
                         <>
@@ -888,7 +928,10 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
 
                         {/* Curated Packages */}
                         <button
-                            onClick={() => setPhase('curated')}
+                            onClick={() => {
+                                updateBooking({ packageChoiceStage: 'curated' });
+                                setPhase('curated');
+                            }}
                             className="booking-choice-card booking-choice-card-package group text-left p-8 rounded-2xl border-2 border-primary-100 bg-white transition-all duration-300 relative overflow-hidden"
                         >
                             <div className="w-14 h-14 bg-primary-50 rounded-2xl flex items-center justify-center mb-5 text-primary-600 group-hover:bg-primary-100 transition-colors">
@@ -936,32 +979,6 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                             </div>
                         </button>
                     </div>
-
-                    <section className="booking-package-detail-panel booking-package-detail-panel-inline">
-                        <section>
-                            <p className="booking-step-kicker">Included setup for this event type</p>
-                            <ul>
-                                {categoryAmenities.map(item => <li key={item}>{item}</li>)}
-                            </ul>
-                        </section>
-
-                        {packageCategory.guestPerks150 && Number(pax || 0) >= 150 && (
-                            <section>
-                                <p className="booking-step-kicker">150+ guest perks</p>
-                                <ul>
-                                    {packageCategory.guestPerks150.map(item => <li key={item}>{item}</li>)}
-                                </ul>
-                            </section>
-                        )}
-
-                        <section className="booking-package-finance-card">
-                            <span>Pricing notes</span>
-                            <strong>{packageCategory.pricingNote}</strong>
-                            <p>{packageCategory.taxNote}</p>
-                            {packageCategory.decemberSurcharge > 0 && <p>December events add {money(packageCategory.decemberSurcharge)}.</p>}
-                            {packageCategory.kidsMealPrice > 0 && <p>Optional kids meal: {money(packageCategory.kidsMealPrice)}/head.</p>}
-                        </section>
-                    </section>
                 </div>
 
                 <div className="flex justify-start pt-12 items-center border-t border-gray-100 mt-8">
@@ -980,80 +997,49 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
     }
 
     if (phase === 'curated') {
-        const categoryAmenities = [
-            ...packageCategory.amenities,
-            ...(isDebutEvent(bookingData.eventType) ? packageCategory.debutExclusives || [] : []),
-        ];
-
         return (
             <div className="booking-package-flow animate-fadeIn">
-                <section className="booking-package-hero">
-                    <div>
-                        <p className="booking-step-kicker">{packageCategory.eyebrow}</p>
-                        <h3>{packageCategory.title}</h3>
-                        <p>{packageCategory.description}</p>
-                    </div>
-                    <div className="booking-package-security">
-                        <span>Security term</span>
-                        <strong>{packageCategory.security.label}</strong>
-                        <p>{packageCategory.security.description}</p>
-                    </div>
-                </section>
+                <div className="booking-curated-heading">
+                    <p className="booking-step-kicker">{packageCategory.eyebrow}</p>
+                    <h3>Choose a package.</h3>
+                    <p>Pick the package that best matches your budget and menu size. You can still adjust dishes after this.</p>
+                </div>
 
-                <section className="booking-package-terms">
-                    {GLOBAL_PAYMENT_TERMS.map(term => (
-                        <span key={term}>{term}</span>
-                    ))}
-                </section>
+                <MiniStepProgress steps={packageSubSteps} activeIndex={currentPackageSubStep} />
 
-                <div className="booking-package-layout">
-                    <div className="booking-menu-path booking-curated-grid">
+                <div className="booking-package-layout booking-package-layout-simple">
+                    <div className="booking-menu-path booking-curated-grid booking-curated-grid-simple">
                         {packageCards.map((pkg, index) => {
                             const menuStructure = pkg.structure || {};
                             const totalDishes = Object.values(menuStructure).reduce((sum, count) => sum + count, 0);
                             const baseTotal = pkg.pricingType === 'addon' ? pkg.addOnPrice : pkg.pricingType === 'flat' ? pkg.flatPrice : (pkg.basePrice * (pax || 0));
                             const priceLabel = pkg.pricingType === 'addon' ? 'Additional package' : pkg.pricingType === 'flat' ? `${money(pkg.flatPrice)} flat` : `${money(pkg.basePrice)}/head`;
-                            const audienceLabel = pkg.pricingType === 'addon' ? `${pkg.minimumPax}+ pax` : pkg.guestBand || `${Number(pax || 0).toLocaleString()} pax`;
+                            const highlights = pkg.highlights?.slice(0, 2) || [];
 
                             return (
                                 <div
                                     key={pkg.code}
-                                    className={`booking-choice-card booking-curated-card booking-tier-card-${index} text-left p-8 rounded-2xl border-2 bg-white transition-all duration-300 relative overflow-hidden`}
+                                    className={`booking-choice-card booking-curated-card booking-curated-card-simple booking-tier-card-${index} text-left rounded-2xl bg-white transition-all duration-300`}
                                 >
                                     <div className="booking-curated-content flex-1 flex flex-col">
-                                        <p className="text-xs font-black uppercase tracking-widest text-primary-700 mb-2">{pkg.code}</p>
-                                        <h3 className="text-2xl font-bold text-gray-900 mb-1">{pkg.name}</h3>
-                                        <p className="text-gray-500 text-sm mb-4">{pkg.description}</p>
-                                        <p className="text-primary-600 font-bold text-lg mb-1">{priceLabel}</p>
-                                        <p className="text-xs text-gray-400 mb-2">{pkg.pricingType === 'addon' ? audienceLabel : `${audienceLabel} - ${totalDishes} included menu choices`}</p>
-                                        {pkg.pricingType !== 'addon' && (
-                                            <div className="booking-package-breakdown">
-                                                {CATEGORY_TABS.map(tab => (
-                                                    <span key={tab.key}>
-                                                        <strong>{menuStructure[tab.key] || 0}</strong> {CATEGORY_LABELS[tab.key]}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {pkg.menuProfile && <p className="booking-package-menu-profile">{pkg.menuProfile}</p>}
-                                        {pkg.highlights && pkg.highlights.length > 0 && (
-                                            <ul className="text-xs text-gray-500 mb-4 space-y-1">
-                                                {pkg.highlights.map((inc, i) => (
-                                                    <li key={i} className="flex items-center">
-                                                        <svg className="w-3.5 h-3.5 mr-1.5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                        {inc}
-                                                    </li>
-                                                ))}
+                                        <p className="booking-curated-code">{pkg.code}</p>
+                                        <h3>{pkg.name}</h3>
+                                        <p className="booking-curated-description">{pkg.description}</p>
+                                        <div className="booking-curated-price-row">
+                                            <strong>{priceLabel}</strong>
+                                            {pkg.pricingType !== 'addon' && <span>{totalDishes} dishes</span>}
+                                        </div>
+                                        {highlights.length > 0 && (
+                                            <ul className="booking-curated-highlights">
+                                                {highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}
                                             </ul>
                                         )}
                                         <div className="mt-auto">
-                                            <div className="text-sm text-gray-500 mb-4">
-                                                <p className="text-xs">Base estimate: {money(baseTotal)}</p>
-                                            </div>
+                                            <p className="booking-curated-total">Estimate for {pax} guests: <strong>{money(baseTotal)}</strong></p>
                                             <button
                                                 onClick={() => applyCuratedPackage(pkg)}
                                                 disabled={pkg.pricingType === 'addon'}
-                                                className="w-full py-3 rounded-xl font-bold text-sm uppercase tracking-wide transition-all transform active:scale-95 bg-gray-900 text-white hover:bg-red-900"
+                                                className="booking-curated-select"
                                             >
                                                 {pkg.pricingType === 'addon' ? 'Available for 150+ guests' : `Select ${pkg.name}`}
                                             </button>
@@ -1063,41 +1049,11 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                             );
                         })}
                     </div>
-
-                    <aside className="booking-package-detail-panel">
-                        <section>
-                            <p className="booking-step-kicker">Included setup</p>
-                            <ul>
-                                {categoryAmenities.map(item => <li key={item}>{item}</li>)}
-                            </ul>
-                        </section>
-
-                        {packageCategory.guestPerks150 && (
-                            <section>
-                                <p className="booking-step-kicker">150+ guest perks</p>
-                                <ul>
-                                    {packageCategory.guestPerks150.map(item => <li key={item}>{item}</li>)}
-                                </ul>
-                            </section>
-                        )}
-
-                        <section className="booking-package-finance-card">
-                            <span>Pricing notes</span>
-                            <strong>{packageCategory.pricingNote}</strong>
-                            <p>{packageCategory.taxNote}</p>
-                            {packageCategory.decemberSurcharge > 0 && <p>December events add {money(packageCategory.decemberSurcharge)}.</p>}
-                            {packageCategory.kidsMealPrice > 0 && <p>Optional kids meal: {money(packageCategory.kidsMealPrice)}/head.</p>}
-                        </section>
-                    </aside>
                 </div>
 
                 <div className="flex justify-start pt-8 items-center border-t border-gray-100 mt-8">
                     <button
                         onClick={() => {
-                            if (mode === 'packages') {
-                                onBack();
-                                return;
-                            }
                             updateBooking({ packageChoiceStage: 'path' });
                             setPhase('path');
                         }}
@@ -1281,15 +1237,41 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                 })}
             </div>
 
+            <div className="booking-menu-tools">
+                <label className="booking-menu-search">
+                    <span>Search dishes</span>
+                    <input
+                        type="search"
+                        value={menuSearch}
+                        onChange={(event) => setMenuSearch(event.target.value)}
+                        placeholder={`Find ${activeCategory.label.toLowerCase()}`}
+                    />
+                </label>
+                <div className="booking-menu-tool-group">
+                    <label>
+                        <span>Show</span>
+                        <select value={menuFilter} onChange={(event) => setMenuFilter(event.target.value)}>
+                            <option value="all">All dishes</option>
+                            <option value="best">Best sellers</option>
+                            <option value="selected">Selected only</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Sort</span>
+                        <select value={menuSort} onChange={(event) => setMenuSort(event.target.value)}>
+                            <option value="recommended">Recommended</option>
+                            <option value="price-low">Lowest price</option>
+                            <option value="price-high">Highest price</option>
+                            <option value="name">Name A-Z</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
             {/* Dish Grid */}
             <div className="flex-1 overflow-y-auto max-h-[450px] pr-2 custom-scrollbar">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {[...(mergedDishes[activeTab] || [])]
-                        .sort((a, b) => {
-                            if (a.isBestSeller !== b.isBestSeller) return b.isBestSeller ? 1 : -1;
-                            return getDishCost(a) - getDishCost(b);
-                        })
-                        .map(dish => {
+                    {pagedDishes.map(dish => {
                             const isSelected = selections[activeTab]?.includes(dish.id);
                             const cost = getDishCost(dish);
                             const categoryCount = selections[activeTab]?.length || 0;
@@ -1299,16 +1281,16 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                             return (
                                 <div
                                     key={dish.id}
-                                    className={`relative rounded-xl overflow-hidden border-2 transition-all duration-200 ${isSelected
-                                        ? 'border-primary-500 bg-primary-50 shadow-md'
+                                    className={`booking-dish-card relative rounded-xl overflow-hidden transition-all duration-200 ${isSelected
+                                        ? 'selected'
                                         : isExtraAdd
-                                            ? 'border-amber-200 bg-amber-50'
-                                            : 'border-gray-100 bg-white hover:border-gray-200'
+                                            ? 'extra'
+                                            : ''
                                         }`}
                                 >
                                     <div className="flex items-start gap-4 p-4">
                                         <div 
-                                            className="relative w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200 cursor-pointer group/img"
+                                            className="relative w-24 h-24 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200 cursor-pointer group/img"
                                             onClick={() => setLightboxDish(dish)}
                                             title="Click to enlarge"
                                         >
@@ -1328,31 +1310,22 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                                             )}
                                         </div>
 
-                                        <div className="flex-1 min-w-0">
+                                        <div className="booking-dish-copy flex-1 min-w-0">
                                             <h5 className={`font-bold text-sm mb-0.5 ${isSelected ? 'text-primary-900' : 'text-gray-900'}`}>
                                                 {dish.name}
                                             </h5>
-                                            <p className="text-xs text-gray-400 line-clamp-1 mb-2">{dish.description}</p>
-                                            <div className="flex items-baseline justify-between gap-2">
-                                                <span className="text-primary-700 font-bold text-sm whitespace-nowrap">
-                                                    ₱{cost}/head
-                                                </span>
+                                            <p className="booking-dish-description text-xs text-gray-400 mb-2">{dish.description || 'A menu option prepared for your selected event package.'}</p>
+                                            <div className="booking-dish-price-row flex items-baseline justify-between gap-2">
+                                                <span>{money(cost)} <small>per head</small></span>
                                                 {pax > 0 && (
-                                                    <span className="text-gray-400 text-xs whitespace-nowrap">
-                                                        = ₱{(cost * pax).toLocaleString()}
-                                                    </span>
+                                                    <strong>{money(cost * pax)} for {pax} guests</strong>
                                                 )}
                                             </div>
                                         </div>
 
                                         <button
                                             onClick={() => toggleDish(activeTab, dish.id)}
-                                            className={`flex-shrink-0 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all self-center ${isSelected
-                                                ? 'bg-red-100 text-red-900 hover:bg-red-200'
-                                                : isExtraAdd
-                                                    ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-                                                    : 'bg-red-900 text-white hover:bg-red-800'
-                                                }`}
+                                            className={`booking-dish-action ${isSelected ? 'remove' : isExtraAdd ? 'extra' : 'add'}`}
                                         >
                                             {isSelected ? 'Remove' : isExtraAdd ? `Add +${money(cost)}/head` : 'Add'}
                                         </button>
@@ -1360,6 +1333,28 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                                 </div>
                             );
                         })}
+                </div>
+                {pagedDishes.length === 0 && (
+                    <div className="booking-menu-empty">
+                        <strong>No dishes found.</strong>
+                        <span>Try a different search, filter, or category.</span>
+                    </div>
+                )}
+            </div>
+
+            <div className="booking-menu-pagination">
+                <span>
+                    Showing {activeDishes.length === 0 ? 0 : ((currentMenuPage - 1) * dishesPerPage) + 1}
+                    -{Math.min(currentMenuPage * dishesPerPage, activeDishes.length)} of {activeDishes.length}
+                </span>
+                <div>
+                    <button type="button" onClick={() => setMenuPage(page => Math.max(1, page - 1))} disabled={currentMenuPage <= 1}>
+                        Previous
+                    </button>
+                    <strong>Page {currentMenuPage} of {totalMenuPages}</strong>
+                    <button type="button" onClick={() => setMenuPage(page => Math.min(totalMenuPages, page + 1))} disabled={currentMenuPage >= totalMenuPages}>
+                        Next
+                    </button>
                 </div>
             </div>
 

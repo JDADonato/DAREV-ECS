@@ -864,15 +864,9 @@ const DashboardAccounting = () => {
 
             {toast && (
                 <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
-                    <div className={'pointer-events-auto relative flex max-w-[380px] items-start gap-3 overflow-hidden rounded-2xl border bg-white/95 px-4 py-3.5 text-sm font-semibold text-slate-700 shadow-xl shadow-slate-950/10 ring-1 ring-black/5 backdrop-blur-md ' + (toast.type === 'success' ? 'border-emerald-100' : 'border-red-100')}>
-                        <span className={'absolute inset-y-0 left-0 w-1 ' + (toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500')} />
-                        {toast.type === 'success' ? (
-                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100"><svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
-                        ) : (
-                            <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-100"><svg className="h-4 w-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
-                        )}
-                        <span className="min-w-0 flex-1 leading-5">{toast.message}</span>
-                        <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                    <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
+                        <span className={'min-w-0 flex-1 font-semibold leading-5 ' + (toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]')}>{toast.message}</span>
+                        <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-[#8a6a46] transition hover:bg-[#f5eadb] hover:text-[#720101]">
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>

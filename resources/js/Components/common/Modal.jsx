@@ -7,44 +7,36 @@ const Modal = ({ isOpen, onClose, title, message, type = 'info', onConfirm, conf
     const isError = type === 'error';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden transform transition-all scale-100 animate-scaleIn">
-                <div
-                    className={`p-7 text-center ${isError ? 'bg-red-50' : !isSuccess ? 'bg-blue-50' : ''}`}
-                    style={isSuccess ? { background: 'linear-gradient(135deg, #720101 0%, #1a1a1a 100%)' } : undefined}
-                >
-                    <div className={`mx-auto flex items-center justify-center h-16 w-16 rounded-2xl mb-4 ${isSuccess ? 'bg-[#f0aa0b]' : isError ? 'bg-red-100' : 'bg-blue-100'}`}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-md overflow-hidden rounded-[1.75rem] border border-[#720101]/10 bg-[#fffaf3] shadow-2xl transform transition-all scale-100 animate-scaleIn">
+                <div className="px-7 pt-8 text-center">
+                    <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl ${isSuccess ? 'bg-[#fff7e8] text-[#720101] ring-1 ring-[#720101]/12' : isError ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : 'bg-[#fff7e8] text-[#9f6500] ring-1 ring-[#720101]/10'}`}>
                         {isSuccess && (
-                            <svg className="h-8 w-8 text-[#1a1a1a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                         )}
                         {isError && (
-                            <svg className="h-8 w-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         )}
                         {!isSuccess && !isError && (
-                            <svg className="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         )}
                     </div>
-                    <h3 className="text-2xl font-display font-bold" style={{ color: isSuccess ? '#ffffff' : '#111827' }}>{title}</h3>
-                    <p className="mt-3 text-sm leading-6" style={{ color: isSuccess ? 'rgba(255,255,255,0.76)' : '#4b5563' }}>{message}</p>
+                    <h3 className="font-display text-2xl font-bold text-[#111827]">{title}</h3>
+                    <p className="mt-3 text-sm font-medium leading-6 text-slate-500">{message}</p>
                 </div>
-                <div className="p-6 bg-white">
+                <div className="bg-[#fffaf3] p-6">
                     <button
                         onClick={() => {
                             if (onConfirm) onConfirm();
                             onClose();
                         }}
-                        className={`w-full py-3.5 px-4 rounded-xl font-bold text-white shadow-lg transition-all transform active:scale-95 ${isSuccess
-                            ? 'bg-[#720101] hover:bg-[#5a0101] shadow-red-200'
-                            : isError
-                                ? 'bg-red-600 hover:bg-red-700 shadow-red-200'
-                                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
-                            }`}
+                        className={`w-full rounded-xl px-4 py-3.5 font-black text-white transition-colors active:scale-[0.99] ${isError ? 'bg-red-600 hover:bg-red-700' : 'bg-[#720101] hover:bg-[#5a0101]'}`}
                     >
                         {confirmText || (isSuccess ? 'Great!' : isError ? 'Try Again' : 'Okay')}
                     </button>
