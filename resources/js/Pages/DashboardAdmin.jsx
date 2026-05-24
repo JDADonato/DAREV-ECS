@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
 import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useCachedJson from '../hooks/useCachedJson';
@@ -55,6 +56,30 @@ const SNAPSHOT_WINDOW_OPTIONS = [
     { value: '24m', label: 'Last 24 months' },
     { value: 'ytd', label: 'Year to date' },
 ];
+
+const MENU_CATEGORY_OPTIONS = [
+    { value: 'all', label: 'All dish types' },
+    { value: 'starter', label: 'Starters' },
+    { value: 'main', label: 'Mains' },
+    { value: 'side', label: 'Sides' },
+    { value: 'dessert', label: 'Desserts' },
+    { value: 'drink', label: 'Drinks' },
+];
+
+const PERFORMANCE_LIMIT_OPTIONS = [5, 8, 10, 15, 20];
+
+const DEFAULT_ANALYTICS_FILTERS = {
+    trend_months: '6',
+    revenue_forecast_period: 'quarterly',
+    revenue_forecast_horizon: '4',
+    revenue_sma_window: '3',
+    pax_projection_period: 'monthly',
+    pax_projection_horizon: '6',
+    pax_sma_window: '3',
+    pax_projection_year: '',
+    pax_projection_quarter: '',
+    snapshot_window: 'all',
+};
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -154,26 +179,30 @@ const DashboardAdmin = () => {
     // ==========================================
     const [analytics, setAnalytics] = useState(null);
     const [analyticsLoading, setAnalyticsLoading] = useState(false);
-    const [analyticsFilters, setAnalyticsFilters] = useState({
-        date_from: '',
-        date_to: '',
-        event_type: '',
-        booking_status: '',
-        payment_status: '',
-        city: '',
-        pax_min: '',
-        pax_max: '',
-        trend_months: '6',
-        revenue_forecast_period: 'quarterly',
-        revenue_forecast_horizon: '4',
-        revenue_sma_window: '3',
-        pax_projection_period: 'monthly',
-        pax_projection_horizon: '6',
-        pax_sma_window: '3',
-        pax_projection_year: '',
-        pax_projection_quarter: '',
-        snapshot_window: 'all',
+    const [analyticsFilters, setAnalyticsFilters] = useState(DEFAULT_ANALYTICS_FILTERS);
+    const [activeAnalyticsFilterPanel, setActiveAnalyticsFilterPanel] = useState(null);
+    const [packageViewFilters, setPackageViewFilters] = useState({
+        limit: '8',
+        sort: 'revenue',
+        minBookings: '',
     });
+    const [menuViewFilters, setMenuViewFilters] = useState({
+        category: 'all',
+        limit: '10',
+        sort: 'selections',
+    });
+    const [paymentRiskFilters, setPaymentRiskFilters] = useState({
+        status: 'all',
+        minBalance: '',
+    });
+    const [workloadFilters, setWorkloadFilters] = useState({
+        status: 'all',
+        minPax: '',
+    });
+    const [alertFilters, setAlertFilters] = useState({
+        severity: 'all',
+    });
+    const [activeDashboardFilterPanel, setActiveDashboardFilterPanel] = useState(null);
     const [reportWidgets, setReportWidgets] = useState([]);
     const [reportTemplates, setReportTemplates] = useState([]);
     const [reportTemplateId, setReportTemplateId] = useState('');
@@ -212,6 +241,48 @@ const DashboardAdmin = () => {
     const paxDemandSummary = paxDemandProjection.summary || {};
     const businessSnapshot = analytics?.businessSnapshot || {};
     const businessSnapshotCards = businessSnapshot.cards || [];
+    const visiblePackagePerformanceData = useMemo(() => {
+        const minBookings = Number(packageViewFilters.minBookings || 0);
+        const rows = packagePerformanceData
+            .filter(pkg => Number(pkg.count || 0) >= minBookings)
+            .sort((a, b) => {
+                if (packageViewFilters.sort === 'bookings') return Number(b.count || 0) - Number(a.count || 0);
+                if (packageViewFilters.sort === 'name') return String(a.label || a.name || '').localeCompare(String(b.label || b.name || ''));
+                return Number(b.revenue || 0) - Number(a.revenue || 0);
+            });
+
+        return rows.slice(0, Number(packageViewFilters.limit || 8));
+    }, [packagePerformanceData, packageViewFilters]);
+    const visibleMenuPerformanceData = useMemo(() => {
+        const rows = menuPerformanceData
+            .filter(row => menuViewFilters.category === 'all' || row.category === menuViewFilters.category)
+            .sort((a, b) => {
+                if (menuViewFilters.sort === 'pax') return Number(b.paxServed || 0) - Number(a.paxServed || 0);
+                if (menuViewFilters.sort === 'name') return String(a.label || '').localeCompare(String(b.label || ''));
+                return Number(b.selections || 0) - Number(a.selections || 0);
+            });
+
+        return rows.slice(0, Number(menuViewFilters.limit || 10));
+    }, [menuPerformanceData, menuViewFilters]);
+    const visiblePaymentStatusBreakdown = useMemo(() => (
+        paymentStatusBreakdown.filter(row => paymentRiskFilters.status === 'all' || String(row.label || '').toLowerCase() === paymentRiskFilters.status)
+    ), [paymentStatusBreakdown, paymentRiskFilters.status]);
+    const visiblePaymentAgingData = useMemo(() => {
+        const minBalance = Number(paymentRiskFilters.minBalance || 0);
+        return paymentAgingData.filter(bucket => Number(bucket.value || 0) >= minBalance);
+    }, [paymentAgingData, paymentRiskFilters.minBalance]);
+    const visibleUpcomingWorkloadData = useMemo(() => {
+        const minPax = Number(workloadFilters.minPax || 0);
+        return upcomingWorkloadData.filter(event => {
+            const status = String(event.status || '').toLowerCase();
+            const statusMatches = workloadFilters.status === 'all' || status === workloadFilters.status;
+            return statusMatches && Number(event.pax || 0) >= minPax;
+        });
+    }, [upcomingWorkloadData, workloadFilters]);
+    const visibleOperationalAlerts = useMemo(() => (
+        operationalAlerts.filter(alert => alertFilters.severity === 'all' || alert.severity === alertFilters.severity)
+    ), [operationalAlerts, alertFilters.severity]);
+    const maxPackageRevenue = Math.max(...visiblePackagePerformanceData.map(pkg => Number(pkg.revenue || 0)), 1);
 
     // Toast notification
     const [toast, setToast] = useState(null);
@@ -443,6 +514,9 @@ const DashboardAdmin = () => {
             fetchCustomMenuItems();
             fetchPackages();
         } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
+            if (activeTab === 'analytics' && (!packages.length || !eventTypes.length)) {
+                fetchPackages();
+            }
             fetchAnalytics();
         } else if (activeTab === 'reports') {
             fetchReportBuilder();
@@ -950,6 +1024,40 @@ const DashboardAdmin = () => {
         return numericKeys.length ? numericKeys.map(key => `${key}: ${key.toLowerCase().includes('rate') ? `${data[key]}%` : formatCurrency(data[key])}`).join(' | ') : (data.message || 'Ready');
     };
 
+    const toggleAnalyticsFilterPanel = (panel) => {
+        setActiveAnalyticsFilterPanel(current => current === panel ? null : panel);
+    };
+
+    const toggleDashboardFilterPanel = (panel) => {
+        setActiveDashboardFilterPanel(current => current === panel ? null : panel);
+    };
+
+    const renderAnalyticsFilterButton = (panel, label = 'Filters') => (
+        <button
+            type="button"
+            onClick={() => toggleAnalyticsFilterPanel(panel)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#720101]/15 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#720101] transition-colors hover:bg-[#fff1d0]"
+            aria-expanded={activeAnalyticsFilterPanel === panel}
+        >
+            <Filter className="h-4 w-4" />
+            {label}
+            <ChevronDown className={`h-4 w-4 transition-transform ${activeAnalyticsFilterPanel === panel ? 'rotate-180' : ''}`} />
+        </button>
+    );
+
+    const renderDashboardFilterButton = (panel, label = 'Filters') => (
+        <button
+            type="button"
+            onClick={() => toggleDashboardFilterPanel(panel)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#720101]/15 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#720101] transition-colors hover:bg-[#fff1d0]"
+            aria-expanded={activeDashboardFilterPanel === panel}
+        >
+            <Filter className="h-4 w-4" />
+            {label}
+            <ChevronDown className={`h-4 w-4 transition-transform ${activeDashboardFilterPanel === panel ? 'rotate-180' : ''}`} />
+        </button>
+    );
+
     const fetchAudits = async ({ silent = false } = {}) => {
         if (!silent) setAuditLoading(true);
         try {
@@ -1266,7 +1374,335 @@ const DashboardAdmin = () => {
                 <div className="p-8">
                     {activeTab === 'dashboard' && (
                         <div className="animate-fadeIn">
+                            <div className="space-y-6">
+                                <section className="admin-panel overflow-hidden">
+                                    <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 xl:flex-row xl:items-center xl:justify-between">
+                                        <div>
+                                            <p className="admin-kicker">Command overview</p>
+                                            <h3 className="mt-1 text-2xl font-black text-gray-950">Overall Business & System Performance</h3>
+                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A one-view pulse of revenue, demand, collections, bookings, alerts, and sales mix from live records.</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {renderDashboardFilterButton('dashboardSnapshot', businessSnapshot.label || 'Timeframe')}
+                                            <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-black">
+                                                <RefreshCw className={`h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
+                                                {analyticsLoading ? 'Refreshing...' : 'Refresh'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {activeDashboardFilterPanel === 'dashboardSnapshot' && (
+                                        <div className="border-b border-gray-100 bg-white p-5">
+                                            <label className="block max-w-xs text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                <span className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5" /> Overview timeframe</span>
+                                                <select
+                                                    value={analyticsFilters.snapshot_window}
+                                                    onChange={(event) => {
+                                                        const nextFilters = { ...analyticsFilters, snapshot_window: event.target.value };
+                                                        setAnalyticsFilters(nextFilters);
+                                                        fetchAnalytics({ filters: nextFilters });
+                                                    }}
+                                                    className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none"
+                                                >
+                                                    {SNAPSHOT_WINDOW_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
+                                        {[
+                                            ['Total revenue', formatCurrency(analyticsSummary.totalRevenue || 0), `Collected ${formatCurrency(analyticsSummary.settledRevenue || 0)}`],
+                                            ['Collection rate', `${analyticsSummary.collectionRate || 0}%`, `Pending ${formatCurrency(analyticsSummary.pendingRevenue || 0)}`],
+                                            ['Active bookings', analyticsSummary.activeBookings || 0, `${analyticsSummary.pendingBookings || 0} pending requests`],
+                                            ['Total pax', Number(analyticsSummary.totalPax || 0).toLocaleString(), `Avg booking ${formatCurrency(analyticsSummary.averageBookingValue || 0)}`],
+                                        ].map(([label, value, hint]) => (
+                                            <div key={label} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
+                                                <p className="mt-2 text-2xl font-black text-gray-950">{value}</p>
+                                                <p className="mt-1 text-xs font-semibold text-gray-500">{hint}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
 
+                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                                    <section className="admin-panel p-6 xl:col-span-2">
+                                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                            <div>
+                                                <p className="admin-kicker">Financial pulse</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Collected Revenue Trend</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">Verified collections across the selected historical window.</p>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardRevenue', `Last ${analyticsFilters.trend_months} months`)}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardRevenue' && (
+                                            <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    <span className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5" /> Trend window</span>
+                                                    <select
+                                                        value={analyticsFilters.trend_months}
+                                                        onChange={(event) => {
+                                                            const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
+                                                            setAnalyticsFilters(nextFilters);
+                                                            fetchAnalytics({ filters: nextFilters });
+                                                        }}
+                                                        className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none"
+                                                    >
+                                                        {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
+                                                    </select>
+                                                </label>
+                                            </div>
+                                        )}
+                                        <div className="h-72">
+                                            {revenueTrendData.length ? (
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <LineChart data={revenueTrendData}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(value) => `PHP ${Math.round(value / 1000)}k`} />
+                                                        <RechartsTooltip formatter={(value) => formatCurrency(value)} />
+                                                        <Line type="monotone" dataKey="revenue" stroke="#720101" strokeWidth={3} dot={{ r: 4 }} name="Collected" />
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No collected revenue for this window.</div>}
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="admin-kicker">Attention center</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Operational Alerts</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">Items that need admin action.</p>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardAlerts', alertFilters.severity === 'all' ? 'Severity' : alertFilters.severity)}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardAlerts' && (
+                                            <div className="mb-5 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    Alert severity
+                                                    <select value={alertFilters.severity} onChange={(e) => setAlertFilters({ ...alertFilters, severity: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                        <option value="all">All severities</option>
+                                                        <option value="danger">Danger</option>
+                                                        <option value="warning">Warning</option>
+                                                        <option value="success">Healthy</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                        )}
+                                        <div className="space-y-3">
+                                            {visibleOperationalAlerts.map((alert) => (
+                                                <div key={alert.label} className={`rounded-xl border p-4 ${alert.severity === 'danger' ? 'border-red-200 bg-red-50' : alert.severity === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-100 bg-emerald-50'}`}>
+                                                    <div className="flex items-start justify-between gap-4">
+                                                        <p className="text-sm font-black text-gray-900">{alert.label}</p>
+                                                        <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-gray-950 shadow-sm">{alert.count}</span>
+                                                    </div>
+                                                    <button onClick={() => alert.label.includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-gray-900">Open queue</button>
+                                                </div>
+                                            ))}
+                                            {!visibleOperationalAlerts.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No alerts match this severity.</div>}
+                                        </div>
+                                    </section>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                            <div>
+                                                <p className="admin-kicker">Collections</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Payment Risk</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">Payment exposure by status and aging bucket.</p>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardPayment', paymentRiskFilters.status === 'all' ? 'Risk filters' : paymentRiskFilters.status)}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardPayment' && (
+                                            <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    <span className="flex items-center gap-2"><CreditCard className="h-3.5 w-3.5" /> Payment status</span>
+                                                    <select value={paymentRiskFilters.status} onChange={(e) => setPaymentRiskFilters({ ...paymentRiskFilters, status: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                        <option value="all">All statuses</option>
+                                                        {paymentStatusBreakdown.map(row => <option key={row.label} value={String(row.label || '').toLowerCase()}>{row.label}</option>)}
+                                                    </select>
+                                                </label>
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    Minimum aging balance
+                                                    <input type="number" min="0" value={paymentRiskFilters.minBalance} onChange={(e) => setPaymentRiskFilters({ ...paymentRiskFilters, minBalance: e.target.value })} placeholder="Show all" className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none" />
+                                                </label>
+                                            </div>
+                                        )}
+                                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                            <div className="h-56">
+                                                {visiblePaymentStatusBreakdown.length ? (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={visiblePaymentStatusBreakdown}>
+                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                            <RechartsTooltip formatter={(value, name) => name === 'total' ? formatCurrency(value) : value} />
+                                                            <Bar dataKey="total" fill="#f0aa0b" radius={[6, 6, 0, 0]} name="Amount" />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No payment rows.</div>}
+                                            </div>
+                                            <div className="space-y-3">
+                                                {visiblePaymentAgingData.map((bucket) => (
+                                                    <div key={bucket.label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span className="text-sm font-black text-gray-800">{bucket.label}</span>
+                                                            <span className="text-sm font-black text-gray-950">{formatCurrency(bucket.value || 0)}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {!visiblePaymentAgingData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No aging balances match this filter.</div>}
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                            <div>
+                                                <p className="admin-kicker">Workload</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Booking Pipeline & Next Events</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">Operational volume and near-term service load.</p>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardWorkload', workloadFilters.status === 'all' ? 'Workload filters' : workloadFilters.status)}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardWorkload' && (
+                                            <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    <span className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5" /> Upcoming status</span>
+                                                    <select value={workloadFilters.status} onChange={(e) => setWorkloadFilters({ ...workloadFilters, status: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                        <option value="all">All statuses</option>
+                                                        {Array.from(new Set(upcomingWorkloadData.map(event => String(event.status || '').toLowerCase()).filter(Boolean))).map(status => <option key={status} value={status}>{status}</option>)}
+                                                    </select>
+                                                </label>
+                                                <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                    <span className="flex items-center gap-2"><Users className="h-3.5 w-3.5" /> Minimum pax</span>
+                                                    <input type="number" min="0" value={workloadFilters.minPax} onChange={(e) => setWorkloadFilters({ ...workloadFilters, minPax: e.target.value })} placeholder="Show all" className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none" />
+                                                </label>
+                                            </div>
+                                        )}
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                            {bookingPipelineData.slice(0, 3).map((row) => (
+                                                <div key={row.label} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                                                    <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{row.label}</p>
+                                                    <p className="mt-2 text-2xl font-black text-gray-950">{row.count}</p>
+                                                    <p className="text-xs font-bold text-amber-700">{formatCurrency(row.value || 0)}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="mt-5 overflow-hidden rounded-xl border border-gray-100">
+                                            <table className="w-full text-sm">
+                                                <thead className="bg-gray-50 text-xs font-black uppercase tracking-widest text-gray-500">
+                                                    <tr><th className="px-4 py-3 text-left">Upcoming Event</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Pax</th><th className="px-4 py-3 text-left">Status</th></tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {visibleUpcomingWorkloadData.slice(0, 6).map((event) => (
+                                                        <tr key={event.id || `${event.client}-${event.date}`}>
+                                                            <td className="px-4 py-3 font-bold text-gray-900">{event.client || event.eventType || 'Event'}</td>
+                                                            <td className="px-4 py-3 text-gray-600">{event.date}</td>
+                                                            <td className="px-4 py-3 text-right font-bold text-gray-900">{event.pax}</td>
+                                                            <td className="px-4 py-3 text-gray-600">{event.status || event.eventType}</td>
+                                                        </tr>
+                                                    ))}
+                                                    {!visibleUpcomingWorkloadData.length && <tr><td colSpan="4" className="px-4 py-8 text-center font-bold text-gray-400">No upcoming events match this filter.</td></tr>}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="admin-kicker">Sales mix</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Top Packages</h3>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardPackages', `Top ${packageViewFilters.limit}`)}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardPackages' && (
+                                            <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                <select value={packageViewFilters.limit} onChange={(e) => setPackageViewFilters({ ...packageViewFilters, limit: e.target.value })} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none">
+                                                    {PERFORMANCE_LIMIT_OPTIONS.map(value => <option key={value} value={value}>Top {value} packages</option>)}
+                                                </select>
+                                                <select value={packageViewFilters.sort} onChange={(e) => setPackageViewFilters({ ...packageViewFilters, sort: e.target.value })} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none">
+                                                    <option value="revenue">Revenue</option>
+                                                    <option value="bookings">Bookings</option>
+                                                    <option value="name">Package name</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                        <div className="space-y-3">
+                                            {visiblePackagePerformanceData.slice(0, 5).map((pkg) => (
+                                                <div key={pkg.label || pkg.name}>
+                                                    <div className="flex items-center justify-between gap-3 text-sm">
+                                                        <span className="truncate font-black text-gray-800">{pkg.label || pkg.name}</span>
+                                                        <span className="font-black text-amber-700">{formatCurrency(pkg.revenue || 0)}</span>
+                                                    </div>
+                                                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                                                        <div className="h-full rounded-full bg-[#720101]" style={{ width: `${Math.max(8, (Number(pkg.revenue || 0) / maxPackageRevenue) * 100)}%` }} />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="admin-kicker">Menu velocity</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Top Dishes</h3>
+                                            </div>
+                                            {renderDashboardFilterButton('dashboardMenu', MENU_CATEGORY_OPTIONS.find(option => option.value === menuViewFilters.category)?.label || 'Dish type')}
+                                        </div>
+                                        {activeDashboardFilterPanel === 'dashboardMenu' && (
+                                            <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                <select value={menuViewFilters.category} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, category: e.target.value })} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none">
+                                                    {MENU_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                                <select value={menuViewFilters.sort} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, sort: e.target.value })} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none">
+                                                    <option value="selections">Selections</option>
+                                                    <option value="pax">Pax served</option>
+                                                    <option value="name">Dish name</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                        <div className="space-y-3">
+                                            {visibleMenuPerformanceData.slice(0, 6).map((dish) => (
+                                                <div key={dish.label} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3">
+                                                    <div className="min-w-0">
+                                                        <p className="truncate text-sm font-black text-gray-900">{dish.label}</p>
+                                                        <p className="text-xs font-bold uppercase text-gray-400">{dish.category}</p>
+                                                    </div>
+                                                    <span className="text-sm font-black text-[#720101]">{menuViewFilters.sort === 'pax' ? dish.paxServed : dish.selections}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-panel p-6">
+                                        <div className="mb-5">
+                                            <p className="admin-kicker">Demand intensity</p>
+                                            <h3 className="mt-1 text-lg font-black text-gray-950">Peak Season Heatmap</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">Monthly event load for planning purchasing and staffing.</p>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-3 text-center text-xs sm:grid-cols-4">
+                                            {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month) => {
+                                                const val = peakSeasonData.find(item => item.month === month)?.events || peakSeasonData.find(item => item.month === month)?.count || 0;
+                                                const bgColor = val <= 3 ? 'bg-green-100 text-green-800' : val <= 6 ? 'bg-yellow-200 text-yellow-800' : val <= 8 ? 'bg-orange-300 text-orange-900' : 'bg-red-500 text-white font-bold';
+                                                return (
+                                                    <div key={month} className={`rounded-xl p-3 ${bgColor}`}>
+                                                        <span className="block font-black">{month}</span>
+                                                        <span className="text-[11px] font-bold">{val} events</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </section>
+                                </div>
+                            </div>
+
+                            <div className="hidden">
                             <section className="admin-hero rounded-2xl p-6 text-white">
                                 <div className="max-w-3xl">
                                     <p className="text-xs font-black uppercase text-[#f0aa0b]">Today’s operating picture</p>
@@ -1409,6 +1845,7 @@ const DashboardAdmin = () => {
                                 </div>
                             </div>
 
+                            </div>
                         </div>
                     )}
                     {activeTab === 'analytics' && (
@@ -1420,7 +1857,8 @@ const DashboardAdmin = () => {
                                         <h3 className="mt-1 text-2xl font-black text-gray-950">Business Forecasting & Operational Signals</h3>
                                         <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">Forecast revenue and guest demand with simple moving averages, then review the operational signals admins need for staffing, purchasing, and payment follow-up.</p>
                                     </div>
-                                    <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary w-full px-5 py-2.5 text-sm font-black sm:w-auto">
+                                    <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary inline-flex w-full items-center justify-center gap-2 px-5 py-2.5 text-sm font-black sm:w-auto">
+                                        <RefreshCw className={`h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
                                         {analyticsLoading ? 'Refreshing...' : 'Refresh Analytics'}
                                     </button>
                                 </div>
@@ -1430,21 +1868,26 @@ const DashboardAdmin = () => {
                                             <h4 className="text-lg font-black text-gray-950">Business Snapshot</h4>
                                             <p className="mt-1 text-sm font-semibold text-gray-500">High-signal metrics for revenue, demand, bookings, and collection health.</p>
                                         </div>
-                                        <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                            Timeframe
-                                            <select
-                                                value={analyticsFilters.snapshot_window}
-                                                onChange={(event) => {
-                                                    const nextFilters = { ...analyticsFilters, snapshot_window: event.target.value };
-                                                    setAnalyticsFilters(nextFilters);
-                                                    fetchAnalytics({ filters: nextFilters });
-                                                }}
-                                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100 sm:w-48"
-                                            >
-                                                {SNAPSHOT_WINDOW_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                            </select>
-                                        </label>
+                                        {renderAnalyticsFilterButton('snapshot', businessSnapshot.label || 'Timeframe')}
                                     </div>
+                                    {activeAnalyticsFilterPanel === 'snapshot' && (
+                                        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                <span className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5" /> Snapshot timeframe</span>
+                                                <select
+                                                    value={analyticsFilters.snapshot_window}
+                                                    onChange={(event) => {
+                                                        const nextFilters = { ...analyticsFilters, snapshot_window: event.target.value };
+                                                        setAnalyticsFilters(nextFilters);
+                                                        fetchAnalytics({ filters: nextFilters });
+                                                    }}
+                                                    className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100"
+                                                >
+                                                    {SNAPSHOT_WINDOW_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                         {businessSnapshotCards.map((card) => (
                                             <div key={card.label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -1469,9 +1912,9 @@ const DashboardAdmin = () => {
                                                 <h3 className="mt-1 text-xl font-black text-gray-950">Revenue Forecast Using SMA</h3>
                                                 <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">Projects short-term collected revenue by smoothing verified payment history.</p>
                                             </div>
-                                            <button onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808]">Apply</button>
+                                            {renderAnalyticsFilterButton('revenueForecast', `${analyticsFilters.revenue_forecast_period} forecast`)}
                                         </div>
-                                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        {activeAnalyticsFilterPanel === 'revenueForecast' && <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-3">
                                             <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
                                                 Period
                                                 <select value={analyticsFilters.revenue_forecast_period} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, revenue_forecast_period: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
@@ -1490,7 +1933,8 @@ const DashboardAdmin = () => {
                                                     {FORECAST_HORIZON_OPTIONS.map(value => <option key={value} value={value}>{value} periods ahead</option>)}
                                                 </select>
                                             </label>
-                                        </div>
+                                            <button type="button" onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808] sm:col-span-3">Apply Forecast Filters</button>
+                                        </div>}
                                     </div>
                                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
                                         {[
@@ -1529,9 +1973,9 @@ const DashboardAdmin = () => {
                                                 <h3 className="mt-1 text-xl font-black text-gray-950">Moving Averages for Pax Demand Projection</h3>
                                                 <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">Smooths historical guest demand so culinary and logistics planning is not distorted by one-off spikes.</p>
                                             </div>
-                                            <button onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808]">Apply</button>
+                                            {renderAnalyticsFilterButton('paxForecast', `${analyticsFilters.pax_projection_period} demand`)}
                                         </div>
-                                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        {activeAnalyticsFilterPanel === 'paxForecast' && <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-3">
                                             <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
                                                 Period
                                                 <select value={analyticsFilters.pax_projection_period} onChange={(e) => setAnalyticsFilters({ ...analyticsFilters, pax_projection_period: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
@@ -1564,7 +2008,8 @@ const DashboardAdmin = () => {
                                                     {FORECAST_HORIZON_OPTIONS.map(value => <option key={value} value={value}>{value} periods ahead</option>)}
                                                 </select>
                                             </label>
-                                        </div>
+                                            <button type="button" onClick={() => fetchAnalytics()} className="rounded-xl bg-[#720101] px-4 py-2.5 text-xs font-black text-white shadow-sm transition-colors hover:bg-[#8d0808] sm:col-span-3">Apply Demand Filters</button>
+                                        </div>}
                                     </div>
                                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
                                         {[
@@ -1603,21 +2048,26 @@ const DashboardAdmin = () => {
                                             <h3 className="text-lg font-black text-gray-950">Collected Revenue Trend</h3>
                                             <p className="mt-1 text-sm font-semibold text-gray-500">Historical verified collections ending at the current month.</p>
                                         </div>
-                                        <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                            Window
-                                            <select
-                                                value={analyticsFilters.trend_months}
-                                                onChange={(event) => {
-                                                    const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
-                                                    setAnalyticsFilters(nextFilters);
-                                                    fetchAnalytics({ filters: nextFilters });
-                                                }}
-                                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none sm:w-44"
-                                            >
-                                                {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
-                                            </select>
-                                        </label>
+                                        {renderAnalyticsFilterButton('revenueTrend', `Last ${analyticsFilters.trend_months} months`)}
                                     </div>
+                                    {activeAnalyticsFilterPanel === 'revenueTrend' && (
+                                        <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                <span className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5" /> Trend window</span>
+                                                <select
+                                                    value={analyticsFilters.trend_months}
+                                                    onChange={(event) => {
+                                                        const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
+                                                        setAnalyticsFilters(nextFilters);
+                                                        fetchAnalytics({ filters: nextFilters });
+                                                    }}
+                                                    className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none"
+                                                >
+                                                    {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                    )}
                                     <div className="h-72">
                                         {revenueTrendData.length ? (
                                             <ResponsiveContainer width="100%" height="100%">
@@ -1634,13 +2084,33 @@ const DashboardAdmin = () => {
                                 </section>
 
                                 <section className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Payment Risk</h3>
-                                    <p className="mb-6 text-sm font-semibold text-gray-500">Balances by payment status and aging bucket.</p>
+                                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h3 className="text-lg font-black text-gray-950">Payment Risk</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">Balances by payment status and aging bucket.</p>
+                                        </div>
+                                        {renderAnalyticsFilterButton('paymentRisk', paymentRiskFilters.status === 'all' ? 'Risk filters' : paymentRiskFilters.status)}
+                                    </div>
+                                    {activeAnalyticsFilterPanel === 'paymentRisk' && (
+                                        <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 sm:grid-cols-2">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                <span className="flex items-center gap-2"><CreditCard className="h-3.5 w-3.5" /> Payment status</span>
+                                                <select value={paymentRiskFilters.status} onChange={(e) => setPaymentRiskFilters({ ...paymentRiskFilters, status: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    <option value="all">All statuses</option>
+                                                    {paymentStatusBreakdown.map(row => <option key={row.label} value={String(row.label || '').toLowerCase()}>{row.label}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Minimum aging balance
+                                                <input type="number" min="0" value={paymentRiskFilters.minBalance} onChange={(e) => setPaymentRiskFilters({ ...paymentRiskFilters, minBalance: e.target.value })} placeholder="Show all" className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none" />
+                                            </label>
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                                         <div className="h-64">
-                                            {paymentStatusBreakdown.length ? (
+                                            {visiblePaymentStatusBreakdown.length ? (
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={paymentStatusBreakdown}>
+                                                    <BarChart data={visiblePaymentStatusBreakdown}>
                                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                                                         <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
                                                         <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
@@ -1651,7 +2121,7 @@ const DashboardAdmin = () => {
                                             ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No payment rows.</div>}
                                         </div>
                                         <div className="space-y-3">
-                                            {paymentAgingData.map((bucket) => (
+                                            {visiblePaymentAgingData.map((bucket) => (
                                                 <div key={bucket.label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
                                                     <div className="flex items-center justify-between gap-3">
                                                         <span className="text-sm font-black text-gray-800">{bucket.label}</span>
@@ -1659,94 +2129,120 @@ const DashboardAdmin = () => {
                                                     </div>
                                                 </div>
                                             ))}
+                                            {!visiblePaymentAgingData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No aging balances match this filter.</div>}
                                         </div>
                                     </div>
                                 </section>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                                <section className="admin-panel p-6 xl:col-span-2">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Booking Pipeline & Upcoming Workload</h3>
-                                    <p className="mb-5 text-sm font-semibold text-gray-500">Counts, value, and next events that need operational attention.</p>
-                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                        {bookingPipelineData.map((row) => (
-                                            <div key={row.label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">{row.label}</p>
-                                                <p className="mt-2 text-2xl font-black text-gray-950">{row.count}</p>
-                                                <p className="text-sm font-bold text-amber-700">{formatCurrency(row.value || 0)}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="mt-6 overflow-hidden rounded-xl border border-gray-100">
-                                        <table className="w-full text-sm">
-                                            <thead className="bg-gray-50 text-xs font-black uppercase tracking-widest text-gray-500">
-                                                <tr><th className="px-4 py-3 text-left">Upcoming Event</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Pax</th><th className="px-4 py-3 text-left">Status</th></tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100">
-                                                {upcomingWorkloadData.map((event) => (
-                                                    <tr key={event.id || `${event.client}-${event.date}`}>
-                                                        <td className="px-4 py-3 font-bold text-gray-900">{event.client || event.eventType || 'Event'}</td>
-                                                        <td className="px-4 py-3 text-gray-600">{event.date}</td>
-                                                        <td className="px-4 py-3 text-right font-bold text-gray-900">{event.pax}</td>
-                                                        <td className="px-4 py-3 text-gray-600">{event.status || event.eventType}</td>
-                                                    </tr>
-                                                ))}
-                                                {!upcomingWorkloadData.length && <tr><td colSpan="4" className="px-4 py-8 text-center font-bold text-gray-400">No upcoming events.</td></tr>}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </section>
-
-                                <section className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Operational Alerts</h3>
-                                    <p className="mb-5 text-sm font-semibold text-gray-500">Queues that should be handled before they become customer issues.</p>
-                                    <div className="space-y-3">
-                                        {operationalAlerts.map((alert) => (
-                                            <div key={alert.label} className={`rounded-2xl border p-4 ${alert.severity === 'danger' ? 'border-red-200 bg-red-50' : alert.severity === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-emerald-100 bg-emerald-50'}`}>
-                                                <div className="flex items-start justify-between gap-4">
-                                                    <p className="text-sm font-black text-gray-900">{alert.label}</p>
-                                                    <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-gray-950 shadow-sm">{alert.count}</span>
-                                                </div>
-                                                <button onClick={() => alert.label.includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-gray-900">Open queue</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </section>
-                            </div>
-
                             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                                <section className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Package Performance</h3>
-                                    <p className="mb-5 text-sm font-semibold text-gray-500">Which packages are producing bookings and value.</p>
-                                    <div className="space-y-3">
-                                        {packagePerformanceData.map((pkg) => (
-                                            <div key={pkg.label || pkg.name} className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 p-4">
-                                                <div>
-                                                    <p className="font-black text-gray-950">{pkg.label || pkg.name}</p>
-                                                    <p className="text-xs font-bold text-gray-500">{pkg.count} bookings</p>
+                                <section className="admin-panel overflow-hidden">
+                                    <div className="flex flex-col gap-3 border-b border-gray-100 bg-white p-6 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <p className="admin-kicker">Sales Mix</p>
+                                            <h3 className="mt-1 text-lg font-black text-gray-950">Package Performance</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">Which packages are producing bookings and value.</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <span className="inline-flex items-center gap-2 rounded-xl bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#720101]">
+                                                <Package className="h-4 w-4" />
+                                                {visiblePackagePerformanceData.length} of {packagePerformanceData.length}
+                                            </span>
+                                            {renderAnalyticsFilterButton('packagePerformance', `Top ${packageViewFilters.limit}`)}
+                                        </div>
+                                    </div>
+                                    {activeAnalyticsFilterPanel === 'packagePerformance' && (
+                                        <div className="grid grid-cols-1 gap-3 border-b border-gray-100 bg-gray-50 p-5 sm:grid-cols-3">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Show
+                                                <select value={packageViewFilters.limit} onChange={(e) => setPackageViewFilters({ ...packageViewFilters, limit: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {PERFORMANCE_LIMIT_OPTIONS.map(value => <option key={value} value={value}>Top {value} packages</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Sort by
+                                                <select value={packageViewFilters.sort} onChange={(e) => setPackageViewFilters({ ...packageViewFilters, sort: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    <option value="revenue">Revenue</option>
+                                                    <option value="bookings">Bookings</option>
+                                                    <option value="name">Package name</option>
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Min bookings
+                                                <input type="number" min="0" value={packageViewFilters.minBookings} onChange={(e) => setPackageViewFilters({ ...packageViewFilters, minBookings: e.target.value })} placeholder="Show all" className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none" />
+                                            </label>
+                                        </div>
+                                    )}
+                                    <div className="max-h-[31rem] space-y-3 overflow-y-auto p-6">
+                                        {visiblePackagePerformanceData.map((pkg) => (
+                                            <div key={pkg.label || pkg.name} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-black text-gray-950">{pkg.label || pkg.name}</p>
+                                                        <p className="mt-1 text-xs font-bold text-gray-500">{pkg.count} bookings</p>
+                                                    </div>
+                                                    <p className="shrink-0 text-right font-black text-amber-700">{formatCurrency(pkg.revenue || 0)}</p>
                                                 </div>
-                                                <p className="font-black text-amber-700">{formatCurrency(pkg.revenue || 0)}</p>
+                                                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                                                    <div className="h-full rounded-full bg-[#720101]" style={{ width: `${Math.max(8, (Number(pkg.revenue || 0) / maxPackageRevenue) * 100)}%` }} />
+                                                </div>
                                             </div>
                                         ))}
-                                        {!packagePerformanceData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No package data yet.</div>}
+                                        {!visiblePackagePerformanceData.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No package data for the selected filters.</div>}
                                     </div>
                                 </section>
 
-                                <section className="admin-panel p-6">
-                                    <h3 className="mb-1 text-lg font-black text-gray-950">Menu Performance</h3>
-                                    <p className="mb-5 text-sm font-semibold text-gray-500">Dish selections from actual booking items.</p>
-                                    <div className="h-72">
-                                        {menuPerformanceData.length ? (
+                                <section className="admin-panel overflow-hidden">
+                                    <div className="flex flex-col gap-3 border-b border-gray-100 bg-white p-6 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <p className="admin-kicker">Dish Velocity</p>
+                                            <h3 className="mt-1 text-lg font-black text-gray-950">Menu Performance</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">Dish selections from actual booking items.</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <span className="inline-flex items-center gap-2 rounded-xl bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#720101]">
+                                                <ClipboardList className="h-4 w-4" />
+                                                Top {visibleMenuPerformanceData.length}
+                                            </span>
+                                            {renderAnalyticsFilterButton('menuPerformance', MENU_CATEGORY_OPTIONS.find(option => option.value === menuViewFilters.category)?.label || 'Dish type')}
+                                        </div>
+                                    </div>
+                                    {activeAnalyticsFilterPanel === 'menuPerformance' && (
+                                        <div className="grid grid-cols-1 gap-3 border-b border-gray-100 bg-gray-50 p-5 sm:grid-cols-3">
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Dish type
+                                                <select value={menuViewFilters.category} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, category: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {MENU_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Show
+                                                <select value={menuViewFilters.limit} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, limit: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    {PERFORMANCE_LIMIT_OPTIONS.map(value => <option key={value} value={value}>Top {value} dishes</option>)}
+                                                </select>
+                                            </label>
+                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                Rank by
+                                                <select value={menuViewFilters.sort} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, sort: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
+                                                    <option value="selections">Selections</option>
+                                                    <option value="pax">Pax served</option>
+                                                    <option value="name">Dish name</option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                    )}
+                                    <div className="h-[31rem] p-6">
+                                        {visibleMenuPerformanceData.length ? (
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={menuPerformanceData} layout="vertical" margin={{ left: 40 }}>
+                                                <BarChart data={visibleMenuPerformanceData} layout="vertical" margin={{ left: 24, right: 12, top: 6, bottom: 6 }}>
                                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
                                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
-                                                    <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#374151', fontWeight: 700 }} width={130} />
+                                                    <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#374151', fontWeight: 700 }} width={150} />
                                                     <RechartsTooltip />
-                                                    <Bar dataKey="selections" fill="#720101" radius={[0, 6, 6, 0]} name="Selections" />
+                                                    <Bar dataKey={menuViewFilters.sort === 'pax' ? 'paxServed' : 'selections'} fill="#720101" radius={[0, 6, 6, 0]} name={menuViewFilters.sort === 'pax' ? 'Pax served' : 'Selections'} />
                                                 </BarChart>
                                             </ResponsiveContainer>
-                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No menu selections yet.</div>}
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No menu selections for the selected filters.</div>}
                                     </div>
                                 </section>
                             </div>

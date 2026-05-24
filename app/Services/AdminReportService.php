@@ -270,7 +270,7 @@ class AdminReportService
             ->selectRaw('SUM(COALESCE(bookings.total_cost, bookings.budget, 0)) as revenue')
             ->groupBy('package_key')
             ->orderByDesc('revenue')
-            ->limit(8)
+            ->limit(50)
             ->get()
             ->map(function ($row) use ($packageNames) {
                 $packageKey = (string) ($row->package_key ?: 'Unassigned');
@@ -295,12 +295,25 @@ class AdminReportService
             ->when($filters['date_from'] ?? null, fn ($q, $date) => $q->where('bookings.event_date', '>=', $date))
             ->when($filters['date_to'] ?? null, fn ($q, $date) => $q->where('bookings.event_date', '<=', $date))
             ->when($filters['event_type'] ?? null, fn ($q, $type) => $q->where('bookings.event_type', $type))
+            ->when($filters['booking_status'] ?? null, fn ($q, $status) => $q->where('bookings.status', $status))
+            ->when($filters['payment_status'] ?? null, function ($q, $status) {
+                $q->whereExists(function ($subquery) use ($status) {
+                    $subquery->select(DB::raw(1))
+                        ->from('payments')
+                        ->whereColumn('payments.booking_id', 'bookings.id')
+                        ->where('payments.status', $status);
+                });
+            })
+            ->when($filters['package_id'] ?? null, fn ($q, $id) => $q->where('bookings.package_id', $id))
+            ->when($filters['city'] ?? null, fn ($q, $city) => $q->where('bookings.venue_city', 'like', '%' . trim($city) . '%'))
+            ->when($filters['pax_min'] ?? null, fn ($q, $pax) => $q->where('bookings.pax', '>=', (int) $pax))
+            ->when($filters['pax_max'] ?? null, fn ($q, $pax) => $q->where('bookings.pax', '<=', (int) $pax))
             ->select('menu_items.name as label', 'menu_items.category')
             ->selectRaw('COUNT(booking_items.id) as selections')
             ->selectRaw('SUM(bookings.pax) as pax_served')
             ->groupBy('menu_items.name', 'menu_items.category')
             ->orderByDesc('selections')
-            ->limit(10)
+            ->limit(50)
             ->get()
             ->map(fn ($row) => [
                 'label' => $row->label,
@@ -652,6 +665,14 @@ class AdminReportService
             ->when($filters['date_to'] ?? null, fn ($q, $date) => $q->where('event_date', '<=', $date))
             ->when($filters['event_type'] ?? null, fn ($q, $type) => $q->where('event_type', $type))
             ->when($filters['booking_status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['payment_status'] ?? null, function ($q, $status) {
+                $q->whereExists(function ($subquery) use ($status) {
+                    $subquery->select(DB::raw(1))
+                        ->from('payments')
+                        ->whereColumn('payments.booking_id', 'bookings.id')
+                        ->where('payments.status', $status);
+                });
+            })
             ->when($filters['package_id'] ?? null, fn ($q, $id) => $q->where('package_id', $id))
             ->when($filters['city'] ?? null, fn ($q, $city) => $q->where('venue_city', 'like', '%' . trim($city) . '%'))
             ->when($filters['pax_min'] ?? null, fn ($q, $pax) => $q->where('pax', '>=', (int) $pax))

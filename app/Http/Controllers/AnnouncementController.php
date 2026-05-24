@@ -33,6 +33,21 @@ class AnnouncementController extends Controller
         return response()->json($query->get());
     }
 
+    public function publicIndex(Request $request)
+    {
+        $limit = min(max((int) $request->query('limit', 4), 1), 8);
+
+        $announcements = Announcement::visibleNow()
+            ->where('visibility', 'all_customers')
+            ->orderByRaw("CASE WHEN type = 'urgent' THEN 0 WHEN type = 'promo' THEN 1 ELSE 2 END")
+            ->latest('published_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (Announcement $announcement) => $this->publicPayload($announcement));
+
+        return response()->json($announcements);
+    }
+
     public function store(Request $request)
     {
         $data = $this->validated($request);
@@ -109,7 +124,7 @@ class AnnouncementController extends Controller
 
     private function validated(Request $request, ?int $ignoreId = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'title' => 'required|string|max:255',
             'summary' => 'nullable|string|max:500',
             'body' => 'nullable|string',
@@ -129,5 +144,41 @@ class AnnouncementController extends Controller
             'cta_url' => 'nullable|string|max:255',
             'image_path' => 'nullable|string|max:255',
         ]);
+
+        $data['send_email'] = $request->boolean('send_email') ? 'true' : 'false';
+
+        return $data;
+    }
+
+    private function publicPayload(Announcement $announcement): array
+    {
+        return [
+            'id' => $announcement->id,
+            'title' => $announcement->title,
+            'slug' => $announcement->slug,
+            'summary' => $announcement->summary,
+            'body' => $announcement->body,
+            'type' => $announcement->type,
+            'cta_label' => $announcement->cta_label,
+            'cta_url' => $announcement->cta_url,
+            'image_path' => $announcement->image_path,
+            'image_url' => $this->imageUrl($announcement->image_path),
+            'published_at' => optional($announcement->published_at)->toDateTimeString(),
+            'starts_at' => optional($announcement->starts_at)->toDateTimeString(),
+            'ends_at' => optional($announcement->ends_at)->toDateTimeString(),
+        ];
+    }
+
+    private function imageUrl(?string $path): ?string
+    {
+        if (blank($path)) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        return '/storage/' . ltrim($path, '/');
     }
 }

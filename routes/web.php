@@ -39,6 +39,7 @@ Route::get('/', fn () => Inertia::render('LandingPage'))->name('home');
 Route::get('/about', fn () => Inertia::render('About'))->name('about');
 Route::get('/amenities', fn () => Inertia::render('Amenities'))->name('amenities');
 Route::get('/contact', fn () => Inertia::render('Contact'))->name('contact');
+Route::get('/api/announcements', [AnnouncementController::class, 'publicIndex'])->middleware('cache.headers:public;max_age=60;etag');
 Route::post('/webhook/paymongo', PayMongoWebhookController::class)->name('webhook.paymongo');
 
 Route::middleware('guest')->group(function () {
@@ -245,12 +246,6 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::put('/api/admin/event-types/{id}', [SettingsController::class, 'updateEventType']);
     Route::delete('/api/admin/event-types/{id}', [SettingsController::class, 'deleteEventType']);
     Route::put('/api/admin/menu-items/{id}/pricing', [SettingsController::class, 'updateDishPricing']);
-    Route::get('/api/admin/announcements', [AnnouncementController::class, 'index']);
-    Route::post('/api/admin/announcements', [AnnouncementController::class, 'store']);
-    Route::patch('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'update']);
-    Route::post('/api/admin/announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
-    Route::post('/api/admin/announcements/{announcement}/archive', [AnnouncementController::class, 'archive']);
-    Route::post('/api/admin/announcements/{announcement}/send-test', [AnnouncementController::class, 'sendTest']);
 });
 
 Route::fallback(function (Request $request) {
