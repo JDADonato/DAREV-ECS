@@ -259,9 +259,91 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
     );
 };
 
+const announcementTypeLabels = {
+    general: 'Announcement',
+    promo: 'Special Offer',
+    event_reminder: 'Event Reminder',
+    holiday_advisory: 'Holiday Advisory',
+    menu_update: 'Menu Update',
+    service_notice: 'Service Notice',
+    urgent: 'Important Notice',
+};
+
+const announcementImage = (announcement) => {
+    const path = announcement?.image_url || announcement?.image_path;
+    if (!path) return '';
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('/')) return path;
+    return `/storage/${path.replace(/^\/+/, '')}`;
+};
+
+const HomepageAnnouncements = ({ announcements }) => {
+    if (!announcements.length) return null;
+
+    const [featured, ...rest] = announcements;
+    const image = announcementImage(featured);
+
+    return (
+        <section className="bg-white px-5 py-12 sm:px-8">
+            <div className="mx-auto max-w-7xl">
+                <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p className="text-xs font-black uppercase tracking-[.22em] text-[#f0aa0b]">Latest Updates</p>
+                        <h2 className="mt-2 font-display text-3xl font-bold text-[#1a1a1a]">Announcements from Eloquente</h2>
+                    </div>
+                    <p className="max-w-xl text-sm font-medium leading-6 text-gray-500">
+                        Fresh advisories, menu notes, and booking updates from the team.
+                    </p>
+                </div>
+
+                <div className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
+                    <article className="overflow-hidden rounded-3xl border border-[#720101]/10 bg-[#fffaf3] shadow-sm">
+                        {image && <img src={image} alt="" className="h-64 w-full object-cover" />}
+                        <div className="p-6 md:p-8">
+                            <span className="inline-flex rounded-full bg-[#720101]/10 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-[#720101]">
+                                {announcementTypeLabels[featured.type] || 'Announcement'}
+                            </span>
+                            <h3 className="mt-4 font-display text-2xl font-bold leading-tight text-[#1a1a1a] md:text-3xl">
+                                {featured.title}
+                            </h3>
+                            <p className="mt-3 max-w-3xl text-sm font-medium leading-7 text-gray-600">
+                                {featured.summary || featured.body}
+                            </p>
+                            {featured.cta_label && featured.cta_url && (
+                                <Link href={featured.cta_url} className="mt-6 inline-flex items-center rounded-full bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-wider text-white transition-colors hover:bg-[#5a0101]">
+                                    {featured.cta_label}
+                                </Link>
+                            )}
+                        </div>
+                    </article>
+
+                    <div className="grid gap-4">
+                        {rest.slice(0, 3).map((announcement) => (
+                            <article key={announcement.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                                <span className="text-[11px] font-black uppercase tracking-widest text-[#720101]">
+                                    {announcementTypeLabels[announcement.type] || 'Announcement'}
+                                </span>
+                                <h3 className="mt-2 text-lg font-black text-[#1a1a1a]">{announcement.title}</h3>
+                                <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-gray-500">
+                                    {announcement.summary || announcement.body}
+                                </p>
+                                {announcement.cta_label && announcement.cta_url && (
+                                    <Link href={announcement.cta_url} className="mt-3 inline-flex text-sm font-black text-[#720101] hover:text-[#f0aa0b]">
+                                        {announcement.cta_label}
+                                    </Link>
+                                )}
+                            </article>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
 const LandingPage = () => {
     const { user, logout } = useAuth();
     const [journeyData, setJourneyData] = useState({ bookings: [], payments: [] });
+    const [announcements, setAnnouncements] = useState([]);
 
     useEffect(() => {
         if (user && user.role === 'Client') {
@@ -276,6 +358,25 @@ const LandingPage = () => {
                 .catch(err => console.error(err));
         }
     }, [user]);
+
+    useEffect(() => {
+        let mounted = true;
+
+        fetch('/api/announcements?limit=4')
+            .then(r => r.ok ? r.json() : [])
+            .then(data => {
+                if (mounted) {
+                    setAnnouncements(Array.isArray(data) ? data : []);
+                }
+            })
+            .catch(() => {
+                if (mounted) setAnnouncements([]);
+            });
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     return (
         <div className="min-h-screen flex flex-col bg-white" style={{fontFamily:"'Inter',sans-serif"}}>
@@ -328,6 +429,8 @@ const LandingPage = () => {
             </section>
 
             <FloatingJourneyTracker bookings={journeyData.bookings} payments={journeyData.payments} />
+
+            <HomepageAnnouncements announcements={announcements} />
 
             {/* TRUST BAR (marquee) */}
             <div className="relative overflow-hidden border-y border-[#720101]/10 bg-[#fffaf3]">

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 
-const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmitting = false }) => {
+const FoodTastingStep = ({ bookingData, updateBooking, onReview, onBack, isSubmitting = false }) => {
     const [showTasting, setShowTasting] = useState(true);
     const [sameAsAbove, setSameAsAbove] = useState(false);
     const [tastingData, setTastingData] = useState({
@@ -57,14 +57,14 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmi
         };
 
         updateBooking(finalData);
-        onSubmit(finalData);
+        onReview(finalData);
     };
 
     const handleSkipToCheckout = () => {
         if (isSubmitting) return;
         const finalData = { wantsTasting: false };
         updateBooking(finalData);
-        onSubmit(finalData);
+        onReview(finalData);
     };
 
     const getMinDate = () => {
@@ -118,8 +118,8 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmi
                             disabled={isSubmitting}
                             className="booking-preset"
                         >
-                            <strong>{isSubmitting ? 'Submitting...' : 'Submit without tasting'}</strong>
-                            <span>Proceed with the booking request.</span>
+                            <strong>Review without tasting</strong>
+                            <span>Check your choices before sending.</span>
                         </button>
                     </div>
 
@@ -211,7 +211,7 @@ const FoodTastingStep = ({ bookingData, updateBooking, onSubmit, onBack, isSubmi
                 <button onClick={onBack} disabled={isSubmitting} className="booking-secondary-btn disabled:cursor-not-allowed disabled:opacity-50">Back</button>
                 {showTasting && (
                     <button onClick={handleSubmitWithTasting} disabled={isSubmitting} className="booking-primary-btn disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500">
-                        {isSubmitting ? 'Submitting...' : 'Submit Booking'}
+                        Review Booking
                     </button>
                 )}
             </div>

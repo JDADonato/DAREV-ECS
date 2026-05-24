@@ -131,18 +131,20 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
             <div className="booking-step-grid">
                 <section className="booking-step-panel">
                     <p className="booking-step-kicker">Contact and venue</p>
-                    <h2>Where should the team prepare for your event?</h2>
+                    <h2>Where is your event?</h2>
                     <p className="booking-step-copy">
-                        Add the contact details and venue location. The summary updates right away so the cost stays easy to understand.
+                        Add the contact person and venue address so the team can confirm logistics and any location fees.
                     </p>
 
-                    <div className="booking-summary-strip">
-                        <span>Location surcharge</span>
-                        <strong>{locationSurcharge > 0 ? `PHP ${locationSurcharge.toLocaleString()}` : 'Included'}</strong>
-                    </div>
-                    <div className="booking-summary-strip">
-                        <span>Venue access</span>
-                        <strong>{isHighRise ? 'High-rise' : 'Standard'}</strong>
+                    <div className="booking-detail-summary">
+                        <div>
+                            <span>Location fee</span>
+                            <strong>{locationSurcharge > 0 ? `PHP ${locationSurcharge.toLocaleString()}` : 'Included'}</strong>
+                        </div>
+                        <div>
+                            <span>Venue access</span>
+                            <strong>{isHighRise ? 'High-rise' : 'Standard'}</strong>
+                        </div>
                     </div>
                 </section>
 

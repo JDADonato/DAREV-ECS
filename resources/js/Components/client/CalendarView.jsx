@@ -341,22 +341,16 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                                 {selectedDate ? formatDisplayDate(selectedDate) : 'Choose a date'} - {selectedTime ? formatTimeRange(selectedTime) : 'Choose a time'}
                             </strong>
                             <p>
-                                {!selectedDate
+                                {availabilityError
+                                    || (!selectedDate
                                     ? 'Pick a date to check capacity'
                                     : availabilityLoading
                                         ? 'Checking this date...'
                                         : availability?.isFull
                                             ? 'This date is fully booked'
                                             : availability
-                                                ? 'Date is available'
-                                                : 'Availability pending'}
-                                {' '}
-                                {availabilityError
-                                    || (!selectedDate
-                                        ? 'Remaining event slots and guest capacity will appear here.'
-                                        : availability
-                                            ? `${availability.remainingEvents} event slot${availability.remainingEvents === 1 ? '' : 's'} left and ${availability.remainingPax} pax capacity remaining.`
-                                            : 'We will verify capacity before you continue.')}
+                                                ? 'Date is available.'
+                                                : 'We will verify availability before you continue.')}
                             </p>
                         </div>
                         <div className={`booking-availability-metrics ${availability?.isFull ? 'full' : availability ? 'open' : ''}`}>

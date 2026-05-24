@@ -37,6 +37,51 @@ const stepMessages = {
     7: { eyebrow: 'Food tasting', greeting: 'Would you like to schedule a tasting?', sub: 'Choose whether you want a tasting, then submit your event plan.' },
 };
 
+const money = (value) => `₱${Number(value || 0).toLocaleString()}`;
+
+const summarizeBookingCosts = (data = {}) => {
+    const baseEventCost = data.totalCost || 0;
+    const serviceCharge = Math.round(baseEventCost * (data.package_service_charge_rate || 0));
+    const vatFee = Math.round(baseEventCost * (data.package_vat_rate || 0));
+    const locationSurcharge = ['outside-16-30', 'outside-31-50'].includes(data.venueDistance)
+        ? Math.round(baseEventCost * (data.package_location_surcharge_rate || 0.20))
+        : 0;
+    const highRiseFee = data.isHighRise ? Math.round(baseEventCost * (data.package_floor_surcharge_rate || 0.03)) : 0;
+    const decemberSurcharge = data.date && data.package_december_surcharge && new Date(data.date).getMonth() === 11
+        ? data.package_december_surcharge
+        : 0;
+    const contingencyFee = data.package_security_type === 'contingency'
+        ? Math.round((baseEventCost + serviceCharge + vatFee + locationSurcharge + highRiseFee + decemberSurcharge) * (data.package_security_rate || 0))
+        : 0;
+    const cashBond = data.package_security_type === 'cash_bond' ? (data.package_cash_bond || 0) : 0;
+    const overtimeFee = Math.max(0, (data.duration || 4) - 4) * 5000;
+    const laborSurcharge = serviceCharge + vatFee + highRiseFee + decemberSurcharge + contingencyFee + cashBond + overtimeFee;
+
+    return {
+        baseEventCost,
+        serviceCharge,
+        vatFee,
+        locationSurcharge,
+        highRiseFee,
+        decemberSurcharge,
+        contingencyFee,
+        cashBond,
+        overtimeFee,
+        laborSurcharge,
+        finalTotal: baseEventCost + locationSurcharge + laborSurcharge,
+    };
+};
+
+const menuRowsFromBooking = (data = {}) => Object.values(data.customMenu || {})
+    .flat()
+    .filter(Boolean)
+    .map((dish) => ({
+        id: `${dish.id}-${dish.name}`,
+        name: dish.name,
+        included: dish.includedInPackage,
+        cost: dish.includedInPackage ? 0 : Number(dish.costPerHead || dish.priceAdj || 0) * Number(data.pax || 0),
+    }));
+
 const BookingWizard = () => {
     const { user } = useAuth();
     const toast = useToast();
@@ -62,6 +107,8 @@ const BookingWizard = () => {
         confirmText: null,
     });
     const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
+    const [reviewData, setReviewData] = useState(null);
+    const [showReviewModal, setShowReviewModal] = useState(false);
 
     const showModal = (type, title, message, onConfirm = null, confirmText = null) => {
         setModal({ isOpen: true, type, title, message, onConfirm, confirmText });
@@ -139,7 +186,7 @@ const BookingWizard = () => {
         setCurrentStep(targetStep);
     };
 
-    const submitBooking = async (extraData = {}) => {
+    const openReviewModal = (extraData = {}) => {
         if (isSubmittingBooking) return;
         const merged = { ...bookingData, ...extraData };
 
@@ -156,29 +203,21 @@ const BookingWizard = () => {
             return;
         }
 
+        setReviewData(merged);
+        setShowReviewModal(true);
+    };
+
+    const submitBooking = async (extraData = {}) => {
+        if (isSubmittingBooking) return;
+        const merged = { ...bookingData, ...extraData };
+
         if (!user) {
             saveBookingDraft(merged, currentStep);
             showModal('error', 'Save your event plan', 'You have already built your event plan. Create an account to save it, submit it, and continue from your dashboard.', () => router.get('/register'), 'Register Now');
             return;
         }
 
-        const baseEventCost = merged.totalCost || 0;
-        const serviceCharge = Math.round(baseEventCost * (merged.package_service_charge_rate || 0));
-        const vatFee = Math.round(baseEventCost * (merged.package_vat_rate || 0));
-        const locationSurcharge = ['outside-16-30', 'outside-31-50'].includes(merged.venueDistance)
-            ? Math.round(baseEventCost * (merged.package_location_surcharge_rate || 0.20))
-            : 0;
-        const highRiseFee = merged.isHighRise ? Math.round(baseEventCost * (merged.package_floor_surcharge_rate || 0.03)) : 0;
-        const decemberSurcharge = merged.date && merged.package_december_surcharge && new Date(merged.date).getMonth() === 11
-            ? merged.package_december_surcharge
-            : 0;
-        const contingencyFee = merged.package_security_type === 'contingency'
-            ? Math.round((baseEventCost + serviceCharge + vatFee + locationSurcharge + highRiseFee + decemberSurcharge) * (merged.package_security_rate || 0))
-            : 0;
-        const cashBond = merged.package_security_type === 'cash_bond' ? (merged.package_cash_bond || 0) : 0;
-        const overtimeFee = Math.max(0, (merged.duration || 4) - 4) * 5000;
-        const laborSurcharge = serviceCharge + vatFee + highRiseFee + decemberSurcharge + contingencyFee + cashBond + overtimeFee;
-        const finalTotal = baseEventCost + locationSurcharge + laborSurcharge;
+        const { locationSurcharge, laborSurcharge, finalTotal } = summarizeBookingCosts(merged);
 
         const payload = {
             user_id: user.id,
@@ -188,7 +227,7 @@ const BookingWizard = () => {
             pax: merged.pax,
             budget: merged.budget,
             dietary_notes: merged.dietaryNotes,
-            package_id: merged.package_id || 'custom',
+            package_id: String(merged.package_id || 'custom'),
             client_full_name: merged.client_full_name,
             venue_address_line: merged.venue_address_line,
             venue_street: merged.venue_street,
@@ -225,6 +264,7 @@ const BookingWizard = () => {
             }
 
             clearDraft();
+            setShowReviewModal(false);
             showModal(
                 'success',
                 'Booking Submitted',
@@ -274,8 +314,11 @@ const BookingWizard = () => {
         if (currentStep === 6) {
             return <EventSurcharges bookingData={bookingData} updateBooking={updateBooking} onNext={nextStep} onBack={prevStep} user={user} />;
         }
-        return <FoodTastingStep bookingData={bookingData} updateBooking={updateBooking} onSubmit={submitBooking} onBack={prevStep} isSubmitting={isSubmittingBooking} />;
+        return <FoodTastingStep bookingData={bookingData} updateBooking={updateBooking} onReview={openReviewModal} onBack={prevStep} isSubmitting={isSubmittingBooking} />;
     };
+
+    const reviewCosts = summarizeBookingCosts(reviewData || bookingData);
+    const reviewMenuRows = menuRowsFromBooking(reviewData || bookingData);
 
     return (
         <div className="booking-page min-h-screen bg-[#fffaf3] font-sans text-slate-900">
@@ -292,6 +335,87 @@ const BookingWizard = () => {
                         <div className="space-y-3 p-5">
                             <button onClick={handleResumeContinue} className="w-full rounded-xl bg-[#720101] px-4 py-3 text-sm font-black text-white transition hover:bg-[#5a0101]">Continue Booking</button>
                             <button onClick={handleResumeStartFresh} className="w-full rounded-xl border border-[#720101]/15 bg-white px-4 py-3 text-sm font-black text-[#720101] transition hover:bg-[#fff7e8]">Start a New Booking</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showReviewModal && reviewData && (
+                <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm animate-fadeIn">
+                    <div className="booking-review-modal">
+                        <div className="booking-review-header">
+                            <p>Final review</p>
+                            <h3>Check your event plan before sending.</h3>
+                            <button
+                                type="button"
+                                onClick={() => setShowReviewModal(false)}
+                                disabled={isSubmittingBooking}
+                                aria-label="Close review"
+                            >
+                                &times;
+                            </button>
+                        </div>
+
+                        <div className="booking-review-body custom-scrollbar">
+                            <section className="booking-review-card">
+                                <span>Event</span>
+                                <dl>
+                                    <div><dt>Type</dt><dd>{reviewData.eventType || '-'}</dd></div>
+                                    <div><dt>Date</dt><dd>{reviewData.date || '-'}</dd></div>
+                                    <div><dt>Time</dt><dd>{reviewData.time || '-'}</dd></div>
+                                    <div><dt>Guests</dt><dd>{reviewData.pax ? `${reviewData.pax} pax` : '-'}</dd></div>
+                                    <div><dt>Venue</dt><dd>{[reviewData.venue_address_line, reviewData.venue_city].filter(Boolean).join(', ') || '-'}</dd></div>
+                                </dl>
+                            </section>
+
+                            <section className="booking-review-card">
+                                <span>Menu</span>
+                                {reviewData.package_name && (
+                                    <div className="booking-review-package">
+                                        <strong>{reviewData.package_name}</strong>
+                                        <b>{money(reviewData.package_pricing_type === 'flat' ? reviewData.package_flat_price : (reviewData.package_base_price || 0) * (reviewData.pax || 0))}</b>
+                                    </div>
+                                )}
+                                {reviewMenuRows.length > 0 ? (
+                                    <ul className="booking-review-menu">
+                                        {reviewMenuRows.map(row => (
+                                            <li key={row.id}>
+                                                <span>{row.name}</span>
+                                                <strong>{row.included ? 'Included' : money(row.cost)}</strong>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="booking-review-muted">No dishes selected yet.</p>
+                                )}
+                            </section>
+
+                            <section className="booking-review-card">
+                                <span>{reviewData.wantsTasting ? 'Food tasting' : 'Food tasting skipped'}</span>
+                                {reviewData.wantsTasting ? (
+                                    <dl>
+                                        <div><dt>Guest</dt><dd>{reviewData.tasting_guest_name || reviewData.client_full_name || '-'}</dd></div>
+                                        <div><dt>Date</dt><dd>{reviewData.tasting_preferred_date || '-'}</dd></div>
+                                        <div><dt>Time</dt><dd>{reviewData.tasting_preferred_time || '-'}</dd></div>
+                                    </dl>
+                                ) : (
+                                    <p className="booking-review-muted">You can coordinate a tasting with the team later from your dashboard.</p>
+                                )}
+                            </section>
+                        </div>
+
+                        <div className="booking-review-footer">
+                            <div>
+                                <span>Estimated total</span>
+                                <strong>{money(reviewCosts.finalTotal)}</strong>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => submitBooking(reviewData)}
+                                disabled={isSubmittingBooking}
+                            >
+                                {isSubmittingBooking ? 'Submitting...' : 'Submit Booking'}
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -85,6 +85,7 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
 
     const [pricingOverrides, setPricingOverrides] = useState({});
     const [customItems, setCustomItems] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
+    const [openSections, setOpenSections] = useState(() => new Set(['details', 'menu']));
 
     useEffect(() => {
         const fetchOverrides = async () => {
@@ -150,6 +151,58 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
     const totalEstimate = menuTotal + packageServiceCharge + packageVat + locationSurcharge + floorSurcharge + decemberSurcharge + contingencyFee + cashBond + overtimeFee;
     const paymentSchedule = useMemo(() => paymentScheduleForDate(date, totalEstimate), [date, totalEstimate]);
     const totalDishCount = Object.values(selectedDishes).reduce((sum, arr) => sum + (arr?.length || 0), 0);
+    const feeCount = [
+        menuExtraFee,
+        packageServiceCharge,
+        packageVat,
+        locationSurcharge,
+        floorSurcharge,
+        decemberSurcharge,
+        contingencyFee,
+        cashBond,
+        overtimeFee,
+    ].filter(value => Number(value || 0) > 0).length;
+    const hasFees = feeCount > 0;
+    const hasTerms = Boolean(package_security_label);
+
+    useEffect(() => {
+        const preferred = ['menu'];
+        if (totalDishCount <= 7) preferred.unshift('details');
+        if (totalDishCount <= 4 && hasTerms) preferred.push('terms');
+        if (totalDishCount <= 5 && hasFees) preferred.push('fees');
+        setOpenSections(new Set(preferred.slice(0, totalDishCount > 7 || feeCount > 3 ? 1 : 2)));
+    }, [totalDishCount, hasTerms, hasFees, feeCount]);
+
+    const toggleSection = (sectionId) => {
+        setOpenSections(prev => {
+            const next = new Set(prev);
+            if (next.has(sectionId)) {
+                next.delete(sectionId);
+                return next;
+            }
+            const openLimit = totalDishCount > 7 || feeCount > 3 ? 1 : 2;
+            const ordered = [sectionId, ...Array.from(next).filter(id => id !== sectionId)].slice(0, openLimit);
+            return new Set(ordered);
+        });
+    };
+
+    const Section = ({ id, title, meta, children }) => {
+        const isOpen = openSections.has(id);
+        return (
+            <section className="booking-summary-section">
+                <button type="button" className="booking-summary-section-toggle" onClick={() => toggleSection(id)} aria-expanded={isOpen}>
+                    <span>{title}</span>
+                    {meta && <em>{meta}</em>}
+                    <svg className={isOpen ? 'open' : ''} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                    </svg>
+                </button>
+                <div className={`booking-summary-section-body ${isOpen ? 'open' : ''}`}>
+                    <div>{children}</div>
+                </div>
+            </section>
+        );
+    };
 
     const selectedMenuRows = Object.keys(CATEGORY_LABELS).flatMap(category => {
         const dishIds = selectedDishes[category] || [];
@@ -218,9 +271,8 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
                     </div>
                 </div>
 
-                <div className="custom-scrollbar flex-1 space-y-5 overflow-y-auto px-5 py-5">
-                    <section>
-                        <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Details</p>
+                <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto px-5 py-4">
+                    <Section id="details" title="Details" meta={eventType || 'Event'}>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                             <span className="text-slate-500">Type</span>
                             <strong className="text-right text-slate-900">{eventType || '-'}</strong>
@@ -245,11 +297,10 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
                                 </>
                             )}
                         </div>
-                    </section>
+                    </Section>
 
                     {package_security_label && (
-                        <section className="border-t border-[#720101]/10 pt-5">
-                            <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Terms</p>
+                        <Section id="terms" title="Payment terms" meta={`${paymentSchedule.rows.length} part${paymentSchedule.rows.length === 1 ? '' : 's'}`}>
                             <div className="space-y-2 rounded-lg bg-white p-3 text-xs font-bold text-slate-500 ring-1 ring-[#720101]/10">
                                 {paymentSchedule.rows.map(row => (
                                     <div key={row.label} className="flex justify-between gap-3">
@@ -260,25 +311,24 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
                                 <p className="pt-2 leading-relaxed text-slate-400">{paymentSchedule.note}</p>
                                 <p className="pt-1 leading-relaxed text-slate-400">{package_security_label}: {package_security_description}</p>
                             </div>
-                        </section>
+                        </Section>
                     )}
 
-                    <section className="border-t border-[#720101]/10 pt-5">
-                        <div className="mb-3 flex items-center justify-between">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Menu</p>
-                            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-[#720101] ring-1 ring-[#720101]/10">{totalDishCount} selected</span>
-                        </div>
+                    <Section id="menu" title="Menu" meta={`${totalDishCount} selected`}>
                         {selectedMenuRows.length === 0 ? (
                             <p className="text-sm font-semibold text-slate-400">No dishes selected yet.</p>
                         ) : (
                             <div className="space-y-2">
                                 {(package_base_price || package_flat_price) && (
-                                    <div className="grid grid-cols-[1fr_auto] gap-3 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-[#720101]/10">
-                                        <span className="min-w-0 truncate font-bold text-[#720101]">{package_name || 'Package base'}</span>
-                                        <span className="font-black text-[#720101]">{money(package_pricing_type === 'flat' ? package_flat_price : package_base_price * (pax || 0))}</span>
+                                    <div className="booking-summary-package-row">
+                                        <div>
+                                            <span>Selected package</span>
+                                            <strong>{package_name || 'Package base'}</strong>
+                                        </div>
+                                        <b>{money(package_pricing_type === 'flat' ? package_flat_price : package_base_price * (pax || 0))}</b>
                                     </div>
                                 )}
-                                {selectedMenuRows.slice(0, 8).map(row => (
+                                {selectedMenuRows.map(row => (
                                     <div key={row.id} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
                                         <span className="min-w-0 truncate font-semibold text-slate-700">{row.name}</span>
                                         <span className={`font-bold ${row.included ? 'text-slate-400' : 'text-slate-900'}`}>
@@ -286,16 +336,12 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
                                         </span>
                                     </div>
                                 ))}
-                                {selectedMenuRows.length > 8 && (
-                                    <p className="text-xs font-bold text-slate-400">+{selectedMenuRows.length - 8} more dishes</p>
-                                )}
                             </div>
                         )}
-                    </section>
+                    </Section>
 
                     {(menuExtraFee > 0 || packageServiceCharge > 0 || packageVat > 0 || locationSurcharge > 0 || floorSurcharge > 0 || decemberSurcharge > 0 || contingencyFee > 0 || cashBond > 0 || overtimeFee > 0) && (
-                        <section className="border-t border-[#720101]/10 pt-5">
-                            <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Additional Fees</p>
+                        <Section id="fees" title="Additional fees" meta={`${feeCount} item${feeCount === 1 ? '' : 's'}`}>
                             <div className="space-y-2 text-sm">
                                 {menuExtraFee > 0 && <div className="flex justify-between"><span className="text-slate-500">Extra menu selections</span><strong>{money(menuExtraFee)}</strong></div>}
                                 {packageServiceCharge > 0 && <div className="flex justify-between"><span className="text-slate-500">Service charge</span><strong>{money(packageServiceCharge)}</strong></div>}
@@ -307,7 +353,7 @@ const BlueprintPanel = ({ bookingData, collapsed = false, onToggle }) => {
                                 {cashBond > 0 && <div className="flex justify-between"><span className="text-slate-500">{package_security_label || 'Cash bond'}</span><strong>{money(cashBond)}</strong></div>}
                                 {overtimeFee > 0 && <div className="flex justify-between"><span className="text-slate-500">Extra service hours</span><strong>{money(overtimeFee)}</strong></div>}
                             </div>
-                        </section>
+                        </Section>
                     )}
                 </div>
 

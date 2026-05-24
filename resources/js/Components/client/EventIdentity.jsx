@@ -38,6 +38,9 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
         onNext(true);
     };
 
+    const selectedEventType = eventTypes.find((eventType) => eventType.label === selected);
+    const selectedSetups = selectedEventType?.applicable_setups || bookingData.event_applicable_setups || [];
+
     return (
         <div className="booking-step">
             <div className="booking-step-grid">
@@ -85,6 +88,19 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                                     </button>
                                 );
                             })}
+                        </div>
+                    )}
+                    {selectedEventType && selectedSetups.length > 0 && (
+                        <div className="booking-event-inclusions">
+                            <div>
+                                <p className="booking-step-kicker">Included setup</p>
+                                <h3>{selectedEventType.label} includes</h3>
+                            </div>
+                            <ul>
+                                {selectedSetups.map((item) => (
+                                    <li key={item}>{item}</li>
+                                ))}
+                            </ul>
                         </div>
                     )}
                 </section>
