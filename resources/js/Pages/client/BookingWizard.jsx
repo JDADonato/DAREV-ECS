@@ -12,7 +12,7 @@ import EventSurcharges from '../../Components/client/EventSurcharges';
 import FoodTastingStep from '../../Components/client/FoodTastingStep';
 import BlueprintPanel from '../../Components/client/BlueprintPanel';
 import Modal from '../../Components/common/Modal';
-import ChatBubble from '../../Components/common/ChatBubble';
+import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 
 const totalSteps = 7;
@@ -124,6 +124,11 @@ const BookingWizard = () => {
             return false;
         }
 
+        if (stepToValidate === 1 && !String(dataToValidate.eventName || '').trim()) {
+            showModal('error', 'Name your event', 'Enter an event name so you can easily track it from your dashboard.');
+            return false;
+        }
+
         if (stepToValidate === 2 && (!dataToValidate.date || !dataToValidate.time)) {
             showModal('error', 'Choose your schedule', 'Select your preferred date and start time so we can check availability for your event.');
             return false;
@@ -224,6 +229,7 @@ const BookingWizard = () => {
             event_date: merged.date,
             event_time: merged.time,
             event_type: merged.eventType,
+            event_name: merged.eventName,
             pax: merged.pax,
             budget: merged.budget,
             dietary_notes: merged.dietaryNotes,
@@ -498,7 +504,7 @@ const BookingWizard = () => {
                 />
             </div>
 
-            {user && <ChatBubble user={user} />}
+            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

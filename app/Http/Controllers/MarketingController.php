@@ -8,6 +8,7 @@ use App\Models\BookingReviewTask;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 /**
@@ -24,7 +25,7 @@ class MarketingController extends Controller
             // Phase 2: Inertia.js Payload Optimization
             // Lazy Evaluation: Only queries the database if the 'bookings' prop is explicitly requested via partial reloads.
             'bookings' => Inertia::lazy(function () {
-                return Booking::with('user:id,username,role')
+                return Booking::with('user:id,full_name,username,role')
                     ->orderBy('event_date', 'asc')
                     ->get();
             })
@@ -37,12 +38,13 @@ class MarketingController extends Controller
      */
     public function getAllBookings(Request $request)
     {
-        $query = Booking::with(['user:id,username,email,phone,role', 'assignee:id,username', 'reviewTasks'])
+        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
                     ->where('client_full_name', 'like', $term)
+                    ->orWhere('event_name', 'like', $term)
                     ->orWhere('venue_city', 'like', $term)
                     ->orWhere('event_type', 'like', $term));
             })
@@ -254,7 +256,7 @@ class MarketingController extends Controller
      */
     public function show(int $id)
     {
-        $booking = Booking::with(['user:id,username,email,phone,role', 'assignee:id,username', 'reviewTasks'])->find($id);
+        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])->find($id);
 
         if (!$booking) {
             return response()->json(['error' => 'Booking not found'], 404);

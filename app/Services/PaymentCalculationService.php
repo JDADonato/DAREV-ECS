@@ -224,9 +224,12 @@ class PaymentCalculationService
             'live_status' => $this->bookingLiveStatus($paidRatio),
         ];
 
-        if ($paidRatio >= 1) {
-            $updates['status'] = 'Completed';
-        } elseif ($paidRatio >= 0.10) {
+        if (in_array($booking->status, ['Completed', 'Cancelled', 'cancelled'], true)) {
+            $booking->update($updates);
+            return;
+        }
+
+        if ($paidRatio >= 0.10) {
             $updates['status'] = 'Reserved';
         }
 

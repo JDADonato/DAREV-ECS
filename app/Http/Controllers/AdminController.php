@@ -43,7 +43,8 @@ class AdminController extends Controller
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('username', 'like', $term)
+                    ->where('full_name', 'like', $term)
+                    ->orWhere('username', 'like', $term)
                     ->orWhere('email', 'like', $term)
                     ->orWhere('phone', 'like', $term));
             })
@@ -51,12 +52,12 @@ class AdminController extends Controller
 
         if ($request->boolean('paginated')) {
             $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
-            $employees = $query->paginate($perPage, ['id', 'username', 'email', 'phone', 'role', 'created_at']);
+            $employees = $query->paginate($perPage, ['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
 
             return ApiResponse::paginated($employees, UserSummaryResource::collection($employees->getCollection())->resolve());
         }
 
-        $employees = $query->get(['id', 'username', 'email', 'phone', 'role', 'created_at']);
+        $employees = $query->get(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
 
         return response()->json(UserSummaryResource::collection($employees)->resolve());
     }
@@ -64,16 +65,17 @@ class AdminController extends Controller
     public function createEmployee(Request $request)
     {
         $request->validate([
+            'full_name' => 'required|string|max:255',
             'username' => 'required|string|unique:users,username',
-            'password' => 'required|string|min:6',
             'email'    => 'nullable|email|unique:users,email',
             'phone'    => 'nullable|string',
             'role'     => 'required|in:Marketing,Accounting',
         ]);
 
         $user = User::create([
+            'full_name' => $request->full_name,
             'username' => $request->username,
-            'password' => $request->password,
+            'password' => 'eloquestaff@2026',
             'email'    => $request->email,
             'phone'    => $request->phone,
             'role'     => $request->role,
@@ -85,6 +87,7 @@ class AdminController extends Controller
     public function updateEmployee(Request $request, int $id)
     {
         $request->validate([
+            'full_name' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', Rule::unique('users', 'username')->ignore($id)],
             'email'    => ['nullable', 'email', Rule::unique('users', 'email')->ignore($id)],
             'phone'    => 'nullable|string',
@@ -99,6 +102,7 @@ class AdminController extends Controller
         }
 
         $updates = [];
+        if ($request->has('full_name')) $updates['full_name'] = $request->full_name;
         if ($request->has('username')) $updates['username'] = $request->username;
         if ($request->has('email'))    $updates['email'] = $request->email;
         if ($request->has('phone'))    $updates['phone'] = $request->phone;
@@ -132,7 +136,7 @@ class AdminController extends Controller
     public function getCustomers(Request $request)
     {
         $query = User::where('role', 'Client')
-            ->select(['id', 'username', 'email', 'phone', 'role', 'created_at'])
+            ->select(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at'])
             ->withCount('bookings')
             ->withMax('bookings', 'event_date')
             ->when($request->query('search'), function ($q, $search) {
@@ -215,6 +219,7 @@ class AdminController extends Controller
                 'budget',
                 'package_id',
                 'event_type',
+                'event_name',
                 'client_full_name',
                 'client_email',
                 'client_phone',
@@ -236,8 +241,8 @@ class AdminController extends Controller
                 'created_at',
             ])
             ->with([
-                'user:id,username,email,phone,role',
-                'assignee:id,username',
+                'user:id,full_name,username,email,phone,role',
+                'assignee:id,full_name,username',
                 'reviewTasks',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])
@@ -247,6 +252,7 @@ class AdminController extends Controller
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
                     ->where('client_full_name', 'like', $term)
+                    ->orWhere('event_name', 'like', $term)
                     ->orWhere('client_email', 'like', $term)
                     ->orWhere('venue_city', 'like', $term));
             })

@@ -20,10 +20,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // 1. Drop RLS policies that reference receiver_id on messages
-        DB::statement("drop policy if exists messages_select_participant_or_staff on public.messages");
-        DB::statement("drop policy if exists messages_update_participant_or_staff on public.messages");
-        DB::statement("drop policy if exists messages_delete_participant_or_staff on public.messages");
+        $isPostgres = DB::connection()->getDriverName() === 'pgsql';
+
+        if ($isPostgres) {
+            // 1. Drop RLS policies that reference receiver_id on messages
+            DB::statement("drop policy if exists messages_select_participant_or_staff on public.messages");
+            DB::statement("drop policy if exists messages_update_participant_or_staff on public.messages");
+            DB::statement("drop policy if exists messages_delete_participant_or_staff on public.messages");
+        }
 
         // 2. Alter the table
         Schema::table('messages', function (Blueprint $table) {
@@ -35,6 +39,10 @@ return new class extends Migration
 
             $table->index('conversation_id');
         });
+
+        if (!$isPostgres) {
+            return;
+        }
 
         // Make receiver_id nullable via raw SQL (avoids doctrine/dbal requirement)
         DB::statement('ALTER TABLE messages ALTER COLUMN receiver_id DROP NOT NULL');
@@ -80,6 +88,15 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            Schema::table('messages', function (Blueprint $table) {
+                $table->dropForeign(['conversation_id']);
+                $table->dropColumn('conversation_id');
+            });
+
+            return;
+        }
+
         // Drop conversation policies
         DB::statement("drop policy if exists conversations_server_manage on public.conversations");
         DB::statement("drop policy if exists conversations_select_own_or_staff on public.conversations");

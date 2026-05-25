@@ -17,6 +17,7 @@ class Booking extends Model
         'budget',
         'package_id',
         'event_type',
+        'event_name',
         'event_type_id',
         'client_full_name',
         'venue_address_line',

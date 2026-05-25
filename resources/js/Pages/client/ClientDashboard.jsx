@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { router } from '@inertiajs/react';
-import ChatBubble from '../../Components/common/ChatBubble';
+import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
-import ReceiptModal from '../../Components/common/ReceiptModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
+
+const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
 
 const peso = (value) => `₱${Number(value || 0).toLocaleString()}`;
 const settledStatuses = ['Paid', 'Verified'];
@@ -24,6 +25,7 @@ const menuCategories = [
     { id: 'drink', label: 'Refreshments' },
 ];
 const dashboardSections = ['details', 'menu', 'tastings', 'payments', 'history'];
+const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
 
 const readStoredDashboardValue = (key, fallback = null) => {
     if (typeof window === 'undefined') return fallback;
@@ -56,11 +58,18 @@ const buildJourneySteps = (booking, payments) => {
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettledPaymentStatus(payment.status));
+    const hasClarification = Boolean(booking.clarification_request);
     const needsClarification = Boolean(booking.clarification_request && !booking.clarification_response);
 
     return [
         { label: 'Booking submitted', done: true, action: 'Review event details' },
-        { label: 'Staff request', done: !needsClarification, action: 'Answer the details requested by the team', isPendingGate: needsClarification },
+        {
+            label: 'Staff request',
+            done: hasClarification && !needsClarification,
+            action: hasClarification ? 'Answer the details requested by the team' : 'No staff details requested yet',
+            isPendingGate: needsClarification,
+            notRequired: !hasClarification,
+        },
         { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices' },
         { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', isPendingGate: !isApproved },
         { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', locked: !isApproved },
@@ -89,7 +98,7 @@ const HistoryPanel = ({ bookings, onRemove }) => (
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                                    <h4 className="font-display text-lg font-bold text-[#1a1a1a]">{booking.client_full_name || 'Eloquente event'}</h4>
+                                    <h4 className="font-display text-lg font-bold text-[#1a1a1a]">{eventDisplayName(booking)}</h4>
                                     <span className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest ${String(booking.status).toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-700'}`}>
                                         {booking.status}
                                     </span>
@@ -139,6 +148,7 @@ const ClientDashboard = () => {
     const [savingDetails, setSavingDetails] = useState(false);
     const [uploadingImage, setUploadingImage] = useState(false);
     const [menuCatalog, setMenuCatalog] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
+    const [menuCatalogLoaded, setMenuCatalogLoaded] = useState(false);
     const [menuSelections, setMenuSelections] = useState({ starter: [], main: [], side: [], dessert: [], drink: [] });
     const [savingMenu, setSavingMenu] = useState(false);
     const [menuEditMode, setMenuEditMode] = useState(false);
@@ -173,8 +183,27 @@ const ClientDashboard = () => {
             setActiveSection(tab);
         }
         fetchData();
-        fetchMenuItemsFromAPI().then(setMenuCatalog);
     }, []);
+
+    useEffect(() => {
+        if (activeSection !== 'menu' || menuCatalogLoaded) return undefined;
+
+        let cancelled = false;
+        fetchMenuItemsFromAPI()
+            .then((catalog) => {
+                if (!cancelled) {
+                    setMenuCatalog(catalog);
+                    setMenuCatalogLoaded(true);
+                }
+            })
+            .catch((error) => {
+                console.error('Error fetching menu catalog:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeSection, menuCatalogLoaded]);
 
     useEffect(() => {
         if (activeBookingId) {
@@ -308,7 +337,10 @@ const ClientDashboard = () => {
     const activeBalance = Math.max(activeTotal - activePaid, 0);
     const activeProgress = activeTotal > 0 ? Math.min((activePaid / activeTotal) * 100, 100) : 0;
     const activeJourneySteps = React.useMemo(() => activeBooking ? buildJourneySteps(activeBooking, activePayments) : [], [activeBooking, activePayments]);
-    const remainingJourneySteps = React.useMemo(() => activeJourneySteps.filter((step) => !step.done), [activeJourneySteps]);
+    const actionableJourneySteps = React.useMemo(() => activeJourneySteps.filter((step) => !step.notRequired), [activeJourneySteps]);
+    const completedJourneySteps = React.useMemo(() => actionableJourneySteps.filter((step) => step.done), [actionableJourneySteps]);
+    const journeyProgress = actionableJourneySteps.length > 0 ? (completedJourneySteps.length / actionableJourneySteps.length) * 100 : 100;
+    const remainingJourneySteps = React.useMemo(() => actionableJourneySteps.filter((step) => !step.done), [actionableJourneySteps]);
 
     if (loading) {
         return (
@@ -537,7 +569,7 @@ const ClientDashboard = () => {
                                             className="flex w-full items-center justify-between rounded-2xl border border-[#720101]/25 bg-[#faf7f2] px-4 py-3 text-left shadow-inner transition-colors hover:bg-white"
                                         >
                                             <span className="min-w-0">
-                                                <span className="block truncate text-sm font-black text-[#1a1a1a]">{activeBooking?.client_full_name || 'Select booking'}</span>
+                                                <span className="block truncate text-sm font-black text-[#1a1a1a]">{activeBooking ? eventDisplayName(activeBooking) : 'Select booking'}</span>
                                                 <span className="mt-1 block text-xs font-semibold text-gray-500">{activeBooking ? `${new Date(activeBooking.event_date).toLocaleDateString()} · ${activeBooking.pax} pax` : 'Choose an event'}</span>
                                             </span>
                                             <svg className={`ml-3 h-5 w-5 shrink-0 text-[#720101] transition-transform ${eventPickerOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M19 9l-7 7-7-7" /></svg>
@@ -557,10 +589,10 @@ const ClientDashboard = () => {
                                                             className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${active ? 'bg-[#720101] text-white' : 'hover:bg-[#720101]/5'}`}
                                                         >
                                                             <span className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${active ? 'bg-white text-[#720101]' : 'bg-[#720101]/10 text-[#720101]'}`}>
-                                                                {booking.client_full_name?.charAt(0)?.toUpperCase() || 'E'}
+                                                                {eventDisplayName(booking)?.charAt(0)?.toUpperCase() || 'E'}
                                                             </span>
                                                             <span className="min-w-0">
-                                                                <span className={`block truncate text-sm font-black ${active ? 'text-white' : 'text-gray-950'}`}>{booking.client_full_name || 'Eloquente event'}</span>
+                                                                <span className={`block truncate text-sm font-black ${active ? 'text-white' : 'text-gray-950'}`}>{eventDisplayName(booking)}</span>
                                                                 <span className={`mt-1 block text-xs font-semibold ${active ? 'text-white/75' : 'text-gray-500'}`}>{new Date(booking.event_date).toLocaleDateString()} · {booking.pax} pax · {booking.status}</span>
                                                             </span>
                                                         </button>
@@ -642,7 +674,7 @@ const ClientDashboard = () => {
                                         </div>
                                     </div>
 
-                                    {activeBooking.clarification_request && (
+                                    {activeBooking.clarification_request && !activeBooking.clarification_response && (
                                         <div className="rounded-3xl border border-[#f0aa0b]/35 bg-[#fff7e8] p-6 shadow-sm sm:p-7">
                                             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                                 <div className="max-w-2xl">
@@ -650,11 +682,6 @@ const ClientDashboard = () => {
                                                     <h3 className="mt-2 text-xl font-display font-bold text-[#1a1a1a]">The team needs a few details from you.</h3>
                                                     <p className="mt-2 text-sm font-semibold leading-6 text-gray-600">{activeBooking.clarification_request}</p>
                                                 </div>
-                                                {activeBooking.clarification_response && (
-                                                    <span className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-green-700">
-                                                        Response sent
-                                                    </span>
-                                                )}
                                             </div>
                                             <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
                                                 <label className="block">
@@ -692,23 +719,23 @@ const ClientDashboard = () => {
                                             <div className="min-w-[170px]">
                                                 <div className="mb-2 flex justify-between text-xs font-bold text-gray-500">
                                                     <span>Progress</span>
-                                                    <span>{Math.round((activeJourneySteps.filter((step) => step.done).length / activeJourneySteps.length) * 100)}%</span>
+                                                    <span>{Math.round(journeyProgress)}%</span>
                                                 </div>
                                                 <div className="h-2 rounded-full bg-gray-100">
                                                     <div
                                                         className="h-2 rounded-full bg-[#720101] transition-all duration-700"
-                                                        style={{ width: `${(activeJourneySteps.filter((step) => step.done).length / activeJourneySteps.length) * 100}%` }}
+                                                        style={{ width: `${journeyProgress}%` }}
                                                     />
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
                                             {activeJourneySteps.map((step, index) => (
-                                                <div key={step.label} className={`rounded-2xl border p-3 relative ${step.done ? 'border-green-200 bg-green-50' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20' : step.locked ? 'border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50'}`}>
-                                                    <div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
-                                                        {step.done ? '✓' : step.locked ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> : index + 1}
+                                                <div key={step.label} className={`rounded-2xl border p-3 relative ${step.done ? 'border-green-200 bg-green-50' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20' : step.notRequired ? 'border-gray-100 bg-white' : step.locked ? 'border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50'}`}>
+                                                    <div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.notRequired ? 'bg-gray-100 text-gray-400' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
+                                                        {step.done ? 'OK' : step.notRequired ? '-' : step.locked ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> : index + 1}
                                                     </div>
-                                                    <p className={`text-xs font-bold ${step.locked ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
+                                                    <p className={`text-xs font-bold ${step.locked || step.notRequired ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
                                                     {!step.done && <p className={`mt-1 text-[11px] font-medium leading-4 ${step.isPendingGate ? 'text-[#b27a00]' : 'text-gray-500'}`}>{step.action}</p>}
                                                 </div>
                                             ))}
@@ -1390,14 +1417,18 @@ const ClientDashboard = () => {
                 </div>
             )}
 
-            {user && <ChatBubble user={user} />}
+            {user && <DeferredChatBubble user={user} />}
 
-            <ReceiptModal
-                isOpen={receiptModal.isOpen}
-                onClose={() => setReceiptModal({ isOpen: false, payment: null, booking: null })}
-                payment={receiptModal.payment}
-                booking={receiptModal.booking}
-            />
+            {receiptModal.isOpen && (
+                <Suspense fallback={null}>
+                    <ReceiptModal
+                        isOpen={receiptModal.isOpen}
+                        onClose={() => setReceiptModal({ isOpen: false, payment: null, booking: null })}
+                        payment={receiptModal.payment}
+                        booking={receiptModal.booking}
+                    />
+                </Suspense>
+            )}
         </div>
     );
 };

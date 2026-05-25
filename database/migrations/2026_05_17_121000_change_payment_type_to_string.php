@@ -7,6 +7,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::statement('ALTER TABLE payments ALTER COLUMN payment_type TYPE VARCHAR(255) USING payment_type::text');
     }
 
@@ -16,6 +20,8 @@ return new class extends Migration
             ->whereNotIn('payment_type', ['Reservation', 'DownPayment', 'Final'])
             ->update(['payment_type' => 'Final']);
 
-        DB::statement("ALTER TABLE payments ALTER COLUMN payment_type TYPE VARCHAR(255) USING payment_type::text");
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            DB::statement("ALTER TABLE payments ALTER COLUMN payment_type TYPE VARCHAR(255) USING payment_type::text");
+        }
     }
 };

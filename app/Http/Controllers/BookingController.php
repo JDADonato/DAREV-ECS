@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Mail\BookingContinuationReminder;
 use App\Notifications\NewBookingNotification;
 use App\Services\BookingValidationService;
-use App\Services\BusinessRulesService;
+use App\Services\CalendarAvailabilityService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -44,6 +44,7 @@ class BookingController extends Controller
             'budget'      => 'nullable|numeric',
             'package_id'  => 'nullable|string',
             'event_type'  => 'nullable|string',
+            'event_name'  => 'required|string|max:255',
             'menu_items'  => 'nullable|array',
             'total_cost'  => 'nullable|numeric',
         ]);
@@ -103,6 +104,7 @@ class BookingController extends Controller
             'budget'               => $request->budget,
             'package_id'           => $request->package_id,
             'event_type'           => $request->event_type,
+            'event_name'           => $request->event_name,
             'client_full_name'     => $request->client_full_name,
             'venue_address_line'   => $request->venue_address_line,
             'venue_street'         => $request->venue_street,
@@ -290,12 +292,8 @@ class BookingController extends Controller
      * 12 months so the React calendar can disable them on initial render.
      * Also includes dates within the 7-day lead-time window.
      */
-    public function getDisabledDates()
+    public function getDisabledDates(CalendarAvailabilityService $availabilityService)
     {
-        $rules   = \App\Models\BusinessRule::getActive();
-        $maxEvents = $rules ? $rules->maximum_capacity_per_day : BusinessRulesService::MAX_EVENTS_PER_DAY;
-        $maxPax    = BusinessRulesService::MAX_PAX_PER_DAY;
-
         // Lead-time window: today through today + 6 days are always blocked
         $today     = Carbon::today();
         $rangeEnd  = Carbon::today()->addMonths(12);
@@ -321,8 +319,21 @@ class BookingController extends Controller
             ->get();
 
         foreach ($bookingStats as $stat) {
-            if ((int) $stat->event_count >= $maxEvents || (int) $stat->total_pax >= $maxPax) {
+            $availability = $availabilityService->availabilityForDate($stat->booking_date);
+            if ($availability['isFull']) {
                 $disabledDates[] = $stat->booking_date;
+            }
+        }
+
+        $overriddenDates = \App\Models\CalendarAvailabilityOverride::query()
+            ->where('date', '>', $today->toDateString())
+            ->where('date', '<=', $rangeEnd->toDateString())
+            ->pluck('date');
+
+        foreach ($overriddenDates as $overrideDate) {
+            $dateString = Carbon::parse($overrideDate)->toDateString();
+            if ($availabilityService->availabilityForDate($dateString)['isFull']) {
+                $disabledDates[] = $dateString;
             }
         }
 
@@ -335,38 +346,12 @@ class BookingController extends Controller
      * Check availability for a specific date.
      * Ported from: bookingController.checkAvailability()
      */
-    public function checkAvailability(string $date)
+    public function checkAvailability(string $date, CalendarAvailabilityService $availabilityService)
     {
-        $rules = \App\Models\BusinessRule::getActive();
+        $availability = $availabilityService->availabilityForDate($date);
+        unset($availability['override']);
 
-        $start = Carbon::parse($date)->toDateString();
-        $end = Carbon::parse($date)->addDay()->toDateString();
-
-        $eventCount = Booking::where('event_date', '>=', $start)
-            ->where('event_date', '<', $end)
-            ->whereNotIn('status', ['Cancelled', 'cancelled'])
-            ->count();
-
-        $totalPax = Booking::where('event_date', '>=', $start)
-            ->where('event_date', '<', $end)
-            ->whereNotIn('status', ['Cancelled', 'cancelled'])
-            ->sum('pax') ?? 0;
-
-        $maxEvents = $rules ? $rules->maximum_capacity_per_day : BusinessRulesService::MAX_EVENTS_PER_DAY;
-        $maxPax = BusinessRulesService::MAX_PAX_PER_DAY; // Max pax isn't in business rules dynamically, fallback to constant
-
-        $remainingPax = max(0, $maxPax - $totalPax);
-        $remainingEvents = max(0, $maxEvents - $eventCount);
-        $isFull = $remainingEvents === 0 || $remainingPax === 0;
-
-        return response()->json([
-            'date'            => $date,
-            'isFull'          => $isFull,
-            'remainingPax'    => $remainingPax,
-            'remainingEvents' => $remainingEvents,
-            'currentPax'      => (int) $totalPax,
-            'currentEvents'   => $eventCount,
-        ]);
+        return response()->json($availability);
     }
 
     /**
@@ -593,7 +578,7 @@ class BookingController extends Controller
 
         // Only update provided fields (COALESCE equivalent)
         $fields = [
-            'event_date', 'event_time', 'pax',
+            'event_date', 'event_time', 'pax', 'event_name',
             'client_full_name', 'venue_address_line', 'venue_street',
             'venue_city', 'venue_province', 'venue_zip_code',
             'client_email', 'client_phone',
@@ -607,6 +592,20 @@ class BookingController extends Controller
         }
 
         if (!empty($updates)) {
+            try {
+                if (array_key_exists('event_date', $updates) || array_key_exists('pax', $updates)) {
+                    BookingValidationService::validateBookingConstraints([
+                        'event_date' => $updates['event_date'] ?? $booking->event_date,
+                        'pax' => $updates['pax'] ?? $booking->pax,
+                    ], $booking);
+                }
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return response()->json(['errors' => $e->errors()], 422);
+            } catch (\Exception $e) {
+                Log::error("Booking update validation error: {$e->getMessage()}");
+                return response()->json(['error' => $e->getMessage()], 500);
+            }
+
             $booking->update($updates);
         }
 

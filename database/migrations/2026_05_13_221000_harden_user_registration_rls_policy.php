@@ -7,6 +7,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::statement('drop policy if exists users_insert_staff_or_registration on public.users');
         DB::statement(<<<'SQL'
             create policy users_insert_staff_or_registration
@@ -21,6 +25,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::statement('drop policy if exists users_insert_staff_or_registration on public.users');
         DB::statement(<<<'SQL'
             create policy users_insert_staff_or_registration

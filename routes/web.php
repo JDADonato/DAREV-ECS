@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\CalendarAvailabilityController;
 use App\Http\Controllers\ClientDashboardController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
@@ -63,6 +64,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::put('/api/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::put('/api/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/api/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // ─── Legacy Messaging Routes (kept for backward compatibility) ───
     Route::get('/api/messages/conversations', [MessageController::class, 'conversations']);
@@ -178,6 +180,9 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
+    Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);
+    Route::put('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'upsert']);
+    Route::delete('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'destroy']);
     Route::post('/api/settings/packages', [SettingsController::class, 'createPackage']);
     Route::put('/api/settings/packages/{id}', [SettingsController::class, 'updatePackage']);
     Route::post('/api/settings/event-types', [SettingsController::class, 'createEventType']);

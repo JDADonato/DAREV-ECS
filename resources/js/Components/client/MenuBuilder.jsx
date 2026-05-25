@@ -694,6 +694,20 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         onNext(true);
     };
 
+    const clearAllSelections = () => {
+        const emptySelections = { starter: [], main: [], side: [], dessert: [], drink: [] };
+        setSelections(emptySelections);
+        setMenuFilter('all');
+        setMenuSearch('');
+        setMenuPage(1);
+        updateBooking({
+            selectedDishes: emptySelections,
+            customMenu: {},
+            totalCost: hasPackagePricing ? getPackageBaseTotal() : 0,
+            menuExtraFee: 0,
+        });
+    };
+
     const totalDishCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0);
     const missingCategories = CATEGORY_TABS.filter(tab => (selections[tab.key] || []).length === 0);
     const allCategoriesFilled = missingCategories.length === 0;
@@ -707,6 +721,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
     const isGuidedMenu = bookingData.package_id === 'custom';
     const isCuratedSelection = bookingData.package_id && !['custom', 'budget-guided'].includes(String(bookingData.package_id));
     const canAdvanceMenu = isGuidedMenu ? (!isLastCategory || allCategoriesFilled) : allCategoriesFilled;
+    const hasAnySelection = totalDishCount > 0;
     const showMenuGuide = isGuidedMenu || hasPackagePricing;
     const goToPreviousCategory = () => {
         if (!isGuidedMenu || isFirstCategory) {
@@ -1346,15 +1361,25 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
 
             {/* Bottom Bar */}
             <div className="flex justify-between pt-8 items-center border-t border-gray-100 mt-8">
-                <button
-                    onClick={goToPreviousCategory}
-                    className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
-                >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                    {isGuidedMenu && !isFirstCategory ? 'Previous category' : 'Back to packages'}
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                    <button
+                        onClick={goToPreviousCategory}
+                        className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
+                    >
+                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        {isGuidedMenu && !isFirstCategory ? 'Previous category' : 'Back to packages'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={clearAllSelections}
+                        disabled={!hasAnySelection}
+                        className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300"
+                    >
+                        Clear all
+                    </button>
+                </div>
 
                 <div className="flex items-center gap-4">
                     <div className="text-right">

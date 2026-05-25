@@ -15,9 +15,9 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
 const CHAT_CACHE_TTL_MS = 60000;
 const BOOKING_CACHE_TTL_MS = 180000;
 
-const ChatBubble = ({ user }) => {
+const ChatBubble = ({ user, openOnMount = false }) => {
     const hasRealtime = typeof window !== 'undefined' && Boolean(window.Echo);
-    const [isOpen, setIsOpen] = useState(false);
+    const [isOpen, setIsOpen] = useState(Boolean(openOnMount));
     const [conversation, setConversation] = useState(null);
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
@@ -38,6 +38,7 @@ const ChatBubble = ({ user }) => {
     const lastMessagesLoadedAtRef = useRef(0);
     const messagesLoadedForRef = useRef(null);
     const lastBookingsLoadedAtRef = useRef(0);
+    const openedOnMountRef = useRef(false);
 
     // Keep ref in sync
     useEffect(() => { conversationRef.current = conversation; }, [conversation]);
@@ -244,6 +245,12 @@ const ChatBubble = ({ user }) => {
         setIsOpen(false);
         setShowBookingPicker(false);
     };
+
+    useEffect(() => {
+        if (!openOnMount || openedOnMountRef.current) return;
+        openedOnMountRef.current = true;
+        handleOpen();
+    }, [openOnMount]);
 
     const handleSend = async (e) => {
         e.preventDefault();

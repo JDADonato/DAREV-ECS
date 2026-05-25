@@ -25,7 +25,6 @@ export default defineConfig({
                 manualChunks: {
                     inertia: ['@inertiajs/react'],
                     ui: ['@headlessui/react', 'lucide-react'],
-                    charts: ['recharts'],
                 }
             }
         }

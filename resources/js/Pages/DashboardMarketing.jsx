@@ -33,6 +33,9 @@ const SECURITY_OPTIONS = [
     { value: 'cash_bond', label: 'Php 1,500 Cash Bond' },
 ];
 
+const MARKETING_BOOKINGS_URL = '/api/marketing/bookings?paginated=1&per_page=100';
+const BOOKING_BACKED_TABS = ['calendar', 'inquiries', 'documents'];
+
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
     type: defaultType,
@@ -65,6 +68,7 @@ const emptyEventTypeForm = () => ({
 const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
 const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
 const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
+const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
 
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
@@ -84,6 +88,21 @@ const DashboardMarketing = () => {
     const [editingPackageId, setEditingPackageId] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [updatingBookingIds, setUpdatingBookingIds] = useState({});
+    const [inquirySearch, setInquirySearch] = useState('');
+    const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
+    const [inquiryAssignmentFilter, setInquiryAssignmentFilter] = useState('all');
+    const [inquirySort, setInquirySort] = useState('eventDateAsc');
+    const [inquiryDateFrom, setInquiryDateFrom] = useState('');
+    const [inquiryDateTo, setInquiryDateTo] = useState('');
+    const [availabilityMonth, setAvailabilityMonth] = useState(() => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    });
+    const [availabilityOverrides, setAvailabilityOverrides] = useState([]);
+    const [availabilityDate, setAvailabilityDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [availabilityForm, setAvailabilityForm] = useState({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+    const [availabilityLoading, setAvailabilityLoading] = useState(false);
+    const [availabilitySaving, setAvailabilitySaving] = useState(false);
 
     // PDF Export State
     const [showExportModal, setShowExportModal] = useState(false);
@@ -106,17 +125,23 @@ const DashboardMarketing = () => {
     useEffect(() => {
         if (activeTab === 'settings') {
             fetchMarketingSettings();
+        } else if (activeTab === 'availability') {
+            fetchAvailabilityOverrides();
+        } else if (BOOKING_BACKED_TABS.includes(activeTab) && bookings.length === 0) {
+            fetchBookings();
         }
-    }, [activeTab]);
+    }, [activeTab, availabilityMonth]);
 
     useSmartRefresh({
-        enabled: true,
+        enabled: ['settings', 'availability', ...BOOKING_BACKED_TABS].includes(activeTab),
         interval: activeTab === 'settings' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'settings') {
                 fetchMarketingSettings();
-            } else {
+            } else if (activeTab === 'availability') {
+                fetchAvailabilityOverrides({ silent });
+            } else if (BOOKING_BACKED_TABS.includes(activeTab)) {
                 fetchBookings({ silent });
             }
         },
@@ -125,7 +150,7 @@ const DashboardMarketing = () => {
     const fetchBookings = async ({ silent = false } = {}) => {
         try {
             // Session auth - no token needed
-            const response = await fetch('/api/marketing/bookings', {
+            const response = await fetch(MARKETING_BOOKINGS_URL, {
                 headers: {
                     'Accept': 'application/json',
                 }
@@ -143,6 +168,85 @@ const DashboardMarketing = () => {
 
     const handleLogout = () => {
         router.post('/logout');
+    };
+
+    const fetchAvailabilityOverrides = async ({ silent = false } = {}) => {
+        if (!silent) setAvailabilityLoading(true);
+        try {
+            const response = await fetch(`/api/calendar-availability?month=${availabilityMonth}`, { headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error('Availability load failed');
+            const data = await response.json();
+            setAvailabilityOverrides(getListData(data));
+        } catch (error) {
+            console.error(error);
+            toast.error('Could not load availability controls.');
+        } finally {
+            if (!silent) setAvailabilityLoading(false);
+        }
+    };
+
+    const selectAvailabilityDate = async (date) => {
+        setAvailabilityDate(date);
+        const existing = availabilityOverrides.find(item => item.date === date);
+        if (existing) {
+            setAvailabilityForm({
+                is_locked: Boolean(existing.is_locked),
+                remaining_events: existing.remainingEvents ?? '',
+                remaining_pax: existing.remainingPax ?? '',
+                note: existing.note || '',
+            });
+            return;
+        }
+        setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+        try {
+            const response = await fetch(`/api/bookings/availability/${date}`, { headers: { Accept: 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            setAvailabilityForm({ is_locked: Boolean(data.isLocked), remaining_events: data.remainingEvents ?? '', remaining_pax: data.remainingPax ?? '', note: '' });
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const saveAvailabilityOverride = async (event) => {
+        event.preventDefault();
+        setAvailabilitySaving(true);
+        try {
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({
+                    is_locked: availabilityForm.is_locked,
+                    remaining_events: availabilityForm.remaining_events === '' ? null : Number(availabilityForm.remaining_events),
+                    remaining_pax: availabilityForm.remaining_pax === '' ? null : Number(availabilityForm.remaining_pax),
+                    note: availabilityForm.note,
+                }),
+            });
+            if (!response.ok) throw new Error('Save failed');
+            toast.success('Availability updated.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            toast.error('Could not save availability override.');
+        } finally {
+            setAvailabilitySaving(false);
+        }
+    };
+
+    const clearAvailabilityOverride = async () => {
+        setAvailabilitySaving(true);
+        try {
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error('Clear failed');
+            setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+            toast.success('Availability override cleared.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            toast.error('Could not clear availability override.');
+        } finally {
+            setAvailabilitySaving(false);
+        }
     };
 
     const updateStatus = async (id, newStatus) => {
@@ -501,6 +605,7 @@ const DashboardMarketing = () => {
 
     const tabMeta = {
         calendar: 'Calendar',
+        availability: 'Availability',
         inquiries: 'Booking Review',
         documents: 'Event Documents',
         content: 'Announcements',
@@ -1026,8 +1131,112 @@ const DashboardMarketing = () => {
         );
     };
 
+    const renderAvailability = () => (
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+            <form onSubmit={saveAvailabilityOverride} className="marketing-panel p-6">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p className="marketing-kicker">Calendar Control</p>
+                        <h2 className="mt-1 text-xl font-black text-slate-950">Manage daily availability</h2>
+                    </div>
+                    <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Date</span>
+                        <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                    </label>
+                    <label className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+                        <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} />
+                        <span className="text-sm font-black text-red-800">Fully lock this date</span>
+                    </label>
+                    <label className="block">
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining event slots</span>
+                        <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                    </label>
+                    <label className="block">
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining pax</span>
+                        <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                    </label>
+                </div>
+                <label className="mt-4 block">
+                    <span className="text-xs font-black uppercase tracking-widest text-slate-500">Internal note</span>
+                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" placeholder="Reason for lock or capacity adjustment" />
+                </label>
+                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-50">Clear Override</button>
+                    <button type="submit" disabled={availabilitySaving} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save Availability'}</button>
+                </div>
+            </form>
+
+            <aside className="marketing-panel p-5">
+                <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900">Month overrides</h3>
+                    <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black text-primary-700">{availabilityOverrides.length}</span>
+                </div>
+                {availabilityLoading ? (
+                    <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Loading availability...</p>
+                ) : availabilityOverrides.length === 0 ? (
+                    <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">No overrides for this month.</p>
+                ) : (
+                    <div className="space-y-3">
+                        {availabilityOverrides.map((item) => (
+                            <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-primary-300 bg-primary-50' : 'border-slate-100 bg-slate-50 hover:bg-white'}`}>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-black text-slate-950">{formatDate(item.date)}</span>
+                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Locked' : 'Limited'}</span>
+                                </div>
+                                <p className="mt-2 text-xs font-bold text-slate-500">{item.remainingEvents} slots / {Number(item.remainingPax || 0).toLocaleString()} pax remaining</p>
+                                {item.note && <p className="mt-2 text-xs font-semibold text-slate-400">{item.note}</p>}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </aside>
+        </div>
+    );
+
     const renderInquiries = () => {
-        const pendingBookings = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
+        const pendingBookings = bookings
+            .filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status))
+            .filter((booking) => {
+                const query = inquirySearch.trim().toLowerCase();
+                const reviewStatus = String(booking.review_status || booking.status || '').toLowerCase();
+                const assigned = Boolean(booking.assigned_to);
+                const eventTime = booking.event_date ? new Date(booking.event_date).getTime() : 0;
+                const fromTime = inquiryDateFrom ? new Date(inquiryDateFrom).getTime() : null;
+                const toTime = inquiryDateTo ? new Date(inquiryDateTo).getTime() : null;
+
+                if (inquiryStatusFilter !== 'all' && reviewStatus !== inquiryStatusFilter) return false;
+                if (inquiryAssignmentFilter === 'assigned' && !assigned) return false;
+                if (inquiryAssignmentFilter === 'unassigned' && assigned) return false;
+                if (fromTime !== null && eventTime < fromTime) return false;
+                if (toTime !== null && eventTime > toTime) return false;
+                if (!query) return true;
+
+                return [
+                    `booking #${booking.id}`,
+                    String(booking.id),
+                    booking.event_name,
+                    booking.event_type,
+                    booking.client_full_name,
+                    booking.username,
+                    booking.client_email,
+                    booking.client_phone,
+                    booking.venue_city,
+                    booking.assigned_name,
+                ].filter(Boolean).join(' ').toLowerCase().includes(query);
+            })
+            .sort((a, b) => {
+                if (inquirySort === 'az' || inquirySort === 'za') {
+                    const left = eventDisplayName(a).toLowerCase();
+                    const right = eventDisplayName(b).toLowerCase();
+                    return inquirySort === 'az' ? left.localeCompare(right) : right.localeCompare(left);
+                }
+                const leftDate = new Date(inquirySort === 'oldest' || inquirySort === 'newest' ? (a.created_at || a.event_date) : a.event_date || 0).getTime();
+                const rightDate = new Date(inquirySort === 'oldest' || inquirySort === 'newest' ? (b.created_at || b.event_date) : b.event_date || 0).getTime();
+                return inquirySort === 'oldest' || inquirySort === 'eventDateAsc' ? leftDate - rightDate : rightDate - leftDate;
+            });
         return (
             <div className="space-y-4">
                 <div className="marketing-panel flex flex-col gap-2 p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -1036,6 +1245,34 @@ const DashboardMarketing = () => {
                         <h2 className="mt-1 text-xl font-bold text-slate-950">{pendingBookings.length} bookings need review</h2>
                     </div>
                     <p className="text-sm font-semibold text-slate-500">Claim, review, request missing details, then approve for payment.</p>
+                </div>
+
+                <div className="marketing-panel grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
+                    <input value={inquirySearch} onChange={(event) => setInquirySearch(event.target.value)} placeholder="Search inquiries" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold md:col-span-2" />
+                    <select value={inquiryStatusFilter} onChange={(event) => setInquiryStatusFilter(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
+                        <option value="all">All statuses</option>
+                        <option value="submitted">Submitted</option>
+                        <option value="under review">Under Review</option>
+                        <option value="needs customer details">Needs Customer Details</option>
+                        <option value="clarification received">Clarification Received</option>
+                    </select>
+                    <select value={inquiryAssignmentFilter} onChange={(event) => setInquiryAssignmentFilter(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
+                        <option value="all">All owners</option>
+                        <option value="assigned">Assigned</option>
+                        <option value="unassigned">Unassigned</option>
+                    </select>
+                    <select value={inquirySort} onChange={(event) => setInquirySort(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
+                        <option value="eventDateAsc">Event date ↑</option>
+                        <option value="eventDateDesc">Event date ↓</option>
+                        <option value="newest">Newest</option>
+                        <option value="oldest">Oldest</option>
+                        <option value="az">A-Z</option>
+                        <option value="za">Z-A</option>
+                    </select>
+                    <div className="grid grid-cols-2 gap-2 xl:col-span-1">
+                        <input type="date" value={inquiryDateFrom} onChange={(event) => setInquiryDateFrom(event.target.value)} className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                        <input type="date" value={inquiryDateTo} onChange={(event) => setInquiryDateTo(event.target.value)} className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                    </div>
                 </div>
 
                 {(
@@ -1047,7 +1284,7 @@ const DashboardMarketing = () => {
                                     <div className="px-6 py-5">
                                         <div className="flex items-center justify-between">
                                             <p className="text-sm font-bold text-primary-700 truncate">
-                                                Booking #{booking.id} - {booking.client_full_name || booking.username}
+                                                Booking #{booking.id} - {eventDisplayName(booking)}
                                             </p>
                                             <div className="ml-2 flex-shrink-0 flex">
                                                 <p className="px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full bg-yellow-100 text-yellow-800">
@@ -1605,7 +1842,7 @@ const DashboardMarketing = () => {
 
                 <div className="marketing-nav-wrap mb-5">
                     <nav className="marketing-nav">
-                        {['calendar', 'inquiries', 'documents', 'content', 'settings', 'messages'].map((tab) => {
+                        {['calendar', 'availability', 'inquiries', 'documents', 'content', 'settings', 'messages'].map((tab) => {
                             return (
                             <button
                                 key={tab}
@@ -1664,6 +1901,7 @@ const DashboardMarketing = () => {
                 )}
 
                 {activeTab === 'inquiries' && renderInquiries()}
+                {activeTab === 'availability' && renderAvailability()}
                 {activeTab === 'documents' && renderDocuments()}
                 {activeTab === 'content' && (
                     <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>

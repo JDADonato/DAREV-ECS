@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from '../Components/charts/LazyRecharts';
 import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
@@ -82,6 +82,10 @@ const DEFAULT_ANALYTICS_FILTERS = {
     snapshot_window: 'all',
 };
 
+const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=100';
+const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=100';
+const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=100';
+
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
     type: defaultType,
@@ -136,7 +140,7 @@ const DashboardAdmin = () => {
     const [empLoading, setEmpLoading] = useState(false);
     const [customerLoading, setCustomerLoading] = useState(false);
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
-    const [empForm, setEmpForm] = useState({ username: '', password: '', role: 'Marketing', email: '', phone: '' });
+    const [empForm, setEmpForm] = useState({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
     const [empFormLoading, setEmpFormLoading] = useState(false);
 
     // ==========================================
@@ -238,6 +242,15 @@ const DashboardAdmin = () => {
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
     const [auditRoleFilter, setAuditRoleFilter] = useState('All');
+    const [availabilityMonth, setAvailabilityMonth] = useState(() => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    });
+    const [availabilityOverrides, setAvailabilityOverrides] = useState([]);
+    const [availabilityLoading, setAvailabilityLoading] = useState(false);
+    const [availabilitySaving, setAvailabilitySaving] = useState(false);
+    const [availabilityDate, setAvailabilityDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [availabilityForm, setAvailabilityForm] = useState({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
 
     const analyticsSummary = analytics?.summary || {};
     const revenueTrendData = analytics?.revenueTrends || [];
@@ -378,7 +391,7 @@ const DashboardAdmin = () => {
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
         if (activeTab === 'users') {
-            bustAdminCache('/api/admin/employees', '/api/admin/customers');
+            bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
             fetchEmployees({ silent });
             fetchCustomers({ silent });
         } else if (activeTab === 'configuration') {
@@ -393,11 +406,13 @@ const DashboardAdmin = () => {
             fetchReportBuilder({ silent });
             fetchReportPreview({ silent });
         } else if (activeTab === 'bookings') {
-            bustAdminCache('/api/admin/bookings');
+            bustAdminCache(ADMIN_BOOKINGS_URL);
             fetchBookings({ silent });
         } else if (activeTab === 'refunds') {
             bustAdminCache('/api/admin/refunds/queue');
             fetchRefundQueue({ silent });
+        } else if (activeTab === 'availability') {
+            fetchAvailabilityOverrides({ silent });
         } else if (activeTab === 'audits') {
             bustAdminCache('/api/admin/audits?per_page=100');
             fetchAudits({ silent });
@@ -438,6 +453,11 @@ const DashboardAdmin = () => {
             eyebrow: 'Customer communications',
             title: 'Announcements',
             description: 'Publish customer announcements, advisories, promos, and email-ready updates.',
+        },
+        availability: {
+            eyebrow: 'Calendar control',
+            title: 'Availability',
+            description: 'Lock dates and control remaining event slots or guest capacity.',
         },
         users: {
             eyebrow: 'Access & clients',
@@ -480,6 +500,7 @@ const DashboardAdmin = () => {
             label: 'Management',
             items: [
                 { id: 'content', label: 'Announcements' },
+                { id: 'availability', label: 'Availability' },
                 { id: 'users', label: 'Users' },
                 { id: 'configuration', label: 'Business Setup' },
                 { id: 'audits', label: 'Audits' },
@@ -622,13 +643,15 @@ const DashboardAdmin = () => {
             fetchBookings();
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
+        } else if (activeTab === 'availability') {
+            fetchAvailabilityOverrides();
         } else if (activeTab === 'audits') {
             fetchAudits();
         }
-    }, [activeTab]);
+    }, [activeTab, availabilityMonth]);
 
     useSmartRefresh({
-        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
+        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
         interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
@@ -652,10 +675,98 @@ const DashboardAdmin = () => {
         setAuditPage(1);
     }, [auditSearch, auditRoleFilter]);
 
+    const fetchAvailabilityOverrides = async ({ silent = false } = {}) => {
+        if (!silent) setAvailabilityLoading(true);
+        try {
+            const response = await fetch(`/api/calendar-availability?month=${availabilityMonth}`, {
+                headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) throw new Error('Availability load failed');
+            const data = await response.json();
+            setAvailabilityOverrides(getListData(data));
+        } catch (error) {
+            console.error(error);
+            showToast('Could not load availability controls', 'error');
+        } finally {
+            if (!silent) setAvailabilityLoading(false);
+        }
+    };
+
+    const selectAvailabilityDate = async (date) => {
+        setAvailabilityDate(date);
+        const existing = availabilityOverrides.find(item => item.date === date);
+        if (existing) {
+            setAvailabilityForm({
+                is_locked: Boolean(existing.is_locked),
+                remaining_events: existing.remainingEvents ?? '',
+                remaining_pax: existing.remainingPax ?? '',
+                note: existing.note || '',
+            });
+            return;
+        }
+
+        setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+        try {
+            const response = await fetch(`/api/bookings/availability/${date}`, { headers: { Accept: 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            setAvailabilityForm({
+                is_locked: Boolean(data.isLocked),
+                remaining_events: data.remainingEvents ?? '',
+                remaining_pax: data.remainingPax ?? '',
+                note: '',
+            });
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const saveAvailabilityOverride = async (event) => {
+        event.preventDefault();
+        setAvailabilitySaving(true);
+        try {
+            const payload = {
+                is_locked: availabilityForm.is_locked,
+                remaining_events: availabilityForm.remaining_events === '' ? null : Number(availabilityForm.remaining_events),
+                remaining_pax: availabilityForm.remaining_pax === '' ? null : Number(availabilityForm.remaining_pax),
+                note: availabilityForm.note,
+            };
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok) throw new Error('Save failed');
+            showToast('Availability updated.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            showToast('Could not save availability override', 'error');
+        } finally {
+            setAvailabilitySaving(false);
+        }
+    };
+
+    const clearAvailabilityOverride = async () => {
+        setAvailabilitySaving(true);
+        try {
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error('Clear failed');
+            setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+            showToast('Availability override cleared.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            showToast('Could not clear availability override', 'error');
+        } finally {
+            setAvailabilitySaving(false);
+        }
+    };
+
     const fetchEmployees = async ({ silent = false } = {}) => {
         if (!silent) setEmpLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/employees', 60000);
+            const data = await fetchCachedJson(ADMIN_EMPLOYEES_URL, 60000);
             setEmployees(getListData(data));
         } catch (error) {
             console.error(error);
@@ -668,7 +779,7 @@ const DashboardAdmin = () => {
     const fetchCustomers = async ({ silent = false } = {}) => {
         if (!silent) setCustomerLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/customers', 60000);
+            const data = await fetchCachedJson(ADMIN_CUSTOMERS_URL, 60000);
             setCustomers(getListData(data));
         } catch (error) {
             console.error(error);
@@ -1329,7 +1440,7 @@ const DashboardAdmin = () => {
     const fetchBookings = async ({ silent = false } = {}) => {
         if (!silent) setBookingsLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/bookings', 30000);
+            const data = await fetchCachedJson(ADMIN_BOOKINGS_URL, 30000);
             setBookings(getListData(data));
         } catch (error) {
             console.error(error);
@@ -1365,7 +1476,7 @@ const DashboardAdmin = () => {
 
             if (res.ok) {
                 showToast("Booking approved and customer notified");
-                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchBookings();
             } else {
                 const err = await res.json().catch(() => ({}));
@@ -1395,7 +1506,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast("Discount applied successfully");
                 setDiscountModal({ open: false, data: null });
-                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchBookings();
             } else {
                 showToast("Could not apply discount", 'error');
@@ -1470,7 +1581,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully`);
                 setEmpModal({ open: false, mode: 'add', data: null });
-                bustAdminCache('/api/admin/employees', '/api/admin/customers');
+                bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
                 fetchEmployees();
                 fetchCustomers();
             } else {
@@ -1495,7 +1606,7 @@ const DashboardAdmin = () => {
             });
             if (res.ok) {
                 showToast("Employee deleted successfully");
-                bustAdminCache('/api/admin/employees');
+                bustAdminCache(ADMIN_EMPLOYEES_URL);
                 fetchEmployees();
             } else {
                 showToast("Could not delete employee", 'error');
@@ -1515,7 +1626,7 @@ const DashboardAdmin = () => {
             });
             if (res.ok) {
                 showToast("Customer deleted successfully");
-                bustAdminCache('/api/admin/customers', '/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_CUSTOMERS_URL, ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchCustomers();
             } else {
                 const err = await res.json().catch(() => ({}));
@@ -1529,9 +1640,10 @@ const DashboardAdmin = () => {
 
     const openEmpModal = (mode, employee = null) => {
         if (mode === 'add') {
-            setEmpForm({ username: '', password: '', role: 'Marketing', email: '', phone: '' });
+            setEmpForm({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
         } else {
             setEmpForm({
+                full_name: employee.full_name || '',
                 username: employee.username,
                 password: '', // blank password for editing implies no change
                 role: employee.role,
@@ -1544,6 +1656,7 @@ const DashboardAdmin = () => {
 
     const openCustomerModal = (customer) => {
         setEmpForm({
+            full_name: customer.full_name || '',
             username: customer.username,
             password: '',
             role: 'Client',
@@ -3235,6 +3348,70 @@ const DashboardAdmin = () => {
                             </form>
                         </div>
                     )}
+                    {activeTab === 'availability' && (
+                        <div className="animate-fadeIn grid gap-6 lg:grid-cols-[1fr_360px]">
+                            <form onSubmit={saveAvailabilityOverride} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Selected date</p>
+                                        <h3 className="mt-1 text-xl font-black text-gray-950">Control daily availability</h3>
+                                    </div>
+                                    <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="admin-input max-w-48" />
+                                </div>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Date</span>
+                                        <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="admin-input mt-2" />
+                                    </label>
+                                    <label className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50/50 px-4 py-3">
+                                        <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} className="h-4 w-4" />
+                                        <span className="text-sm font-black text-red-800">Fully lock this date</span>
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining event slots</span>
+                                        <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="admin-input mt-2" />
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining pax</span>
+                                        <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="admin-input mt-2" />
+                                    </label>
+                                </div>
+                                <label className="mt-4 block">
+                                    <span className="text-xs font-black uppercase tracking-widest text-gray-500">Internal note</span>
+                                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="admin-input mt-2" placeholder="Reason for lock or capacity adjustment" />
+                                </label>
+                                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-black text-gray-600 hover:bg-gray-50 disabled:opacity-50">Clear Override</button>
+                                    <button type="submit" disabled={availabilitySaving} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-black text-white hover:bg-indigo-700 disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save Availability'}</button>
+                                </div>
+                            </form>
+
+                            <aside className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-gray-900">Month overrides</h3>
+                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{availabilityOverrides.length}</span>
+                                </div>
+                                {availabilityLoading ? (
+                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">Loading availability...</p>
+                                ) : availabilityOverrides.length === 0 ? (
+                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">No overrides for this month.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {availabilityOverrides.map((item) => (
+                                            <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50 hover:bg-white'}`}>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-black text-gray-950">{formatDate(item.date)}</span>
+                                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Locked' : 'Limited'}</span>
+                                                </div>
+                                                <p className="mt-2 text-xs font-bold text-gray-500">{item.remainingEvents} slots / {Number(item.remainingPax || 0).toLocaleString()} pax remaining</p>
+                                                {item.note && <p className="mt-2 text-xs font-semibold text-gray-400">{item.note}</p>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </aside>
+                        </div>
+                    )}
                     {
                         activeTab === 'users' && (
                             <div className="animate-fadeIn">
@@ -3278,11 +3455,11 @@ const DashboardAdmin = () => {
                                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                                     <div className="flex items-center">
                                                                         <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-indigo-100 to-blue-200 flex items-center justify-center text-indigo-700 font-bold">
-                                                                            {emp.username.charAt(0).toUpperCase()}
+                                                                            {(emp.full_name || emp.username).charAt(0).toUpperCase()}
                                                                         </div>
                                                                         <div className="ml-4">
-                                                                            <div className="text-sm font-bold text-gray-900">{emp.username}</div>
-                                                                            <div className="text-xs text-gray-500">{emp.phone || 'No phone'}</div>
+                                                                            <div className="text-sm font-bold text-gray-900">{emp.full_name || emp.username}</div>
+                                                                            <div className="text-xs text-gray-500">@{emp.username}{emp.phone ? ` / ${emp.phone}` : ' / No phone'}</div>
                                                                         </div>
                                                                     </div>
                                                                 </td>
@@ -3730,6 +3907,12 @@ const DashboardAdmin = () => {
                             </div>
                             <form onSubmit={handleEmpSubmit} className="p-6">
                                 <div className="space-y-4">
+                                    {empModal.data?.role !== 'Client' && (
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Full Name</label>
+                                            <input type="text" required value={empForm.full_name} onChange={e => setEmpForm({ ...empForm, full_name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Username</label>
                                         <input type="text" required value={empForm.username} onChange={e => setEmpForm({ ...empForm, username: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
@@ -3744,10 +3927,17 @@ const DashboardAdmin = () => {
                                             <input type="text" value={empForm.phone} onChange={e => setEmpForm({ ...empForm, phone: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
                                         </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Password</label>
-                                        <input type="text" required={empModal.mode === 'add'} minLength="6" value={empForm.password} onChange={e => setEmpForm({ ...empForm, password: e.target.value })} placeholder={empModal.mode === 'edit' ? "Leave blank to keep current" : ""} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
-                                    </div>
+                                    {empModal.mode === 'add' && empModal.data?.role !== 'Client' && (
+                                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-800">
+                                            Default password: eloquestaff@2026
+                                        </div>
+                                    )}
+                                    {empModal.mode === 'edit' && (
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">New Password</label>
+                                            <input type="text" minLength="6" value={empForm.password} onChange={e => setEmpForm({ ...empForm, password: e.target.value })} placeholder="Leave blank to keep current" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Privilege Level</label>
                                         {empModal.data?.role === 'Client' ? (
