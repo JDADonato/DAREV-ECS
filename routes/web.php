@@ -151,6 +151,7 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     Route::put('/api/bookings/{id}/cancel', [BookingController::class, 'cancel']);
     Route::put('/api/bookings/{id}/update', [BookingController::class, 'update']);
     Route::post('/api/bookings/pay', [BookingController::class, 'recordPayment']);
+    Route::post('/api/bookings/{id}/clarification-response', [BookingController::class, 'respondToClarification']);
     Route::delete('/api/bookings/{id}/remove-history', [BookingController::class, 'removeHistory']);
 
     // Food tasting (authenticated)
@@ -171,6 +172,10 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);
+    Route::put('/api/marketing/bookings/{id}/assign', [MarketingController::class, 'assign']);
+    Route::put('/api/marketing/bookings/{id}/review-status', [MarketingController::class, 'updateReviewStatus']);
+    Route::post('/api/marketing/bookings/{id}/clarification', [MarketingController::class, 'requestClarification']);
+    Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
     Route::post('/api/settings/packages', [SettingsController::class, 'createPackage']);

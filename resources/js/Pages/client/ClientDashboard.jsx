@@ -56,9 +56,11 @@ const buildJourneySteps = (booking, payments) => {
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettledPaymentStatus(payment.status));
+    const needsClarification = Boolean(booking.clarification_request && !booking.clarification_response);
 
     return [
         { label: 'Booking submitted', done: true, action: 'Review event details' },
+        { label: 'Staff request', done: !needsClarification, action: 'Answer the details requested by the team', isPendingGate: needsClarification },
         { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices' },
         { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', isPendingGate: !isApproved },
         { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', locked: !isApproved },
@@ -143,6 +145,8 @@ const ClientDashboard = () => {
     const [eventPickerOpen, setEventPickerOpen] = useState(false);
     const [activeDetailRow, setActiveDetailRow] = useState(null);
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
+    const [clarificationResponse, setClarificationResponse] = useState('');
+    const [submittingClarification, setSubmittingClarification] = useState(false);
 
     const [submittingPayment, setSubmittingPayment] = useState(false);
 
@@ -212,6 +216,7 @@ const ClientDashboard = () => {
             setMenuSelections({ starter: [], main: [], side: [], dessert: [], drink: [] });
         }
         setMenuEditMode(false);
+        setClarificationResponse(booking.clarification_response || '');
     }, [activeBookingId, data.bookings]);
 
     useEffect(() => {
@@ -352,6 +357,36 @@ const ClientDashboard = () => {
             setToast({ message: 'We could not save your details. Please try again.', type: 'error' });
         } finally {
             setSavingDetails(false);
+        }
+    };
+
+    const submitClarificationResponse = async () => {
+        if (!activeBooking?.id || clarificationResponse.trim().length < 3) {
+            setToast({ message: 'Please add a short response for the team.', type: 'error' });
+            return;
+        }
+
+        setSubmittingClarification(true);
+        try {
+            const res = await fetch(`/api/bookings/${activeBooking.id}/clarification-response`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ response: clarificationResponse.trim() }),
+            });
+            const result = await res.json().catch(() => ({}));
+            if (res.ok) {
+                setToast({ message: 'Your response was sent to the team.', type: 'success' });
+                fetchData();
+            } else {
+                setToast({ message: result.message || 'We could not send your response yet.', type: 'error' });
+            }
+        } catch (e) {
+            setToast({ message: 'We could not send your response yet.', type: 'error' });
+        } finally {
+            setSubmittingClarification(false);
         }
     };
 
@@ -606,6 +641,45 @@ const ClientDashboard = () => {
                                             <p className="text-3xl font-display font-bold text-[#720101]">₱{parseFloat(activeBooking.total_cost || 0).toLocaleString()}</p>
                                         </div>
                                     </div>
+
+                                    {activeBooking.clarification_request && (
+                                        <div className="rounded-3xl border border-[#f0aa0b]/35 bg-[#fff7e8] p-6 shadow-sm sm:p-7">
+                                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                <div className="max-w-2xl">
+                                                    <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Details requested</p>
+                                                    <h3 className="mt-2 text-xl font-display font-bold text-[#1a1a1a]">The team needs a few details from you.</h3>
+                                                    <p className="mt-2 text-sm font-semibold leading-6 text-gray-600">{activeBooking.clarification_request}</p>
+                                                </div>
+                                                {activeBooking.clarification_response && (
+                                                    <span className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-green-700">
+                                                        Response sent
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                                                <label className="block">
+                                                    <span className="text-xs font-black uppercase tracking-widest text-gray-500">Your response</span>
+                                                    <textarea
+                                                        value={clarificationResponse}
+                                                        onChange={(event) => setClarificationResponse(event.target.value)}
+                                                        rows={3}
+                                                        disabled={Boolean(activeBooking.clarification_response)}
+                                                        placeholder="Write the details requested by the team..."
+                                                        className="mt-2 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-semibold text-gray-800 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10 disabled:bg-gray-50"
+                                                    />
+                                                </label>
+                                                {!activeBooking.clarification_response && (
+                                                    <button
+                                                        onClick={submitClarificationResponse}
+                                                        disabled={submittingClarification}
+                                                        className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white transition hover:bg-[#5a0101] disabled:opacity-60"
+                                                    >
+                                                        {submittingClarification ? 'Sending...' : 'Send Response'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-7">
                                         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -34,6 +34,13 @@ class Booking extends Model
         'food_tasting_id',
         'total_cost',
         'status',
+        'review_status',
+        'assigned_to',
+        'clarification_request',
+        'clarification_response',
+        'clarification_requested_at',
+        'clarification_responded_at',
+        'reviewed_at',
         'outsourced_services',
         'theme_uploads',
         'special_instructions',
@@ -55,6 +62,9 @@ class Booking extends Model
         return [
             'event_date' => 'date',
             'expires_at' => 'datetime',
+            'clarification_requested_at' => 'datetime',
+            'clarification_responded_at' => 'datetime',
+            'reviewed_at' => 'datetime',
             'total_cost' => 'decimal:2',
             'transport_fee' => 'decimal:2',
             'labor_surcharge' => 'decimal:2',
@@ -96,6 +106,16 @@ class Booking extends Model
     public function foodTasting()
     {
         return $this->belongsTo(FoodTasting::class);
+    }
+
+    public function assignee()
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    public function reviewTasks()
+    {
+        return $this->hasMany(BookingReviewTask::class);
     }
 
     // ─── Helpers ───

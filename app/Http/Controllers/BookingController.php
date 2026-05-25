@@ -37,7 +37,7 @@ class BookingController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'user_id'     => 'required|exists:users,id',
+            'user_id'     => 'nullable|exists:users,id',
             'event_date'  => 'required|date',
             'event_time'  => 'required|string',
             'pax'         => 'required|integer|min:1',
@@ -73,7 +73,7 @@ class BookingController extends Controller
                 );
 
                 if (!$isAccurate) {
-                    Log::warning("Potential price manipulation detected for user {$request->user_id}");
+                    Log::warning("Potential price manipulation detected for user " . Auth::id());
                     return response()->json([
                         'error' => 'Price calculation mismatch. Please refresh and try again.',
                         'recalculated_total' => BookingValidationService::calculateTotalCost(
@@ -96,7 +96,7 @@ class BookingController extends Controller
 
         // 4. Insert Booking
         $booking = Booking::create([
-            'user_id'              => $request->user_id,
+            'user_id'              => Auth::id(),
             'event_date'           => $eventDate,
             'event_time'           => $request->event_time,
             'pax'                  => $pax,
@@ -117,8 +117,24 @@ class BookingController extends Controller
             'venue_building_details' => $request->venue_building_details,
             'transport_fee'        => $request->transport_fee ?? 0,
             'labor_surcharge'      => $request->labor_surcharge ?? 0,
+            'review_status'        => 'Submitted',
             'expires_at'           => now()->addHours(24), // Phase 1: Slot Expiration
         ]);
+
+        foreach ([
+            'Confirm date and capacity',
+            'Review package and menu fit',
+            'Check venue location and access',
+            'Confirm payment schedule',
+            'Check tasting preference',
+        ] as $label) {
+            $booking->reviewTasks()->create([
+                'task_type' => 'review',
+                'label' => $label,
+                'status' => 'Pending',
+                'customer_visible' => false,
+            ]);
+        }
 
         // 5. Auto-generate dynamic payment schedule using PaymentCalculationService
         $cost = (float) ($request->total_cost ?? $request->budget ?? 0);
@@ -159,6 +175,57 @@ class BookingController extends Controller
             'message'   => 'Booking created successfully!',
             'bookingId' => $booking->id,
         ], 201);
+    }
+
+    public function respondToClarification(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'response' => ['required', 'string', 'min:3', 'max:3000'],
+        ]);
+
+        $booking = Booking::where('id', $id)
+            ->where('user_id', Auth::id())
+            ->first();
+
+        if (!$booking) {
+            return response()->json(['message' => 'Booking not found.'], 404);
+        }
+
+        if (!$booking->clarification_request) {
+            return response()->json(['message' => 'No details are being requested for this booking right now.'], 422);
+        }
+
+        $booking->update([
+            'clarification_response' => $data['response'],
+            'clarification_responded_at' => now(),
+            'review_status' => 'Clarification Received',
+        ]);
+
+        $booking->reviewTasks()
+            ->where('task_type', 'clarification')
+            ->where('customer_visible', true)
+            ->whereIn('status', ['Pending', 'Needs Customer'])
+            ->latest()
+            ->first()
+            ?->update([
+                'status' => 'Customer Responded',
+                'customer_response' => $data['response'],
+            ]);
+
+        try {
+            $staff = User::whereIn('role', ['Admin', 'Marketing'])->get();
+            Notification::send($staff, new NewBookingNotification($booking));
+        } catch (\Throwable $e) {
+            Log::warning('Clarification response notification failed.', [
+                'booking_id' => $booking->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Your response was sent to the team.',
+            'booking' => $booking->fresh(['reviewTasks']),
+        ]);
     }
 
     /**

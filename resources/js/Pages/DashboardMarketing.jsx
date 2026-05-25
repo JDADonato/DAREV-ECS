@@ -163,6 +163,8 @@ const DashboardMarketing = () => {
             });
 
             if (response.ok) {
+                const data = await response.json().catch(() => ({}));
+                if (data.booking) mergeUpdatedBooking(data.booking);
                 const label = newStatus === 'Confirmed' ? 'approved' : 'declined';
                 toast.success(`Booking #${id} has been ${label} successfully.`);
                 fetchBookings(); // sync with server in background
@@ -177,6 +179,71 @@ const DashboardMarketing = () => {
             toast.error('We could not update the booking. Please check your connection.');
         } finally {
             setUpdatingBookingIds(prev => { const n = { ...prev }; delete n[id]; return n; });
+        }
+    };
+
+    const mergeUpdatedBooking = (updatedBooking) => {
+        if (!updatedBooking?.id) return;
+        setBookings(prev => prev.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item));
+        setSelectedBooking(prev => prev?.id === updatedBooking.id ? { ...prev, ...updatedBooking } : prev);
+    };
+
+    const assignBooking = async (id) => {
+        try {
+            const response = await fetch(`/api/marketing/bookings/${id}/assign`, {
+                method: 'PUT',
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Assignment failed');
+            mergeUpdatedBooking(data.booking);
+            toast.success('Booking is now assigned to you.');
+        } catch (error) {
+            console.error(error);
+            toast.error('We could not assign this booking right now.');
+        }
+    };
+
+    const requestClarification = async (id) => {
+        const message = window.prompt('What details should the customer provide?');
+        if (!message || message.trim().length < 5) return;
+
+        try {
+            const response = await fetch(`/api/marketing/bookings/${id}/clarification`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: message.trim() }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Request failed');
+            mergeUpdatedBooking(data.booking);
+            toast.success('Request sent to the customer dashboard.');
+        } catch (error) {
+            console.error(error);
+            toast.error('We could not send the request right now.');
+        }
+    };
+
+    const toggleReviewTask = async (bookingId, task) => {
+        const nextStatus = task.status === 'Done' ? 'Pending' : 'Done';
+        try {
+            const response = await fetch(`/api/marketing/bookings/${bookingId}/review-tasks/${task.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ status: nextStatus }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Checklist update failed');
+            mergeUpdatedBooking(data.booking);
+        } catch (error) {
+            console.error(error);
+            toast.error('We could not update the checklist.');
         }
     };
 
@@ -485,6 +552,7 @@ const DashboardMarketing = () => {
         if (!selectedBooking) return null;
         const selectedDishes = getSelectedDishes(selectedBooking);
         const isApproved = selectedBooking.status === 'Confirmed';
+        const reviewStatus = selectedBooking.review_status || (selectedBooking.status === 'Pending' ? 'Submitted' : selectedBooking.status);
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setSelectedBooking(null)}>
@@ -501,6 +569,55 @@ const DashboardMarketing = () => {
                     </div>
 
                     <div className="custom-scrollbar flex-1 space-y-8 overflow-y-auto bg-white p-6">
+                        <div className="rounded-xl border border-[#720101]/10 bg-[#fffaf3] p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <p className="marketing-kicker">Review workflow</p>
+                                    <h4 className="mt-1 text-lg font-black text-slate-950">{reviewStatus}</h4>
+                                    <p className="mt-1 text-sm font-semibold text-slate-500">
+                                        Owner: {selectedBooking.assigned_name || 'Unassigned'}
+                                    </p>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {!selectedBooking.assigned_to && (
+                                        <button onClick={() => assignBooking(selectedBooking.id)} className="rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5">
+                                            Claim booking
+                                        </button>
+                                    )}
+                                    <button onClick={() => requestClarification(selectedBooking.id)} className="rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-[#fff0cf]">
+                                        Request details
+                                    </button>
+                                </div>
+                            </div>
+                            {selectedBooking.clarification_request && (
+                                <div className="mt-4 rounded-lg border border-[#f0aa0b]/30 bg-white p-3">
+                                    <p className="text-[11px] font-black uppercase tracking-widest text-[#9f6500]">Customer details requested</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-700">{selectedBooking.clarification_request}</p>
+                                    <p className="mt-3 text-[11px] font-black uppercase tracking-widest text-slate-400">Customer response</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-700">{selectedBooking.clarification_response || 'Waiting for customer response.'}</p>
+                                </div>
+                            )}
+                            {Array.isArray(selectedBooking.review_tasks) && selectedBooking.review_tasks.length > 0 && (
+                                <div className="mt-4 border-t border-[#720101]/10 pt-4">
+                                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Review checklist</p>
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        {selectedBooking.review_tasks.filter(task => task.task_type === 'review').map(task => (
+                                            <button
+                                                key={task.id}
+                                                onClick={() => toggleReviewTask(selectedBooking.id, task)}
+                                                className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${task.status === 'Done' ? 'border-green-200 bg-green-50 text-green-800' : 'border-slate-200 bg-white text-slate-600 hover:border-[#720101]/20'}`}
+                                            >
+                                                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${task.status === 'Done' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                    {task.status === 'Done' ? '✓' : ''}
+                                                </span>
+                                                {task.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-4">
                                 <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-900">
@@ -538,7 +655,7 @@ const DashboardMarketing = () => {
                                         <p className="text-sm text-gray-700">{formatTime(selectedBooking.event_time)}</p>
                                     </div>
                                     <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Status Payload</p>
+                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Booking Status</p>
                                         <span className={`inline-flex mt-1 items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isApproved ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                             {selectedBooking.status}
                                         </span>
@@ -910,15 +1027,15 @@ const DashboardMarketing = () => {
     };
 
     const renderInquiries = () => {
-        const pendingBookings = bookings.filter(b => b.status === 'Pending');
+        const pendingBookings = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
         return (
             <div className="space-y-4">
                 <div className="marketing-panel flex flex-col gap-2 p-5 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                        <p className="marketing-kicker">Lead Queue</p>
-                        <h2 className="mt-1 text-xl font-bold text-slate-950">{pendingBookings.length} pending inquiries</h2>
+                        <p className="marketing-kicker">Booking Intake</p>
+                        <h2 className="mt-1 text-xl font-bold text-slate-950">{pendingBookings.length} bookings need review</h2>
                     </div>
-                    <p className="text-sm font-semibold text-slate-500">Newest client requests that need a decision.</p>
+                    <p className="text-sm font-semibold text-slate-500">Claim, review, request missing details, then approve for payment.</p>
                 </div>
 
                 {(
@@ -934,9 +1051,17 @@ const DashboardMarketing = () => {
                                             </p>
                                             <div className="ml-2 flex-shrink-0 flex">
                                                 <p className="px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full bg-yellow-100 text-yellow-800">
-                                                    {booking.status}
+                                                    {booking.review_status || booking.status}
                                                 </p>
                                             </div>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
+                                            <span>Owner: {booking.assigned_name || 'Unassigned'}</span>
+                                            {booking.clarification_request && (
+                                                <span className="text-[#9f6500]">
+                                                    {booking.clarification_response ? 'Customer responded' : 'Waiting for customer details'}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="mt-3 sm:flex sm:justify-between items-center">
                                             <div className="sm:flex gap-6">
@@ -954,6 +1079,20 @@ const DashboardMarketing = () => {
                                                 </p>
                                             </div>
                                             <div className="mt-4 flex items-center text-sm sm:mt-0 space-x-3">
+                                                {!booking.assigned_to && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
+                                                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#720101]/15 bg-white px-4 py-1.5 font-bold text-[#720101] transition-colors hover:bg-[#720101]/5"
+                                                    >
+                                                        Claim
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); requestClarification(booking.id); }}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-4 py-1.5 font-bold text-[#9f6500] transition-colors hover:bg-[#fff0cf]"
+                                                >
+                                                    Ask details
+                                                </button>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Confirmed'); }}
                                                     disabled={!!updatingBookingIds[booking.id]}

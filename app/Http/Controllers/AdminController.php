@@ -225,11 +225,20 @@ class AdminController extends Controller
                 'venue_zip_code',
                 'total_cost',
                 'status',
+                'review_status',
+                'assigned_to',
+                'clarification_request',
+                'clarification_response',
+                'clarification_requested_at',
+                'clarification_responded_at',
+                'reviewed_at',
                 'live_status',
                 'created_at',
             ])
             ->with([
                 'user:id,username,email,phone,role',
+                'assignee:id,username',
+                'reviewTasks',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])
             ->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed'])

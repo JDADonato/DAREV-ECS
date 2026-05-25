@@ -42,6 +42,14 @@ class BookingSummaryResource extends JsonResource
             'total_cost' => $this->total_cost,
             'totalCost' => (float) ($this->total_cost ?? $this->budget ?? 0),
             'status' => $this->status,
+            'review_status' => $this->review_status ?? 'Submitted',
+            'assigned_to' => $this->assigned_to,
+            'assigned_name' => $this->assignee->username ?? null,
+            'clarification_request' => $this->clarification_request,
+            'clarification_response' => $this->clarification_response,
+            'clarification_requested_at' => $this->clarification_requested_at,
+            'clarification_responded_at' => $this->clarification_responded_at,
+            'reviewed_at' => $this->reviewed_at,
             'live_status' => $this->live_status,
             'created_at' => $this->created_at,
             'username' => $this->user->username ?? null,
@@ -52,6 +60,15 @@ class BookingSummaryResource extends JsonResource
             'paid_total' => $this->whenLoaded('payments', fn () => $this->payments->whereIn('status', ['Paid', 'Verified'])->sum(fn ($payment) => (float) $payment->amount)),
             'pending_payment_total' => $this->whenLoaded('payments', fn () => $this->payments->whereNotIn('status', ['Paid', 'Verified', 'Refunded'])->sum(fn ($payment) => (float) $payment->amount)),
             'payments' => PaymentResource::collection($this->whenLoaded('payments', fn () => $this->payments, collect())),
+            'review_tasks' => $this->whenLoaded('reviewTasks', fn () => $this->reviewTasks->map(fn ($task) => [
+                'id' => $task->id,
+                'task_type' => $task->task_type,
+                'label' => $task->label,
+                'status' => $task->status,
+                'customer_visible' => $task->customer_visible,
+                'customer_response' => $task->customer_response,
+                'completed_at' => $task->completed_at,
+            ])->values()),
         ];
     }
 }
