@@ -4,6 +4,7 @@ import { router } from '@inertiajs/react';
 import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import ConfirmModal from '../../Components/common/ConfirmModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
 
 const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
@@ -110,7 +111,7 @@ const HistoryPanel = ({ bookings, onRemove }) => (
                             <div className="flex items-center gap-3">
                                 {onRemove && (
                                     <button 
-                                        onClick={() => { if (window.confirm('Remove this event from your history?')) onRemove(booking.id); }}
+                                        onClick={() => onRemove(booking.id)}
                                         className="rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-bold text-red-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-700"
                                     >
                                         Remove
@@ -157,6 +158,12 @@ const ClientDashboard = () => {
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
     const [clarificationResponse, setClarificationResponse] = useState('');
     const [submittingClarification, setSubmittingClarification] = useState(false);
+    const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', onConfirm: null });
+    const [feedbackRequests, setFeedbackRequests] = useState([]);
+    const [feedbackForm, setFeedbackForm] = useState({ rating: 5, food_rating: 5, service_rating: 5, communication_rating: 5, value_rating: 5, comments: '', testimonial_permission: false });
+    const [submittingFeedback, setSubmittingFeedback] = useState(false);
+
+    const closeConfirmModal = () => setConfirmModal({ isOpen: false, title: '', message: '', confirmText: 'Confirm', onConfirm: null });
 
     const [submittingPayment, setSubmittingPayment] = useState(false);
 
@@ -260,12 +267,15 @@ const ClientDashboard = () => {
             const response = await fetch('/api/dashboard/client');
             if (response.ok) {
                 const result = await response.json();
+                const feedbackResponse = await fetch('/api/customer/feedback-requests', { headers: { Accept: 'application/json' } });
+                const pendingFeedback = feedbackResponse.ok ? await feedbackResponse.json() : [];
                 setData({
                     bookings: result.bookings || [],
                     historyBookings: result.historyBookings || [],
                     tastings: result.tastings || [],
                     payments: result.payments || [],
                 });
+                setFeedbackRequests(Array.isArray(pendingFeedback) ? pendingFeedback : []);
                 const activeBookings = result.bookings || [];
                 const storedBookingId = Number(readStoredDashboardValue(activeBookingStorageKey));
                 const preferredBookingId = activeBookingId || storedBookingId || null;
@@ -289,6 +299,28 @@ const ClientDashboard = () => {
             console.error("Error fetching dashboard data:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const submitFeedback = async (token) => {
+        if (!token || submittingFeedback) return;
+        setSubmittingFeedback(true);
+        try {
+            const response = await fetch(`/api/customer/feedback-requests/${token}/responses`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(feedbackForm),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result.error || 'Could not submit feedback.');
+            setToast({ message: result.message || 'Thank you for your feedback.', type: 'success' });
+            setFeedbackForm({ rating: 5, food_rating: 5, service_rating: 5, communication_rating: 5, value_rating: 5, comments: '', testimonial_permission: false });
+            fetchData();
+        } catch (error) {
+            console.error(error);
+            setToast({ message: error.message || 'Could not submit feedback.', type: 'error' });
+        } finally {
+            setSubmittingFeedback(false);
         }
     };
 
@@ -510,6 +542,71 @@ const ClientDashboard = () => {
                 )}
 
                 <CustomerAnnouncements />
+
+                {feedbackRequests.length > 0 && (
+                    <div className="mb-8 rounded-3xl border border-[#f0aa0b]/30 bg-[#fffaf3] p-6 shadow-sm">
+                        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="max-w-2xl">
+                                <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Feedback Request</p>
+                                <h2 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">How did your event go?</h2>
+                                <p className="mt-2 text-sm font-medium leading-6 text-gray-600">
+                                    Share your experience for {feedbackRequests[0].booking?.event_name || feedbackRequests[0].booking?.event_type || 'your completed event'}.
+                                </p>
+                            </div>
+                            <form
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    submitFeedback(feedbackRequests[0].token);
+                                }}
+                                className="w-full space-y-4 lg:max-w-xl"
+                            >
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {[
+                                        ['rating', 'Overall'],
+                                        ['food_rating', 'Food'],
+                                        ['service_rating', 'Service'],
+                                        ['communication_rating', 'Communication'],
+                                        ['value_rating', 'Value'],
+                                    ].map(([field, label]) => (
+                                        <label key={field} className="block">
+                                            <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">{label}</span>
+                                            <select
+                                                value={feedbackForm[field]}
+                                                onChange={(event) => setFeedbackForm(prev => ({ ...prev, [field]: Number(event.target.value) }))}
+                                                className="mt-1 w-full rounded-xl border border-[#720101]/10 bg-white px-3 py-2 text-sm font-bold text-gray-800 outline-none focus:border-[#720101]/30 focus:ring-2 focus:ring-[#720101]/15"
+                                            >
+                                                {[5, 4, 3, 2, 1].map(value => <option key={value} value={value}>{value} / 5</option>)}
+                                            </select>
+                                        </label>
+                                    ))}
+                                </div>
+                                <textarea
+                                    value={feedbackForm.comments}
+                                    onChange={(event) => setFeedbackForm(prev => ({ ...prev, comments: event.target.value }))}
+                                    placeholder="Tell us what went well or what we can improve."
+                                    rows={3}
+                                    className="w-full resize-none rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-medium text-gray-800 outline-none focus:border-[#720101]/30 focus:ring-2 focus:ring-[#720101]/15"
+                                />
+                                <label className="flex items-center gap-3 text-sm font-semibold text-gray-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={feedbackForm.testimonial_permission}
+                                        onChange={(event) => setFeedbackForm(prev => ({ ...prev, testimonial_permission: event.target.checked }))}
+                                        className="h-4 w-4 rounded border-gray-300 text-[#720101] focus:ring-[#720101]/20"
+                                    />
+                                    Eloquente may use my comments as a testimonial.
+                                </label>
+                                <button
+                                    type="submit"
+                                    disabled={submittingFeedback}
+                                    className="rounded-xl bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-[#5a0101] disabled:opacity-60"
+                                >
+                                    {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mb-8 rounded-3xl bg-[#1a1a1a] p-6 text-white shadow-xl shadow-black/10 sm:p-8">
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -926,9 +1023,18 @@ const ClientDashboard = () => {
 
                                     {activeSection === 'history' && (
                                         <HistoryPanel bookings={data.historyBookings} onRemove={(id) => {
-                                            fetch(`/api/bookings/${id}/remove-history`, { method: 'DELETE' })
-                                                .then(() => fetchData())
-                                                .catch(err => setToast({ message: 'Error removing history.', type: 'error' }));
+                                            setConfirmModal({
+                                                isOpen: true,
+                                                title: 'Remove event from history?',
+                                                message: 'This hides the event from your dashboard history.',
+                                                confirmText: 'Remove',
+                                                onConfirm: () => {
+                                                    closeConfirmModal();
+                                                    fetch(`/api/bookings/${id}/remove-history`, { method: 'DELETE' })
+                                                        .then(() => fetchData())
+                                                        .catch(err => setToast({ message: 'Error removing history.', type: 'error' }));
+                                                },
+                                            });
                                         }} />
                                     )}
 
@@ -1129,13 +1235,18 @@ const ClientDashboard = () => {
                                                                     {tasting.status !== 'Cancelled' && (
                                                                         <div className="flex gap-2">
                                                                             <button 
-                                                                                onClick={() => {
-                                                                                    if (window.confirm('Cancel this food tasting session?')) {
+                                                                                onClick={() => setConfirmModal({
+                                                                                    isOpen: true,
+                                                                                    title: 'Cancel tasting session?',
+                                                                                    message: 'This will cancel the selected food tasting request.',
+                                                                                    confirmText: 'Cancel Session',
+                                                                                    onConfirm: () => {
+                                                                                        closeConfirmModal();
                                                                                         fetch(`/api/food-tasting/${tasting.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' } })
                                                                                             .then(() => { setToast({ message: 'Tasting cancelled.', type: 'success' }); fetchData(); })
                                                                                             .catch(() => setToast({ message: 'Error cancelling tasting.', type: 'error' }));
-                                                                                    }
-                                                                                }}
+                                                                                    },
+                                                                                })}
                                                                                 className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg"
                                                                             >
                                                                                 Cancel Session
@@ -1429,6 +1540,15 @@ const ClientDashboard = () => {
                     />
                 </Suspense>
             )}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                tone="danger"
+                onCancel={closeConfirmModal}
+                onConfirm={confirmModal.onConfirm}
+            />
         </div>
     );
 };

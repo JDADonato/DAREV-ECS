@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
+import ConfirmModal from './ConfirmModal';
+import ErrorModal from './ErrorModal';
 
 /**
  * Phase 2: Staff Messaging — WebSocket-powered Ticket/Claiming System.
@@ -31,6 +33,8 @@ const StaffMessaging = () => {
     const [transferring, setTransferring] = useState(false);
     const [hasOlderMessages, setHasOlderMessages] = useState(false);
     const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+    const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false);
+    const [errorModal, setErrorModal] = useState({ isOpen: false, message: '' });
     const messagesEndRef = useRef(null);
     const echoChannelsRef = useRef({});
     const selectedConvRef = useRef(null);
@@ -185,15 +189,22 @@ const StaffMessaging = () => {
                 fetchConversations();
             } else {
                 const err = await res.json();
-                alert(err.error || 'Failed to claim conversation.');
+                setErrorModal({ isOpen: true, message: err.error || 'Failed to claim conversation.' });
             }
-        } catch (e) { console.error('Claim failed:', e); }
+        } catch (e) {
+            console.error('Claim failed:', e);
+            setErrorModal({ isOpen: true, message: 'Failed to claim conversation.' });
+        }
         finally { setClaiming(false); }
     };
 
     const handleResolve = async () => {
         if (!selectedConv) return;
-        if (!confirm('Are you sure you want to resolve (close) this conversation?')) return;
+        setResolveConfirmOpen(true);
+    };
+
+    const confirmResolve = async () => {
+        if (!selectedConv) return;
         try {
             const res = await fetch(`/api/chat/conversations/${selectedConv.id}/resolve`, {
                 method: 'POST',
@@ -204,7 +215,12 @@ const StaffMessaging = () => {
                 setMessages([]);
                 fetchConversations();
             }
-        } catch (e) { console.error('Resolve failed:', e); }
+        } catch (e) {
+            console.error('Resolve failed:', e);
+            setErrorModal({ isOpen: true, message: 'Failed to resolve conversation.' });
+        } finally {
+            setResolveConfirmOpen(false);
+        }
     };
 
     const fetchAvailableStaff = async () => {
@@ -230,9 +246,12 @@ const StaffMessaging = () => {
                 fetchConversations();
             } else {
                 const err = await res.json();
-                alert(err.error || 'Failed to transfer.');
+                setErrorModal({ isOpen: true, message: err.error || 'Failed to transfer.' });
             }
-        } catch (e) { console.error('Transfer failed'); }
+        } catch (e) {
+            console.error('Transfer failed');
+            setErrorModal({ isOpen: true, message: 'Failed to transfer.' });
+        }
         finally { setTransferring(false); }
     };
 
@@ -495,6 +514,20 @@ const StaffMessaging = () => {
                     )}
                 </div>
             </div>
+            <ConfirmModal
+                isOpen={resolveConfirmOpen}
+                title="Resolve conversation?"
+                message="This will close the conversation and remove it from your active chat queue."
+                confirmText="Resolve"
+                onCancel={() => setResolveConfirmOpen(false)}
+                onConfirm={confirmResolve}
+            />
+            <ErrorModal
+                isOpen={errorModal.isOpen}
+                title="Chat action failed"
+                message={errorModal.message}
+                onClose={() => setErrorModal({ isOpen: false, message: '' })}
+            />
         </div>
     );
 };

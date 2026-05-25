@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\BookingSummaryResource;
 use App\Models\Booking;
 use App\Models\BookingReviewTask;
+use App\Services\EventPreparationService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -38,7 +39,7 @@ class MarketingController extends Controller
      */
     public function getAllBookings(Request $request)
     {
-        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])
+        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks', 'preparationTasks'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';
@@ -92,6 +93,14 @@ class MarketingController extends Controller
             'reviewed_at' => in_array($request->status, ['Confirmed', 'Cancelled', 'Completed'], true) ? now() : $booking->reviewed_at,
         ]);
 
+        if ($request->status === 'Confirmed') {
+            EventPreparationService::ensureDefaultTasks($booking->fresh());
+        }
+
+        if ($request->status === 'Completed') {
+            EventPreparationService::ensureFeedbackRequest($booking->fresh());
+        }
+
         // ─── Send notification to the client ───
         try {
             $client = \App\Models\User::find($booking->user_id);
@@ -105,7 +114,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking status updated',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
         ]);
     }
 
@@ -125,7 +134,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking assigned.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
         ]);
     }
 
@@ -147,10 +156,18 @@ class MarketingController extends Controller
             'reviewed_at' => in_array($data['review_status'], ['Approved For Reservation', 'Not Available', 'Completed'], true) ? now() : $booking->reviewed_at,
         ]);
 
+        if ($data['review_status'] === 'Approved For Reservation') {
+            EventPreparationService::ensureDefaultTasks($booking->fresh());
+        }
+
+        if ($data['review_status'] === 'Completed') {
+            EventPreparationService::ensureFeedbackRequest($booking->fresh());
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Review status updated.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
         ]);
     }
 
@@ -196,7 +213,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Details requested from customer.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
         ]);
     }
 
@@ -218,7 +235,7 @@ class MarketingController extends Controller
             'completed_at' => $data['status'] === 'Done' ? now() : null,
         ]);
 
-        $booking = Booking::with(['user', 'assignee', 'reviewTasks'])->find($bookingId);
+        $booking = Booking::with(['user', 'assignee', 'reviewTasks', 'preparationTasks'])->find($bookingId);
 
         return response()->json([
             'success' => true,
@@ -256,7 +273,7 @@ class MarketingController extends Controller
      */
     public function show(int $id)
     {
-        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])->find($id);
+        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks', 'preparationTasks'])->find($id);
 
         if (!$booking) {
             return response()->json(['error' => 'Booking not found'], 404);

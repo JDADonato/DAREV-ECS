@@ -4,6 +4,13 @@ import { useToast } from '../context/ToastContext';
 import { router } from '@inertiajs/react';
 import NotificationBell from '../Components/common/NotificationBell';
 import FlashToast from '../Components/common/FlashToast';
+import ConfirmModal from '../Components/common/ConfirmModal';
+import PromptModal from '../Components/common/PromptModal';
+import StaffPagination from '../Components/staff/StaffPagination';
+import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
+import StaffPageHeader from '../Components/staff/StaffPageHeader';
+import StaffEmptyState from '../Components/staff/StaffEmptyState';
+import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
     formatDate,
@@ -20,6 +27,7 @@ import {
 
 const StaffMessaging = lazy(() => import('../Components/common/StaffMessaging'));
 const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
+const PreparationBoard = lazy(() => import('../Components/operations/PreparationBoard'));
 import { getListData } from '../utils/apiResponses';
 
 const PACKAGE_CATEGORY_OPTIONS = [
@@ -34,7 +42,7 @@ const SECURITY_OPTIONS = [
 ];
 
 const MARKETING_BOOKINGS_URL = '/api/marketing/bookings?paginated=1&per_page=100';
-const BOOKING_BACKED_TABS = ['calendar', 'inquiries', 'documents'];
+const BOOKING_BACKED_TABS = ['calendar', 'intake', 'documents'];
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -75,7 +83,7 @@ const DashboardMarketing = () => {
     const toast = useToast();
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('calendar');
+    const [activeTab, setActiveTab] = useState('today');
     const [selectedMonth, setSelectedMonth] = useState(new Date());
     const [menuItems, setMenuItems] = useState([]);
     const [packages, setPackages] = useState([]);
@@ -94,6 +102,8 @@ const DashboardMarketing = () => {
     const [inquirySort, setInquirySort] = useState('eventDateAsc');
     const [inquiryDateFrom, setInquiryDateFrom] = useState('');
     const [inquiryDateTo, setInquiryDateTo] = useState('');
+    const [inquiryPage, setInquiryPage] = useState(1);
+    const [inquiryPerPage, setInquiryPerPage] = useState(25);
     const [availabilityMonth, setAvailabilityMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -103,6 +113,8 @@ const DashboardMarketing = () => {
     const [availabilityForm, setAvailabilityForm] = useState({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
     const [availabilityLoading, setAvailabilityLoading] = useState(false);
     const [availabilitySaving, setAvailabilitySaving] = useState(false);
+    const [clarificationPrompt, setClarificationPrompt] = useState({ isOpen: false, bookingId: null });
+    const [deleteEventTypeConfirm, setDeleteEventTypeConfirm] = useState({ isOpen: false, eventType: null });
 
     // PDF Export State
     const [showExportModal, setShowExportModal] = useState(false);
@@ -123,7 +135,13 @@ const DashboardMarketing = () => {
     }, []);
 
     useEffect(() => {
-        if (activeTab === 'settings') {
+        setInquiryPage(1);
+    }, [inquirySearch, inquiryStatusFilter, inquiryAssignmentFilter, inquirySort, inquiryDateFrom, inquiryDateTo, inquiryPerPage]);
+
+    useEffect(() => {
+        if (activeTab === 'today') {
+            fetchBookings();
+        } else if (activeTab === 'settings') {
             fetchMarketingSettings();
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides();
@@ -133,11 +151,13 @@ const DashboardMarketing = () => {
     }, [activeTab, availabilityMonth]);
 
     useSmartRefresh({
-        enabled: ['settings', 'availability', ...BOOKING_BACKED_TABS].includes(activeTab),
+        enabled: ['today', 'settings', 'availability', ...BOOKING_BACKED_TABS].includes(activeTab),
         interval: activeTab === 'settings' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
-            if (activeTab === 'settings') {
+            if (activeTab === 'today') {
+                fetchBookings({ silent });
+            } else if (activeTab === 'settings') {
                 fetchMarketingSettings();
             } else if (activeTab === 'availability') {
                 fetchAvailabilityOverrides({ silent });
@@ -308,22 +328,26 @@ const DashboardMarketing = () => {
         }
     };
 
-    const requestClarification = async (id) => {
-        const message = window.prompt('What details should the customer provide?');
-        if (!message || message.trim().length < 5) return;
+    const requestClarification = (id) => {
+        setClarificationPrompt({ isOpen: true, bookingId: id });
+    };
 
+    const submitClarificationRequest = async (message) => {
+        const id = clarificationPrompt.bookingId;
+        if (!id) return;
         try {
             const response = await fetch(`/api/marketing/bookings/${id}/clarification`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
-                    'Content-Type': 'application/json',
+                'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ message: message.trim() }),
+                body: JSON.stringify({ message }),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Request failed');
             mergeUpdatedBooking(data.booking);
+            setClarificationPrompt({ isOpen: false, bookingId: null });
             toast.success('Request sent to the customer dashboard.');
         } catch (error) {
             console.error(error);
@@ -514,11 +538,19 @@ const DashboardMarketing = () => {
     };
 
     const handleDeleteEventType = async (eventType) => {
-        if (!window.confirm(`Delete ${eventType.label}? Packages using this type will move to Other.`)) return;
+        setDeleteEventTypeConfirm({ isOpen: true, eventType });
+    };
+
+    const confirmDeleteEventType = async () => {
+        const eventType = deleteEventTypeConfirm.eventType;
+        if (!eventType) return;
         setSettingsSaving(true);
         try {
             const response = await fetch(`/api/settings/event-types/${eventType.id}`, { method: 'DELETE' });
-            if (response.ok) fetchMarketingSettings();
+            if (response.ok) {
+                setDeleteEventTypeConfirm({ isOpen: false, eventType: null });
+                fetchMarketingSettings();
+            }
         } catch (error) {
             console.error('Error deleting event type:', error);
         } finally {
@@ -530,7 +562,7 @@ const DashboardMarketing = () => {
         const time = formatTime(booking.event_time);
         const eventType = titleCase(booking.event_type || booking.package_type || booking.type) || 'Event';
         const client = booking.client_full_name || booking.username || 'Unnamed client';
-        return `${time} • ${eventType} • ${client}`;
+        return `${time} / ${eventType} / ${client}`;
     };
 
     const getCompactClientName = (booking) => {
@@ -604,14 +636,99 @@ const DashboardMarketing = () => {
     const dashboardSummary = marketingBookingIndexes;
 
     const tabMeta = {
+        today: 'Today',
+        intake: 'Intake',
         calendar: 'Calendar',
         availability: 'Availability',
+        preparation: 'Preparation',
         inquiries: 'Booking Review',
         documents: 'Event Documents',
         content: 'Announcements',
         settings: 'Menu And Packages',
         messages: 'Messages',
     };
+
+    const marketingSummary = useMemo(() => {
+        const pending = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
+        const needsDetails = pending.filter(b => String(b.review_status || '').toLowerCase() === 'needs customer details' || b.clarification_request);
+        const upcoming = bookings.filter(b => b.event_date && ['Confirmed', 'Reserved'].includes(b.status));
+        const now = new Date();
+        const nextSeven = new Date();
+        nextSeven.setDate(now.getDate() + 7);
+        const urgent = pending.filter(b => {
+            if (!b.event_date) return false;
+            const date = new Date(b.event_date);
+            return date >= now && date <= nextSeven;
+        });
+
+        return {
+            pending: pending.length,
+            needsDetails: needsDetails.length,
+            upcoming: upcoming.length,
+            urgent: urgent.length,
+            pipeline: pending.reduce((sum, b) => sum + getBookingValue(b), 0),
+            pendingRows: pending,
+            upcomingRows: upcoming,
+            urgentRows: urgent,
+        };
+    }, [bookings]);
+
+    const renderToday = () => (
+        <div className="staff-today-grid">
+            <section className="staff-work-surface">
+                <div className="staff-surface-head">
+                    <div>
+                        <p className="marketing-kicker">Priority queue</p>
+                        <h3 className="mt-1 text-lg font-black text-slate-950">Marketing work needing action</h3>
+                    </div>
+                </div>
+                <div className="p-4">
+                    <div className="staff-priority-list">
+                        <button type="button" onClick={() => setActiveTab('intake')} className="staff-priority-item">
+                            <div><h3>Booking intake</h3><p>{marketingSummary.pending} submitted bookings are waiting for review or approval.</p></div>
+                            <StaffStatusBadge tone={marketingSummary.pending > 0 ? 'warn' : 'good'}>{marketingSummary.pending}</StaffStatusBadge>
+                        </button>
+                        <button type="button" onClick={() => setActiveTab('intake')} className="staff-priority-item">
+                            <div><h3>Needs customer details</h3><p>{marketingSummary.needsDetails} bookings are blocked by missing or clarified information.</p></div>
+                            <StaffStatusBadge tone={marketingSummary.needsDetails > 0 ? 'danger' : 'good'}>{marketingSummary.needsDetails}</StaffStatusBadge>
+                        </button>
+                        <button type="button" onClick={() => setActiveTab('preparation')} className="staff-priority-item">
+                            <div><h3>Upcoming handoffs</h3><p>{marketingSummary.upcoming} approved or reserved events need preparation visibility.</p></div>
+                            <StaffStatusBadge tone={marketingSummary.upcoming > 0 ? 'warn' : 'good'}>{marketingSummary.upcoming}</StaffStatusBadge>
+                        </button>
+                        <button type="button" onClick={() => setActiveTab('messages')} className="staff-priority-item">
+                            <div><h3>Customer messages</h3><p>Open the shared inbox to claim, answer, transfer, or resolve customer conversations.</p></div>
+                            <StaffStatusBadge tone="muted">Inbox</StaffStatusBadge>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section className="staff-work-surface">
+                <div className="staff-surface-head">
+                    <div>
+                        <p className="marketing-kicker">Next events</p>
+                        <h3 className="mt-1 text-lg font-black text-slate-950">Upcoming approved bookings</h3>
+                    </div>
+                </div>
+                {marketingSummary.upcomingRows.length === 0 ? (
+                    <StaffEmptyState title="No upcoming approved events" message="Confirmed or reserved events will appear here for preparation follow-up." />
+                ) : (
+                    <div className="p-4 staff-priority-list">
+                        {marketingSummary.upcomingRows.slice(0, 6).map((booking) => (
+                            <button key={booking.id} type="button" onClick={() => setSelectedBooking(booking)} className="staff-priority-item">
+                                <div>
+                                    <h3>{eventDisplayName(booking)}</h3>
+                                    <p>{formatDate(booking.event_date)} / {booking.pax || 0} pax / {booking.client_full_name || booking.username || 'Customer'}</p>
+                                </div>
+                                <StaffStatusBadge tone="good">{booking.status}</StaffStatusBadge>
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </section>
+        </div>
+    );
 
     const renderCalendar = () => {
         const daysInMonth = getDaysInMonth(selectedMonth);
@@ -630,7 +747,7 @@ const DashboardMarketing = () => {
                 <div key={day} className="marketing-calendar-cell custom-scrollbar">
                     <div className="mb-2 flex items-center justify-between">
                         <span className="text-xs font-black text-slate-700">{day}</span>
-                        {dayBookings.length > 0 && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{dayBookings.length}</span>}
+                        {dayBookings.length > 0 && <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{dayBookings.length}</span>}
                     </div>
                     {dayBookings.map(booking => (
                         <div
@@ -713,7 +830,7 @@ const DashboardMarketing = () => {
                                                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${task.status === 'Done' ? 'border-green-200 bg-green-50 text-green-800' : 'border-slate-200 bg-white text-slate-600 hover:border-[#720101]/20'}`}
                                             >
                                                 <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${task.status === 'Done' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
-                                                    {task.status === 'Done' ? '✓' : ''}
+                                                    {task.status === 'Done' ? 'OK' : ''}
                                                 </span>
                                                 {task.label}
                                             </button>
@@ -735,11 +852,11 @@ const DashboardMarketing = () => {
                                         <p className="text-sm font-semibold text-gray-900">{selectedBooking.client_full_name || selectedBooking.username || 'N/A'}</p>
                                     </div>
                                     <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Comm Link (Email)</p>
+                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Email)</p>
                                         <p className="text-sm text-gray-700">{selectedBooking.client_email || 'N/A'}</p>
                                     </div>
                                     <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Comm Link (Phone)</p>
+                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Phone)</p>
                                         <p className="text-sm text-gray-700">{selectedBooking.client_phone || 'N/A'}</p>
                                     </div>
                                 </div>
@@ -748,11 +865,11 @@ const DashboardMarketing = () => {
                             <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
                                 <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-900">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                    Temporal Constraints
+                                    Schedule
                                 </h4>
                                 <div className="space-y-3">
                                     <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Execution Date</p>
+                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Event Date</p>
                                         <p className="text-sm font-semibold text-gray-900">{formatDate(selectedBooking.event_date)}</p>
                                     </div>
                                     <div>
@@ -817,6 +934,20 @@ const DashboardMarketing = () => {
                                 </div>
                             </div>
                         </div>
+
+                        {selectedBooking.preparation_tasks?.length > 0 && (
+                            <div>
+                                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Preparation Tasks</h4>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                    {selectedBooking.preparation_tasks.map(task => (
+                                        <div key={task.id} className={`rounded-lg border px-4 py-3 ${task.status === 'Done' ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-[#fffaf3]'}`}>
+                                            <p className="text-sm font-bold text-gray-900">{task.label}</p>
+                                            <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-gray-400">{task.department} / {task.status}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {isApproved && (
                             <div>
@@ -1134,11 +1265,7 @@ const DashboardMarketing = () => {
     const renderAvailability = () => (
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <form onSubmit={saveAvailabilityOverride} className="marketing-panel p-6">
-                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <p className="marketing-kicker">Calendar Control</p>
-                        <h2 className="mt-1 text-xl font-black text-slate-950">Manage daily availability</h2>
-                    </div>
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
                     <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1172,7 +1299,7 @@ const DashboardMarketing = () => {
             <aside className="marketing-panel p-5">
                 <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-sm font-black uppercase tracking-widest text-slate-900">Month overrides</h3>
-                    <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black text-primary-700">{availabilityOverrides.length}</span>
+                    <span className="rounded-md bg-primary-50 px-3 py-1 text-xs font-black text-primary-700">{availabilityOverrides.length}</span>
                 </div>
                 {availabilityLoading ? (
                     <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Loading availability...</p>
@@ -1237,49 +1364,40 @@ const DashboardMarketing = () => {
                 const rightDate = new Date(inquirySort === 'oldest' || inquirySort === 'newest' ? (b.created_at || b.event_date) : b.event_date || 0).getTime();
                 return inquirySort === 'oldest' || inquirySort === 'eventDateAsc' ? leftDate - rightDate : rightDate - leftDate;
             });
+        const pagedPendingBookings = pendingBookings.slice((inquiryPage - 1) * inquiryPerPage, inquiryPage * inquiryPerPage);
         return (
             <div className="space-y-4">
-                <div className="marketing-panel flex flex-col gap-2 p-5 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <p className="marketing-kicker">Booking Intake</p>
-                        <h2 className="mt-1 text-xl font-bold text-slate-950">{pendingBookings.length} bookings need review</h2>
-                    </div>
-                    <p className="text-sm font-semibold text-slate-500">Claim, review, request missing details, then approve for payment.</p>
-                </div>
-
-                <div className="marketing-panel grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
-                    <input value={inquirySearch} onChange={(event) => setInquirySearch(event.target.value)} placeholder="Search inquiries" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold md:col-span-2" />
-                    <select value={inquiryStatusFilter} onChange={(event) => setInquiryStatusFilter(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
+                <div className="marketing-panel staff-filter-bar">
+                    <input value={inquirySearch} onChange={(event) => setInquirySearch(event.target.value)} placeholder="Search booking, customer, phone, or city" className="staff-control" />
+                    <select value={inquiryStatusFilter} onChange={(event) => setInquiryStatusFilter(event.target.value)} className="staff-control">
                         <option value="all">All statuses</option>
                         <option value="submitted">Submitted</option>
                         <option value="under review">Under Review</option>
                         <option value="needs customer details">Needs Customer Details</option>
                         <option value="clarification received">Clarification Received</option>
                     </select>
-                    <select value={inquiryAssignmentFilter} onChange={(event) => setInquiryAssignmentFilter(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
+                    <select value={inquiryAssignmentFilter} onChange={(event) => setInquiryAssignmentFilter(event.target.value)} className="staff-control">
                         <option value="all">All owners</option>
                         <option value="assigned">Assigned</option>
                         <option value="unassigned">Unassigned</option>
                     </select>
-                    <select value={inquirySort} onChange={(event) => setInquirySort(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
-                        <option value="eventDateAsc">Event date ↑</option>
-                        <option value="eventDateDesc">Event date ↓</option>
+                    <select value={inquirySort} onChange={(event) => setInquirySort(event.target.value)} className="staff-control">
+                        <option value="eventDateAsc">Event date ascending</option>
+                        <option value="eventDateDesc">Event date descending</option>
                         <option value="newest">Newest</option>
                         <option value="oldest">Oldest</option>
                         <option value="az">A-Z</option>
                         <option value="za">Z-A</option>
                     </select>
-                    <div className="grid grid-cols-2 gap-2 xl:col-span-1">
-                        <input type="date" value={inquiryDateFrom} onChange={(event) => setInquiryDateFrom(event.target.value)} className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                        <input type="date" value={inquiryDateTo} onChange={(event) => setInquiryDateTo(event.target.value)} className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                    </div>
+                    <input type="date" value={inquiryDateFrom} onChange={(event) => setInquiryDateFrom(event.target.value)} className="staff-control" />
+                    <input type="date" value={inquiryDateTo} onChange={(event) => setInquiryDateTo(event.target.value)} className="staff-control" />
                 </div>
 
                 {(
                     <div className="marketing-panel overflow-hidden">
                         <ul className="divide-y divide-amber-100/70">
                             {pendingBookings.length === 0 ? <li className="p-8 text-gray-500 text-center">No pending inquiries.</li> : null}
-                            {pendingBookings.map(booking => (
+                            {pagedPendingBookings.map(booking => (
                                 <li key={booking.id} onClick={() => setSelectedBooking(booking)} className="block cursor-pointer transition-colors hover:bg-[#fffaf3]">
                                     <div className="px-6 py-5">
                                         <div className="flex items-center justify-between">
@@ -1287,7 +1405,7 @@ const DashboardMarketing = () => {
                                                 Booking #{booking.id} - {eventDisplayName(booking)}
                                             </p>
                                             <div className="ml-2 flex-shrink-0 flex">
-                                                <p className="px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full bg-yellow-100 text-yellow-800">
+                                                <p className="inline-flex rounded-md bg-yellow-100 px-3 py-1 text-xs font-bold leading-5 text-yellow-800">
                                                     {booking.review_status || booking.status}
                                                 </p>
                                             </div>
@@ -1360,6 +1478,7 @@ const DashboardMarketing = () => {
                                 </li>
                             ))}
                         </ul>
+                        <StaffPagination page={inquiryPage} perPage={inquiryPerPage} total={pendingBookings.length} onPageChange={setInquiryPage} onPerPageChange={setInquiryPerPage} />
                     </div>
                 )}
             </div>
@@ -1416,7 +1535,7 @@ const DashboardMarketing = () => {
 
                     <div class="details">
                         <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
-                        <p><strong>Event Date:</strong> ${booking.event_date}</p>
+                        <p><strong>Event Date:</strong> ${formatDate(booking.event_date)}</p>
                         <p><strong>Client:</strong> ${booking.client_full_name || booking.username}</p>
                         <p><strong>Email:</strong> ${booking.client_email || 'N/A'}</p>
                         <p><strong>Phone:</strong> ${booking.client_phone || 'N/A'}</p>
@@ -1425,7 +1544,7 @@ const DashboardMarketing = () => {
                         ${booking.special_instructions ? `<p><strong>Special Notes:</strong> ${booking.special_instructions}</p>` : ''}
                         
                         ${type === 'Contract' ? `
-                            <p><strong>Total Budget:</strong> ₱${(booking.total_cost || booking.budget || 0).toLocaleString()}</p>
+                            <p><strong>Total Budget:</strong> PHP {(booking.total_cost || booking.budget || 0).toLocaleString()}</p>
                             <p><strong>Terms:</strong> 50% Downpayment required to secure date.</p>
                             <br><br>
                             <div style="display:flex; justify-content:space-between; margin-top:50px;">
@@ -1461,10 +1580,6 @@ const DashboardMarketing = () => {
         const confirmedBookings = bookings.filter(b => b.status === 'Confirmed');
         return (
             <div className="marketing-panel overflow-hidden">
-                <div className="border-b border-amber-100/80 bg-[#fffaf3] px-6 py-5">
-                    <p className="marketing-kicker">Production Docs</p>
-                    <h2 className="mt-1 text-xl font-bold text-slate-950">{confirmedBookings.length} confirmed events ready for paperwork</h2>
-                </div>
                 <ul className="divide-y divide-amber-100/70">
                     {confirmedBookings.length === 0 ? <li className="p-6 text-gray-500 text-center">No confirmed events for documentation.</li> : null}
                     {confirmedBookings.map(booking => (
@@ -1507,9 +1622,7 @@ const DashboardMarketing = () => {
         return (
             <>
             <div className="marketing-panel overflow-hidden">
-                <div className="border-b border-amber-100/80 bg-[#fffaf3] px-6 pt-5">
-                    <p className="marketing-kicker">Menu And Packages</p>
-                    <h2 className="mt-1 text-xl font-bold text-slate-950">Packages, event types, and dish pricing</h2>
+                <div className="border-b border-amber-100/80 bg-[#fffaf3] px-6 pt-2">
                     <nav className="flex gap-2 overflow-x-auto">
                         {[
                             ['packages', 'Packages'],
@@ -1590,7 +1703,7 @@ const DashboardMarketing = () => {
                                     {packages.map(pkg => (
                                         <tr key={pkg.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 font-bold text-gray-900">{pkg.name}</td>
-                                            <td className="px-6 py-4"><span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-black uppercase text-primary-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
+                                            <td className="px-6 py-4"><span className="rounded-md bg-primary-50 px-2.5 py-1 text-xs font-black uppercase text-primary-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
                                             <td className="px-6 py-4 text-gray-600">{getCategoryLabel(pkg.package_category)}</td>
                                             <td className="px-6 py-4 text-gray-600">{(pkg.event_type_slugs || [pkg.type]).map(slug => eventTypes.find(type => type.slug === slug)?.label || slug).join(', ')}</td>
                                             <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</td>
@@ -1809,60 +1922,52 @@ const DashboardMarketing = () => {
     );
 
     return (
-        <div className="marketing-page min-h-screen">
-            <nav className="marketing-topbar sticky top-0 z-30">
-                <div className="mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
-                    <div className="flex min-h-16 flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                            <p className="marketing-kicker">Eloquente</p>
-                            <h1 className="text-xl font-bold font-display text-slate-950">Marketing Workspace</h1>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="staff-role-chip">Marketing team</div>
-                            <NotificationBell variant="dark" />
-                            <span className="text-sm font-bold text-slate-700">{user?.username}</span>
-                            <button onClick={handleLogout} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 hover:text-slate-900">Logout</button>
-                        </div>
-                    </div>
-                </div>
-            </nav>
-            <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
-                <section className="marketing-command mb-5">
-                    <div>
-                        <p className="marketing-kicker">Today</p>
-                        <h2 className="mt-1 text-2xl font-bold text-slate-950">Booking workbench</h2>
-                    </div>
-                    <div className="marketing-metrics">
-                        <div><span>Upcoming</span><strong>{dashboardSummary.upcoming}</strong></div>
-                        <div><span>Pending</span><strong>{dashboardSummary.pending}</strong></div>
-                        <div><span>This Month</span><strong>{dashboardSummary.monthEvents}</strong></div>
-                        <div><span>Pipeline</span><strong>PHP {formatMoney(dashboardSummary.pipeline)}</strong></div>
-                    </div>
-                </section>
+        <StaffWorkspaceLayout
+            title="Marketing Workspace"
+            roleLabel="Marketing team"
+            username={user?.username}
+            active={activeTab}
+            onNavigate={setActiveTab}
+            onLogout={handleLogout}
+            navGroups={[
+                {
+                    label: 'Daily work',
+                    items: [
+                        { id: 'today', label: 'Today', count: marketingSummary.pending + marketingSummary.needsDetails },
+                        { id: 'intake', label: 'Intake', count: dashboardSummary.pending },
+                        { id: 'calendar', label: 'Calendar', count: dashboardSummary.monthEvents },
+                        { id: 'preparation', label: 'Preparation', count: marketingSummary.upcoming },
+                        { id: 'messages', label: 'Messages' },
+                    ],
+                },
+                {
+                    label: 'Operations',
+                    items: [
+                        { id: 'availability', label: 'Availability' },
+                        { id: 'documents', label: 'Documents' },
+                        { id: 'content', label: 'Announcements' },
+                        { id: 'settings', label: 'Menu Setup' },
+                    ],
+                },
+            ]}
+        >
+                <StaffPageHeader
+                    eyebrow={activeTab === 'today' ? 'Today' : 'Marketing workflow'}
+                    title={activeTab === 'today' ? 'Booking workbench' : tabMeta[activeTab]}
+                    metrics={[
+                        { label: 'Upcoming', value: dashboardSummary.upcoming },
+                        { label: 'Pending', value: dashboardSummary.pending },
+                        { label: 'This Month', value: dashboardSummary.monthEvents },
+                        { label: 'Pipeline', value: `PHP ${formatMoney(dashboardSummary.pipeline)}` },
+                    ]}
+                />
 
-                <div className="marketing-nav-wrap mb-5">
-                    <nav className="marketing-nav">
-                        {['calendar', 'availability', 'inquiries', 'documents', 'content', 'settings', 'messages'].map((tab) => {
-                            return (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`marketing-tab ${activeTab === tab ? 'marketing-tab-active' : ''}`}
-                            >
-                                <span>{tabMeta[tab]}</span>
-                                {tab === 'inquiries' && dashboardSummary.pending > 0 && <em>{dashboardSummary.pending}</em>}
-                                {tab === 'calendar' && dashboardSummary.monthEvents > 0 && <em>{dashboardSummary.monthEvents}</em>}
-                            </button>
-                            );
-                        })}
-                    </nav>
-                </div>
+                {activeTab === 'today' && renderToday()}
 
                 {activeTab === 'calendar' && (
                     <div className="marketing-panel p-5 lg:p-6">
                         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <p className="marketing-kicker">Event Calendar</p>
                                 <h2 className="mt-1 text-2xl font-bold text-slate-950">
                                     {selectedMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
                                 </h2>
@@ -1900,8 +2005,13 @@ const DashboardMarketing = () => {
                     </div>
                 )}
 
-                {activeTab === 'inquiries' && renderInquiries()}
+                {activeTab === 'intake' && renderInquiries()}
                 {activeTab === 'availability' && renderAvailability()}
+                {activeTab === 'preparation' && (
+                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading preparation board...</div>}>
+                        <PreparationBoard />
+                    </Suspense>
+                )}
                 {activeTab === 'documents' && renderDocuments()}
                 {activeTab === 'content' && (
                     <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
@@ -1914,12 +2024,31 @@ const DashboardMarketing = () => {
                         <StaffMessaging />
                     </Suspense>
                 )}
-
-            </main>
             {renderBookingModal()}
             {renderExportModal()}
+            <PromptModal
+                isOpen={clarificationPrompt.isOpen}
+                title="Request customer details"
+                message="Tell the customer exactly what the team needs before this booking can move forward."
+                label="Details needed"
+                placeholder="Example: Please confirm the final venue access time and updated headcount."
+                minLength={5}
+                confirmText="Send Request"
+                onCancel={() => setClarificationPrompt({ isOpen: false, bookingId: null })}
+                onConfirm={submitClarificationRequest}
+            />
+            <ConfirmModal
+                isOpen={deleteEventTypeConfirm.isOpen}
+                title={`Delete ${deleteEventTypeConfirm.eventType?.label || 'event type'}?`}
+                message="Packages using this event type will move to Other."
+                confirmText="Delete"
+                tone="danger"
+                onCancel={() => setDeleteEventTypeConfirm({ isOpen: false, eventType: null })}
+                onConfirm={confirmDeleteEventType}
+                busy={settingsSaving}
+            />
             <FlashToast />
-        </div>
+        </StaffWorkspaceLayout>
     );
 };
 

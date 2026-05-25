@@ -132,6 +132,24 @@ export const getErrorMessage = (error, fallback) => {
     return validationErrors[0] || fallback;
 };
 
+const customerValidationMessages = {
+    package_id: 'Please choose a package again.',
+    event_date: 'Please choose an event date.',
+    selected_menu: 'Please review your selected dishes.',
+};
+
+export const getCustomerSafeValidationMessage = (error, fallback = 'Please review the highlighted details and try again.') => {
+    const fields = error?.errors && typeof error.errors === 'object' ? Object.keys(error.errors) : [];
+    const mapped = fields.map(field => customerValidationMessages[field]).find(Boolean);
+    if (mapped) return mapped;
+
+    const raw = String(error?.error || error?.message || '').toLowerCase();
+    const rawField = Object.keys(customerValidationMessages).find(field => raw.includes(field));
+    if (rawField) return customerValidationMessages[rawField];
+
+    return fallback;
+};
+
 export const paginate = (items, page, perPage = 8) => {
     const total = Array.isArray(items) ? items.length : 0;
     const totalPages = Math.max(1, Math.ceil(total / perPage));

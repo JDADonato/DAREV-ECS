@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\PaymentProcessed;
 use App\Models\Payment;
 use App\Services\PaymentCalculationService;
+use App\Services\PaymentEventService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +62,19 @@ class PayMongoWebhookController extends Controller
                         'reference_number' => $this->resourceReferenceNumber($event),
                     ]);
 
+                    PaymentEventService::record(
+                        'webhook_unmatched',
+                        'paymongo',
+                        null,
+                        [
+                            'event_type' => $eventType,
+                            'resource_id' => Arr::get($event, 'data.attributes.data.id'),
+                            'reference_number' => $this->resourceReferenceNumber($event),
+                        ],
+                        Arr::get($event, 'data.attributes.data.id'),
+                        $eventId ?: null
+                    );
+
                     return ['status' => 'unmatched'];
                 }
 
@@ -75,6 +89,20 @@ class PayMongoWebhookController extends Controller
                         'received_currency' => $this->resourceCurrency($event),
                     ]);
 
+                    PaymentEventService::record(
+                        'webhook_mismatch',
+                        'paymongo',
+                        $payment,
+                        [
+                            'event_type' => $eventType,
+                            'expected_amount' => (float) $payment->amount,
+                            'received_amount' => $this->resourceAmount($event),
+                            'received_currency' => $this->resourceCurrency($event),
+                        ],
+                        Arr::get($event, 'data.attributes.data.id'),
+                        $eventId ?: null
+                    );
+
                     return ['status' => 'mismatch', 'payment_id' => $payment->id];
                 }
 
@@ -88,6 +116,19 @@ class PayMongoWebhookController extends Controller
                         'verified_at' => now(),
                     ])->save();
                 }
+
+                PaymentEventService::record(
+                    'webhook_paid',
+                    'paymongo',
+                    $payment,
+                    [
+                        'event_type' => $eventType,
+                        'payment_type' => $payment->payment_type,
+                        'amount' => (float) $payment->amount,
+                    ],
+                    $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id,
+                    $eventId ?: null
+                );
 
                 $booking = $payment->booking;
 

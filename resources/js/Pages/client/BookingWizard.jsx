@@ -14,6 +14,7 @@ import BlueprintPanel from '../../Components/client/BlueprintPanel';
 import Modal from '../../Components/common/Modal';
 import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import { getCustomerSafeValidationMessage } from '../../utils/dashboardUtils';
 
 const totalSteps = 7;
 
@@ -284,12 +285,9 @@ const BookingWizard = () => {
 
             if (error.response && error.response.data) {
                 const data = error.response.data;
-                errorMsg = data.error || data.message || errorMsg;
-
-                if (data.errors) {
-                    const validationErrors = Object.values(data.errors).flat().join(' ');
-                    errorMsg += ` ${validationErrors}`;
-                }
+                errorMsg = data.errors
+                    ? getCustomerSafeValidationMessage(data)
+                    : getCustomerSafeValidationMessage(data, data.error || data.message || errorMsg);
             }
 
             showModal('error', 'Booking Failed', errorMsg);

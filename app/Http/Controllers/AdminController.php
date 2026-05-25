@@ -10,6 +10,7 @@ use App\Models\MenuItem;
 use App\Models\PricingOverride;
 use App\Models\User;
 use App\Services\AdminReportService;
+use App\Services\EventPreparationService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -244,6 +245,7 @@ class AdminController extends Controller
                 'user:id,full_name,username,email,phone,role',
                 'assignee:id,full_name,username',
                 'reviewTasks',
+                'preparationTasks',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])
             ->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed'])
@@ -292,7 +294,12 @@ class AdminController extends Controller
             return response()->json(['error' => 'Only pending bookings can be approved from this screen.'], 422);
         }
 
-        $booking->update(['status' => $request->status]);
+        $booking->update([
+            'status' => $request->status,
+            'review_status' => 'Approved For Reservation',
+            'reviewed_at' => now(),
+        ]);
+        EventPreparationService::ensureDefaultTasks($booking->fresh());
         Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
         $booking->refresh();
 

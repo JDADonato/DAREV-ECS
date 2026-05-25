@@ -70,6 +70,14 @@ class BookingSummaryResource extends JsonResource
                 'customer_response' => $task->customer_response,
                 'completed_at' => $task->completed_at,
             ])->values()),
+            'preparation_tasks' => $this->whenLoaded('preparationTasks', fn () => $this->preparationTasks->map(fn ($task) => [
+                'id' => $task->id,
+                'department' => $task->department,
+                'label' => $task->label,
+                'status' => $task->status,
+                'due_at' => $task->due_at,
+                'completed_at' => $task->completed_at,
+            ])->values()),
         ];
     }
 }

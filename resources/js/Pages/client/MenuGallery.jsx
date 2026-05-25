@@ -7,6 +7,7 @@ import NotificationBell from '../../Components/common/NotificationBell';
 import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import ConfirmModal from '../../Components/common/ConfirmModal';
 
 const CATEGORY_LIMITS = { starter: 3, main: 4, side: 4, dessert: 4, drink: 3 };
 const STORAGE_KEY = 'ecs_booking_draft';
@@ -28,9 +29,15 @@ const MenuGallery = () => {
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showConflictModal, setShowConflictModal] = useState(false);
+    const [exitBuildConfirmOpen, setExitBuildConfirmOpen] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
     const menuStartRef = useRef(null);
     const ITEMS_PER_PAGE = 9;
+
+    const exitBuildMode = () => {
+        setIsSelectionMode(false);
+        setExitBuildConfirmOpen(false);
+    };
 
     // Package builder state
     const [packageSelections, setPackageSelections] = useState({
@@ -445,8 +452,11 @@ const MenuGallery = () => {
                                 )}
                                 <button
                                     onClick={() => {
-                                        if (totalPackageDishes > 0 && !confirm('Exit build mode? Your selections will be kept.')) return;
-                                        setIsSelectionMode(false);
+                                        if (totalPackageDishes > 0) {
+                                            setExitBuildConfirmOpen(true);
+                                            return;
+                                        }
+                                        exitBuildMode();
                                     }}
                                     className="flex items-center gap-1.5 bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all"
                                 >
@@ -887,6 +897,15 @@ const MenuGallery = () => {
                     </div>
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={exitBuildConfirmOpen}
+                title="Exit build mode?"
+                message="Your dish selections will be kept so you can return to this package later."
+                confirmText="Exit"
+                onCancel={() => setExitBuildConfirmOpen(false)}
+                onConfirm={exitBuildMode}
+            />
 
             {/* Scroll to Top Button */}
             {showScrollTop && (

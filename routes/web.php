@@ -9,6 +9,7 @@ use App\Http\Controllers\ClientDashboardController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\AccountingController;
+use App\Http\Controllers\FeedbackController;
 use App\Http\Controllers\FoodTastingController;
 use App\Http\Controllers\MenuController;
 use App\Http\Controllers\ChatController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\MarketingController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PayMongoWebhookController;
+use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingsController;
 use Illuminate\Http\Request;
@@ -166,6 +168,8 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 
     Route::get('/api/customer/announcements', [AnnouncementController::class, 'customerIndex']);
     Route::post('/api/customer/announcements/{announcement}/read', [AnnouncementController::class, 'markRead']);
+    Route::get('/api/customer/feedback-requests', [FeedbackController::class, 'index']);
+    Route::post('/api/customer/feedback-requests/{token}/responses', [FeedbackController::class, 'store']);
 });
 
 // ─── Marketing Routes (Marketing + Admin) ───
@@ -180,6 +184,8 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
+    Route::get('/api/operations/preparation-board', [OperationsController::class, 'preparationBoard']);
+    Route::patch('/api/operations/preparation-tasks/{task}', [OperationsController::class, 'updatePreparationTask']);
     Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);
     Route::put('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'upsert']);
     Route::delete('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'destroy']);
@@ -209,6 +215,7 @@ Route::middleware(['auth', 'role:Accounting,Admin'])->group(function () {
     Route::put('/api/accounting/payments/{id}', [AccountingController::class, 'updatePayment']);
     Route::put('/api/accounting/bookings/{id}/payment-terms', [AccountingController::class, 'updateBookingPaymentTerms']);
     Route::get('/api/accounting/ledger', [AccountingController::class, 'getLedger']);
+    Route::get('/api/accounting/reconciliation', [AccountingController::class, 'getReconciliation']);
     Route::post('/api/accounting/remind/{paymentId}', [AccountingController::class, 'remindClient']);
     Route::get('/api/accounting/refunds/queue', [AccountingController::class, 'getRefundQueue']);
     Route::post('/api/accounting/refund/{bookingId}', [AccountingController::class, 'processRefund']);

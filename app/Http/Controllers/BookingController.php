@@ -622,10 +622,9 @@ class BookingController extends Controller
 
         $request->validate([
             'booking_id'     => 'required|integer',
-            'payment_method' => 'required|string',
+            'payment_method' => 'nullable|string',
         ]);
 
-        // Verify the booking belongs to this user
         $booking = Booking::where('id', $request->booking_id)
             ->where('user_id', $userId)
             ->first();
@@ -634,32 +633,9 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking not found.'], 404);
         }
 
-        if ($request->pay_in_full) {
-            // Update all pending payments for this booking
-            Payment::where('booking_id', $request->booking_id)
-                ->where('status', 'Pending')
-                ->update([
-                    'payment_method' => $request->payment_method,
-                    'status'         => 'Verified',
-                    'verified_at'    => now(),
-                ]);
-        } else {
-            // Update single payment
-            Payment::where('id', $request->payment_id)
-                ->where('booking_id', $request->booking_id)
-                ->update([
-                    'payment_method' => $request->payment_method,
-                    'status'         => 'Verified',
-                    'verified_at'    => now(),
-                ]);
-        }
-
-        // If the booking is 'Pending' and payment was verified, we update the status
-        if ($booking->status === 'Pending') {
-            $booking->update(['status' => 'Confirmed', 'live_status' => 'Payment Verified']);
-        }
-
-        return response()->json(['message' => 'Payment processed and verified successfully.']);
+        return response()->json([
+            'error' => 'Manual payment confirmation is no longer available. Please use the secure checkout link or contact Accounting if you need help with a payment.',
+        ], 410);
     }
 
     private function normalizeJsonPayload(mixed $value): mixed

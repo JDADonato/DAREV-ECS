@@ -41,4 +41,14 @@ class Payment extends Model
     {
         return $this->belongsTo(Booking::class);
     }
+
+    public function events()
+    {
+        return $this->hasMany(PaymentEvent::class);
+    }
+
+    public function refundCases()
+    {
+        return $this->hasMany(RefundCase::class);
+    }
 }
