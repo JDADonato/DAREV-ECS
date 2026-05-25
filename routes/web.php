@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\CalendarAvailabilityController;
 use App\Http\Controllers\ClientDashboardController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
@@ -63,6 +64,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::put('/api/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::put('/api/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/api/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // ─── Legacy Messaging Routes (kept for backward compatibility) ───
     Route::get('/api/messages/conversations', [MessageController::class, 'conversations']);
@@ -151,6 +153,7 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     Route::put('/api/bookings/{id}/cancel', [BookingController::class, 'cancel']);
     Route::put('/api/bookings/{id}/update', [BookingController::class, 'update']);
     Route::post('/api/bookings/pay', [BookingController::class, 'recordPayment']);
+    Route::post('/api/bookings/{id}/clarification-response', [BookingController::class, 'respondToClarification']);
     Route::delete('/api/bookings/{id}/remove-history', [BookingController::class, 'removeHistory']);
 
     // Food tasting (authenticated)
@@ -171,8 +174,15 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);
+    Route::put('/api/marketing/bookings/{id}/assign', [MarketingController::class, 'assign']);
+    Route::put('/api/marketing/bookings/{id}/review-status', [MarketingController::class, 'updateReviewStatus']);
+    Route::post('/api/marketing/bookings/{id}/clarification', [MarketingController::class, 'requestClarification']);
+    Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
+    Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);
+    Route::put('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'upsert']);
+    Route::delete('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'destroy']);
     Route::post('/api/settings/packages', [SettingsController::class, 'createPackage']);
     Route::put('/api/settings/packages/{id}', [SettingsController::class, 'updatePackage']);
     Route::post('/api/settings/event-types', [SettingsController::class, 'createEventType']);
@@ -181,10 +191,12 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::put('/api/settings/menu-items/{id}/pricing', [SettingsController::class, 'updateDishPricing']);
     Route::get('/api/admin/announcements', [AnnouncementController::class, 'index']);
     Route::post('/api/admin/announcements', [AnnouncementController::class, 'store']);
+    Route::get('/api/admin/announcement-audience-users', [AnnouncementController::class, 'audienceUsers']);
     Route::patch('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'update']);
     Route::post('/api/admin/announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
     Route::post('/api/admin/announcements/{announcement}/archive', [AnnouncementController::class, 'archive']);
     Route::post('/api/admin/announcements/{announcement}/send-test', [AnnouncementController::class, 'sendTest']);
+    Route::delete('/api/admin/announcements/{announcement}', [AnnouncementController::class, 'destroy']);
 });
 
 // ─── Accounting Routes ───
@@ -224,6 +236,7 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::get('/api/admin/analytics/menu-performance', [AdminController::class, 'getAnalyticsMenuPerformance']);
     Route::get('/api/admin/analytics/customer-experience', [AdminController::class, 'getAnalyticsCustomerExperience']);
     Route::get('/api/admin/analytics/operations', [AdminController::class, 'getAnalyticsOperations']);
+    Route::get('/api/admin/analytics/forecasts', [AdminController::class, 'getAnalyticsForecasts']);
     Route::get('/api/admin/report-widgets', [ReportController::class, 'widgets']);
     Route::post('/api/admin/report-preview', [ReportController::class, 'preview']);
     Route::get('/api/admin/report-templates', [ReportController::class, 'templates']);

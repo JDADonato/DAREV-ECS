@@ -4,7 +4,7 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import { useToast } from '../../context/ToastContext';
 import UserDropdown from '../../Components/common/UserDropdown';
 import NotificationBell from '../../Components/common/NotificationBell';
-import ChatBubble from '../../Components/common/ChatBubble';
+import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 
@@ -757,7 +757,7 @@ const MenuGallery = () => {
             {isSelectionMode && totalPackageDishes > 0 && (
                 <button
                     onClick={() => setShowPackageDrawer(true)}
-                    className="fixed bottom-6 right-6 z-50 bg-red-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:bg-red-800 transition-all transform hover:scale-105 active:scale-95"
+                    className="fixed bottom-24 right-6 z-50 bg-red-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 hover:bg-red-800 transition-all transform hover:scale-105 active:scale-95"
                     style={{animation:'imgZoomIn .3s ease'}}
                 >
                     <div className="relative">
@@ -900,7 +900,7 @@ const MenuGallery = () => {
                 </button>
             )}
             {/* Chat Bubble */}
-            {user && <ChatBubble user={user} />}
+            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

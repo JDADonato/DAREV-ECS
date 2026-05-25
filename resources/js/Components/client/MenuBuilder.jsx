@@ -522,7 +522,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         });
     };
 
-    // Budget Maximizer: round-robin across categories to spread dishes evenly
+    // Budget builder: secure one dish from every category first, then add extras if the budget allows.
     const applyBudgetMaximizer = () => {
         if (!isBudgetReady || budgetMissingCategory) return;
         const totalBudget = parseInt(budget);
@@ -531,19 +531,38 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
 
         const categories = ['starter', 'main', 'side', 'dessert', 'drink'];
 
-        // Build sorted dish lists per category, then fit selections within the target budget.
+        // Build sorted dish lists per category.
         const categoryQueues = {};
         categories.forEach(cat => {
             categoryQueues[cat] = [...(mergedDishes[cat] || [])]
                 .map(dish => ({
                     ...dish,
                     category: cat,
-                    totalCost: getDishCost(dish) * pax
+                    totalCost: Number(getDishCost(dish) || 0) * Number(pax || 0)
                 }))
-                .sort((a, b) => b.totalCost - a.totalCost); // expensive first
+                .filter(dish => dish.totalCost > 0)
+                .sort((a, b) => a.totalCost - b.totalCost);
         });
 
-        // Round-robin: cycle through categories, picking one dish at a time from each
+        // First pass: guarantee a complete menu by selecting the lowest-priced dish in every category.
+        for (const cat of categories) {
+            const cheapest = categoryQueues[cat]?.[0];
+            if (!cheapest || runningTotal + cheapest.totalCost > totalBudget) {
+                return;
+            }
+
+            newSelections[cat].push(cheapest.id);
+            runningTotal += cheapest.totalCost;
+        }
+
+        // Second pass: with a complete menu secured, add the best remaining choices that still fit.
+        const remainingQueues = {};
+        categories.forEach(cat => {
+            remainingQueues[cat] = [...categoryQueues[cat]]
+                .filter(dish => !newSelections[cat].includes(dish.id))
+                .sort((a, b) => b.totalCost - a.totalCost);
+        });
+
         let changed = true;
         while (changed) {
             changed = false;
@@ -551,51 +570,18 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                 const limit = CATEGORY_LIMITS[cat] || 5;
                 if (newSelections[cat].length >= limit) continue; // Category full
 
-                // Find the next best dish in this category that fits the budget
-                const queue = categoryQueues[cat];
-                let picked = false;
+                const queue = remainingQueues[cat] || [];
                 for (let i = 0; i < queue.length; i++) {
                     const dish = queue[i];
                     if (newSelections[cat].includes(dish.id)) continue; // Already selected
                     if (runningTotal + dish.totalCost <= totalBudget) {
                         newSelections[cat].push(dish.id);
                         runningTotal += dish.totalCost;
-                        picked = true;
                         changed = true;
                         break;
                     }
                 }
-
-                // If most expensive doesn't fit, try cheaper ones
-                if (!picked) {
-                    const cheapQueue = [...queue].reverse();
-                    for (const dish of cheapQueue) {
-                        if (newSelections[cat].includes(dish.id)) continue;
-                        if (runningTotal + dish.totalCost <= totalBudget) {
-                            newSelections[cat].push(dish.id);
-                            runningTotal += dish.totalCost;
-                            changed = true;
-                            break;
-                        }
-                    }
-                }
             }
-        }
-
-        // Fallback: if budget is too low for even one per category, pick cheapest from each
-        const totalPicked = Object.values(newSelections).reduce((sum, arr) => sum + arr.length, 0);
-        if (totalPicked === 0) {
-            categories.forEach(cat => {
-                const sorted = [...(mergedDishes[cat] || [])].sort((a, b) => getDishCost(a) - getDishCost(b));
-                if (sorted.length > 0) {
-                    const cheapest = sorted[0];
-                    const cost = getDishCost(cheapest) * pax;
-                    if (runningTotal + cost <= totalBudget * 1.1) {
-                        newSelections[cat].push(cheapest.id);
-                        runningTotal += cost;
-                    }
-                }
-            });
         }
 
         setSelections(newSelections);
@@ -708,6 +694,20 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
         onNext(true);
     };
 
+    const clearAllSelections = () => {
+        const emptySelections = { starter: [], main: [], side: [], dessert: [], drink: [] };
+        setSelections(emptySelections);
+        setMenuFilter('all');
+        setMenuSearch('');
+        setMenuPage(1);
+        updateBooking({
+            selectedDishes: emptySelections,
+            customMenu: {},
+            totalCost: hasPackagePricing ? getPackageBaseTotal() : 0,
+            menuExtraFee: 0,
+        });
+    };
+
     const totalDishCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0);
     const missingCategories = CATEGORY_TABS.filter(tab => (selections[tab.key] || []).length === 0);
     const allCategoriesFilled = missingCategories.length === 0;
@@ -721,6 +721,7 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
     const isGuidedMenu = bookingData.package_id === 'custom';
     const isCuratedSelection = bookingData.package_id && !['custom', 'budget-guided'].includes(String(bookingData.package_id));
     const canAdvanceMenu = isGuidedMenu ? (!isLastCategory || allCategoriesFilled) : allCategoriesFilled;
+    const hasAnySelection = totalDishCount > 0;
     const showMenuGuide = isGuidedMenu || hasPackagePricing;
     const goToPreviousCategory = () => {
         if (!isGuidedMenu || isFirstCategory) {
@@ -821,8 +822,8 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                             {budgetMissingCategory
                                 ? `Menu prices are still loading for ${budgetMissingCategory.label}.`
                                 : budgetMinimum > 0
-                                    ? `Minimum smart budget: ${money(budgetMinimum)} for ${pax} guests. This covers at least one dish from every category.`
-                                    : 'Calculating the minimum smart budget from current menu prices.'}
+                                    ? `For ${pax} guests, a complete menu starts at ${money(budgetMinimum)}. This includes at least one choice from each menu section.`
+                                    : 'Checking the starting menu price for your guest count.'}
                         </div>
 
                         <div className="flex gap-4">
@@ -906,8 +907,8 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
                                     {budgetMissingCategory
                                         ? `Menu prices are still loading for ${budgetMissingCategory.label}.`
                                         : budgetMinimum > 0
-                                            ? `Minimum smart budget: ${money(budgetMinimum)} for ${pax} guests. This covers at least one dish from every category.`
-                                            : 'Calculating the minimum smart budget from current menu prices.'}
+                                            ? `For ${pax} guests, a complete menu starts at ${money(budgetMinimum)}. This includes at least one choice from each menu section.`
+                                            : 'Checking the starting menu price for your guest count.'}
                                 </div>
                                 <ul className="space-y-2 text-xs text-gray-500 mb-5">
                                     <li className="flex items-center"><svg className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Auto-selects dishes to fit your budget</li>
@@ -1360,15 +1361,25 @@ const MenuBuilder = ({ bookingData, updateBooking, onNext, onBack, mode = 'full'
 
             {/* Bottom Bar */}
             <div className="flex justify-between pt-8 items-center border-t border-gray-100 mt-8">
-                <button
-                    onClick={goToPreviousCategory}
-                    className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
-                >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                    {isGuidedMenu && !isFirstCategory ? 'Previous category' : 'Back to packages'}
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                    <button
+                        onClick={goToPreviousCategory}
+                        className="text-gray-500 font-medium hover:text-gray-800 px-4 py-3 transition-colors flex items-center text-sm"
+                    >
+                        <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        {isGuidedMenu && !isFirstCategory ? 'Previous category' : 'Back to packages'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={clearAllSelections}
+                        disabled={!hasAnySelection}
+                        className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300"
+                    >
+                        Clear all
+                    </button>
+                </div>
 
                 <div className="flex items-center gap-4">
                     <div className="text-right">

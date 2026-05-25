@@ -95,21 +95,31 @@ class ReportController extends Controller
         return response()->json((new ReportRunResource($run))->resolve(), 201);
     }
 
-    public function export(ReportRun $run): StreamedResponse
+    public function export(Request $request, ReportRun $run)
     {
+        $format = strtolower((string) $request->query('format', 'csv'));
+        if ($format === 'pdf') {
+            $filename = 'eloquente-report-' . $run->id . '.pdf';
+            return response($this->buildPdf($run), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            ]);
+        }
+
         $filename = 'eloquente-report-' . $run->id . '.csv';
         $snapshot = $run->result_snapshot_json ?? [];
+        $widgetNames = collect($this->reports->widgetDefinitions())->pluck('name', 'id');
 
-        return response()->streamDownload(function () use ($snapshot) {
+        return response()->streamDownload(function () use ($snapshot, $widgetNames) {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, ['Widget', 'Metric', 'Value', 'Extra']);
+            fputcsv($handle, ['Report Section', 'Item', 'Detail', 'Value']);
 
             foreach ($snapshot as $widget) {
-                $title = $widget['id'] ?? 'widget';
+                $title = $widgetNames[$widget['id'] ?? ''] ?? $this->humanLabel($widget['id'] ?? 'Report Section');
                 $data = $widget['data'] ?? [];
 
                 foreach ($this->flattenWidgetRows($data) as $row) {
-                    fputcsv($handle, [$title, $row['metric'], $row['value'], $row['extra']]);
+                    fputcsv($handle, [$title, $row['item'], $row['detail'], $row['value']]);
                 }
             }
 
@@ -133,25 +143,144 @@ class ReportController extends Controller
         if (isset($data['rows']) && is_array($data['rows'])) {
             return collect($data['rows'])->flatMap(function ($row) {
                 if (!is_array($row)) {
-                    return [['metric' => 'value', 'value' => $row, 'extra' => '']];
+                    return [['item' => 'Result', 'detail' => '', 'value' => $this->formatExportValue($row)]];
                 }
 
                 $label = $row['label'] ?? $row['name'] ?? $row['client'] ?? $row['date'] ?? 'row';
                 return collect($row)
-                    ->reject(fn ($value, $key) => in_array($key, ['label', 'name', 'client'], true))
+                    ->reject(fn ($value, $key) => in_array($key, ['id', 'label', 'name', 'client'], true) || is_array($value))
                     ->map(fn ($value, $key) => [
-                        'metric' => $label . ' - ' . $key,
-                        'value' => is_scalar($value) ? $value : json_encode($value),
-                        'extra' => '',
+                        'item' => $label,
+                        'detail' => $this->humanLabel((string) $key),
+                        'value' => $this->formatExportValue($value, (string) $key),
                     ])
                     ->values();
             })->values()->all();
         }
 
         return collect($data)
-            ->reject(fn ($value) => is_array($value))
-            ->map(fn ($value, $key) => ['metric' => $key, 'value' => $value, 'extra' => ''])
+            ->reject(fn ($value, $key) => is_array($value) || $key === 'action')
+            ->map(fn ($value, $key) => [
+                'item' => $this->humanLabel((string) $key),
+                'detail' => '',
+                'value' => $this->formatExportValue($value, (string) $key),
+            ])
+            ->when(isset($data['action']), fn ($rows) => $rows->push([
+                'item' => 'Recommended Action',
+                'detail' => '',
+                'value' => $data['action'],
+            ]))
             ->values()
             ->all();
+    }
+
+    private function buildPdf(ReportRun $run): string
+    {
+        $widgetNames = collect($this->reports->widgetDefinitions())->pluck('name', 'id');
+        $lines = [
+            'Eloquente Catering',
+            'Management Report #' . $run->id,
+            'Generated: ' . now()->format('M j, Y g:i A'),
+            '',
+        ];
+
+        foreach ($run->result_snapshot_json ?? [] as $widget) {
+            $title = $widgetNames[$widget['id'] ?? ''] ?? $this->humanLabel($widget['id'] ?? 'Report Section');
+            $lines[] = strtoupper($title);
+            foreach ($this->flattenWidgetRows($widget['data'] ?? []) as $row) {
+                $detail = $row['detail'] ? ' - ' . $row['detail'] : '';
+                $lines[] = $row['item'] . $detail . ': ' . $row['value'];
+            }
+            $lines[] = '';
+        }
+
+        return $this->simplePdf($lines);
+    }
+
+    private function simplePdf(array $lines): string
+    {
+        $pages = array_chunk($this->wrapPdfLines($lines), 42);
+        $objects = [];
+        $objects[] = '<< /Type /Catalog /Pages 2 0 R >>';
+        $pageRefs = [];
+        $fontObjectId = (count($pages) * 2) + 3;
+
+        foreach ($pages as $index => $pageLines) {
+            $pageId = 3 + ($index * 2);
+            $contentId = $pageId + 1;
+            $pageRefs[] = $pageId . ' 0 R';
+            $objects[] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 {$fontObjectId} 0 R >> >> /Contents {$contentId} 0 R >>";
+
+            $streamLines = ['BT', '/F1 11 Tf', '50 742 Td', '14 TL'];
+            foreach ($pageLines as $line) {
+                $streamLines[] = '(' . $this->escapePdfText($line) . ') Tj';
+                $streamLines[] = 'T*';
+            }
+            $streamLines[] = 'ET';
+            $stream = implode("\n", $streamLines);
+            $objects[] = "<< /Length " . strlen($stream) . " >>\nstream\n{$stream}\nendstream";
+        }
+
+        array_splice($objects, 1, 0, ['<< /Type /Pages /Kids [' . implode(' ', $pageRefs) . '] /Count ' . count($pages) . ' >>']);
+        $objects[] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+        foreach ($objects as $index => $object) {
+            $offsets[] = strlen($pdf);
+            $pdf .= ($index + 1) . " 0 obj\n{$object}\nendobj\n";
+        }
+
+        $xref = strlen($pdf);
+        $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
+        $pdf .= "0000000000 65535 f \n";
+        for ($i = 1; $i <= count($objects); $i++) {
+            $pdf .= str_pad((string) $offsets[$i], 10, '0', STR_PAD_LEFT) . " 00000 n \n";
+        }
+        $pdf .= "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF";
+
+        return $pdf;
+    }
+
+    private function wrapPdfLines(array $lines): array
+    {
+        return collect($lines)->flatMap(function ($line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                return [''];
+            }
+            return str_split($line, 88);
+        })->all();
+    }
+
+    private function escapePdfText(string $text): string
+    {
+        return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
+    }
+
+    private function humanLabel(string $key): string
+    {
+        $label = preg_replace('/(?<!^)[A-Z]/', ' $0', str_replace(['_', '-'], ' ', $key));
+        return ucwords(trim((string) $label));
+    }
+
+    private function formatExportValue(mixed $value, string $key = ''): string
+    {
+        if (is_bool($value)) {
+            return $value ? 'Yes' : 'No';
+        }
+
+        if (is_numeric($value)) {
+            $lower = strtolower($key);
+            if (str_contains($lower, 'revenue') || str_contains($lower, 'amount') || str_contains($lower, 'total') || str_contains($lower, 'value') || str_contains($lower, 'balance')) {
+                return 'PHP ' . number_format((float) $value, 2);
+            }
+            if (str_contains($lower, 'rate') || str_contains($lower, 'percent')) {
+                return number_format((float) $value, 1) . '%';
+            }
+            return number_format((float) $value, is_float($value + 0) && fmod((float) $value, 1.0) !== 0.0 ? 2 : 0);
+        }
+
+        return (string) $value;
     }
 }

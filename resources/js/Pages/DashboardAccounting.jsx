@@ -253,8 +253,8 @@ const DashboardAccounting = () => {
 
     const tabMeta = {
         bookings: 'Payment Verification',
-        ledger: 'Transaction Ledger',
-        refunds: 'Refund Management',
+        ledger: 'Ledger',
+        refunds: 'Refunds',
     };
 
     return (
@@ -264,10 +264,10 @@ const DashboardAccounting = () => {
                     <div className="flex min-h-16 flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
                         <div>
                             <p className="marketing-kicker">Eloquente</p>
-                            <h1 className="text-xl font-bold font-display text-slate-950">Accounting Executive Dashboard</h1>
+                            <h1 className="text-xl font-bold font-display text-slate-950">Accounting Workspace</h1>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
-                            <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">Finance workspace</div>
+                            <div className="staff-role-chip">Finance team</div>
                             <span className="text-sm font-bold text-slate-700">{user && user.username}</span>
                             <button onClick={handleLogout} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 hover:text-slate-900">Logout</button>
                         </div>
@@ -278,7 +278,7 @@ const DashboardAccounting = () => {
             <main className="flex-grow mx-auto max-w-[1500px] w-full py-6 px-4 sm:px-6 lg:px-8">
                 <section className="marketing-command mb-5">
                     <div>
-                        <p className="marketing-kicker">Accounting Operations</p>
+                        <p className="marketing-kicker">Today</p>
                         <h2 className="mt-1 text-2xl font-bold text-slate-950">Payment control desk</h2>
                     </div>
                     <div className="marketing-metrics">
@@ -775,7 +775,7 @@ const DashboardAccounting = () => {
                     <div className="marketing-panel overflow-hidden">
                         <div className="px-6 py-5 border-b border-amber-100 bg-[#fffaf3]">
                             <p className="marketing-kicker">Refund Queue</p>
-                            <h3 className="mt-1 text-lg font-bold text-slate-950">Refund Management Queue</h3>
+                            <h3 className="mt-1 text-lg font-bold text-slate-950">Refund Queue</h3>
                             <p className="text-sm text-slate-500 mt-1">Process manual financial returns for cancelled events outside the 7-day lock-in period. A 10% reservation fee will be deducted.</p>
                         </div>
                         {loading ? (
@@ -863,7 +863,7 @@ const DashboardAccounting = () => {
             />
 
             {toast && (
-                <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                <div className="pointer-events-none fixed right-5 top-24 z-50 animate-slideUp">
                     <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                         <span className={'min-w-0 flex-1 font-semibold leading-5 ' + (toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]')}>{toast.message}</span>
                         <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-[#8a6a46] transition hover:bg-[#f5eadb] hover:text-[#720101]">

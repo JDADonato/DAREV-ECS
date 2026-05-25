@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\BookingSummaryResource;
 use App\Models\Booking;
+use App\Models\BookingReviewTask;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 /**
@@ -22,7 +25,7 @@ class MarketingController extends Controller
             // Phase 2: Inertia.js Payload Optimization
             // Lazy Evaluation: Only queries the database if the 'bookings' prop is explicitly requested via partial reloads.
             'bookings' => Inertia::lazy(function () {
-                return Booking::with('user:id,username,role')
+                return Booking::with('user:id,full_name,username,role')
                     ->orderBy('event_date', 'asc')
                     ->get();
             })
@@ -35,12 +38,13 @@ class MarketingController extends Controller
      */
     public function getAllBookings(Request $request)
     {
-        $query = Booking::with('user:id,username,email,phone,role')
+        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
                     ->where('client_full_name', 'like', $term)
+                    ->orWhere('event_name', 'like', $term)
                     ->orWhere('venue_city', 'like', $term)
                     ->orWhere('event_type', 'like', $term));
             })
@@ -74,7 +78,19 @@ class MarketingController extends Controller
             return response()->json(['error' => 'Booking not found'], 404);
         }
 
-        $booking->update(['status' => $request->status]);
+        $reviewStatus = match ($request->status) {
+            'Confirmed' => 'Approved For Reservation',
+            'Cancelled' => 'Not Available',
+            'Completed' => 'Completed',
+            default => $booking->review_status ?: 'Submitted',
+        };
+
+        $booking->update([
+            'status' => $request->status,
+            'review_status' => $reviewStatus,
+            'assigned_to' => $booking->assigned_to ?: Auth::id(),
+            'reviewed_at' => in_array($request->status, ['Confirmed', 'Cancelled', 'Completed'], true) ? now() : $booking->reviewed_at,
+        ]);
 
         // ─── Send notification to the client ───
         try {
@@ -86,7 +102,129 @@ class MarketingController extends Controller
             \Illuminate\Support\Facades\Log::error("Notification failed on status update: {$e->getMessage()}");
         }
 
-        return response()->json(['success' => true, 'message' => 'Booking status updated']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Booking status updated',
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+        ]);
+    }
+
+    public function assign(Request $request, int $id)
+    {
+        $booking = Booking::find($id);
+
+        if (!$booking) {
+            return response()->json(['error' => 'Booking not found'], 404);
+        }
+
+        $booking->update([
+            'assigned_to' => Auth::id(),
+            'review_status' => $booking->review_status === 'Submitted' ? 'Under Review' : ($booking->review_status ?: 'Under Review'),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Booking assigned.',
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+        ]);
+    }
+
+    public function updateReviewStatus(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'review_status' => 'required|in:Submitted,Under Review,Needs Customer Details,Clarification Received,Approved For Reservation,Not Available,Completed',
+        ]);
+
+        $booking = Booking::find($id);
+
+        if (!$booking) {
+            return response()->json(['error' => 'Booking not found'], 404);
+        }
+
+        $booking->update([
+            'review_status' => $data['review_status'],
+            'assigned_to' => $booking->assigned_to ?: Auth::id(),
+            'reviewed_at' => in_array($data['review_status'], ['Approved For Reservation', 'Not Available', 'Completed'], true) ? now() : $booking->reviewed_at,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Review status updated.',
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+        ]);
+    }
+
+    public function requestClarification(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'message' => 'required|string|min:5|max:3000',
+        ]);
+
+        $booking = Booking::find($id);
+
+        if (!$booking) {
+            return response()->json(['error' => 'Booking not found'], 404);
+        }
+
+        $booking->update([
+            'review_status' => 'Needs Customer Details',
+            'assigned_to' => $booking->assigned_to ?: Auth::id(),
+            'clarification_request' => $data['message'],
+            'clarification_response' => null,
+            'clarification_requested_at' => now(),
+            'clarification_responded_at' => null,
+        ]);
+
+        BookingReviewTask::create([
+            'booking_id' => $booking->id,
+            'task_type' => 'clarification',
+            'label' => $data['message'],
+            'status' => 'Needs Customer',
+            'assigned_to' => Auth::id(),
+            'customer_visible' => DB::raw('true'),
+        ]);
+
+        try {
+            $booking->user?->notify(new \App\Notifications\BookingStatusNotification($booking, 'Needs Customer Details'));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Clarification notification failed.', [
+                'booking_id' => $booking->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Details requested from customer.',
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks'])),
+        ]);
+    }
+
+    public function updateReviewTask(Request $request, int $bookingId, int $taskId)
+    {
+        $data = $request->validate([
+            'status' => 'required|in:Pending,Done,Needs Customer,Customer Responded',
+        ]);
+
+        $task = BookingReviewTask::where('booking_id', $bookingId)->find($taskId);
+
+        if (!$task) {
+            return response()->json(['error' => 'Review task not found'], 404);
+        }
+
+        $task->update([
+            'status' => $data['status'],
+            'completed_by' => $data['status'] === 'Done' ? Auth::id() : null,
+            'completed_at' => $data['status'] === 'Done' ? now() : null,
+        ]);
+
+        $booking = Booking::with(['user', 'assignee', 'reviewTasks'])->find($bookingId);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Review checklist updated.',
+            'booking' => new BookingSummaryResource($booking),
+        ]);
     }
 
     /**
@@ -118,7 +256,7 @@ class MarketingController extends Controller
      */
     public function show(int $id)
     {
-        $booking = Booking::with('user:id,username,role')->find($id);
+        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'reviewTasks'])->find($id);
 
         if (!$booking) {
             return response()->json(['error' => 'Booking not found'], 404);

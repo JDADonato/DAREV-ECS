@@ -43,7 +43,8 @@ class AdminController extends Controller
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('username', 'like', $term)
+                    ->where('full_name', 'like', $term)
+                    ->orWhere('username', 'like', $term)
                     ->orWhere('email', 'like', $term)
                     ->orWhere('phone', 'like', $term));
             })
@@ -51,12 +52,12 @@ class AdminController extends Controller
 
         if ($request->boolean('paginated')) {
             $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
-            $employees = $query->paginate($perPage, ['id', 'username', 'email', 'phone', 'role', 'created_at']);
+            $employees = $query->paginate($perPage, ['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
 
             return ApiResponse::paginated($employees, UserSummaryResource::collection($employees->getCollection())->resolve());
         }
 
-        $employees = $query->get(['id', 'username', 'email', 'phone', 'role', 'created_at']);
+        $employees = $query->get(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
 
         return response()->json(UserSummaryResource::collection($employees)->resolve());
     }
@@ -64,16 +65,17 @@ class AdminController extends Controller
     public function createEmployee(Request $request)
     {
         $request->validate([
+            'full_name' => 'required|string|max:255',
             'username' => 'required|string|unique:users,username',
-            'password' => 'required|string|min:6',
             'email'    => 'nullable|email|unique:users,email',
             'phone'    => 'nullable|string',
             'role'     => 'required|in:Marketing,Accounting',
         ]);
 
         $user = User::create([
+            'full_name' => $request->full_name,
             'username' => $request->username,
-            'password' => $request->password,
+            'password' => 'eloquestaff@2026',
             'email'    => $request->email,
             'phone'    => $request->phone,
             'role'     => $request->role,
@@ -85,6 +87,7 @@ class AdminController extends Controller
     public function updateEmployee(Request $request, int $id)
     {
         $request->validate([
+            'full_name' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', Rule::unique('users', 'username')->ignore($id)],
             'email'    => ['nullable', 'email', Rule::unique('users', 'email')->ignore($id)],
             'phone'    => 'nullable|string',
@@ -99,6 +102,7 @@ class AdminController extends Controller
         }
 
         $updates = [];
+        if ($request->has('full_name')) $updates['full_name'] = $request->full_name;
         if ($request->has('username')) $updates['username'] = $request->username;
         if ($request->has('email'))    $updates['email'] = $request->email;
         if ($request->has('phone'))    $updates['phone'] = $request->phone;
@@ -132,7 +136,7 @@ class AdminController extends Controller
     public function getCustomers(Request $request)
     {
         $query = User::where('role', 'Client')
-            ->select(['id', 'username', 'email', 'phone', 'role', 'created_at'])
+            ->select(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at'])
             ->withCount('bookings')
             ->withMax('bookings', 'event_date')
             ->when($request->query('search'), function ($q, $search) {
@@ -215,6 +219,7 @@ class AdminController extends Controller
                 'budget',
                 'package_id',
                 'event_type',
+                'event_name',
                 'client_full_name',
                 'client_email',
                 'client_phone',
@@ -225,11 +230,20 @@ class AdminController extends Controller
                 'venue_zip_code',
                 'total_cost',
                 'status',
+                'review_status',
+                'assigned_to',
+                'clarification_request',
+                'clarification_response',
+                'clarification_requested_at',
+                'clarification_responded_at',
+                'reviewed_at',
                 'live_status',
                 'created_at',
             ])
             ->with([
-                'user:id,username,email,phone,role',
+                'user:id,full_name,username,email,phone,role',
+                'assignee:id,full_name,username',
+                'reviewTasks',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])
             ->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed'])
@@ -238,6 +252,7 @@ class AdminController extends Controller
                 $term = '%' . trim((string) $search) . '%';
                 $q->where(fn ($inner) => $inner
                     ->where('client_full_name', 'like', $term)
+                    ->orWhere('event_name', 'like', $term)
                     ->orWhere('client_email', 'like', $term)
                     ->orWhere('venue_city', 'like', $term));
             })
@@ -278,7 +293,7 @@ class AdminController extends Controller
         }
 
         $booking->update(['status' => $request->status]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
         $booking->refresh();
 
         try {
@@ -372,7 +387,7 @@ class AdminController extends Controller
             'discount_type'  => $discountType,
             'total_cost'     => $newTotalCost,
         ]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json([
             'message'        => 'Discount applied successfully',
@@ -393,44 +408,37 @@ class AdminController extends Controller
 
     public function getAnalyticsSummary(Request $request, AdminReportService $reports)
     {
-        return response()->json(['summary' => $reports->analytics($this->analyticsFilters($request))['summary']]);
+        return response()->json($reports->analyticsSummary($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsRevenue(Request $request, AdminReportService $reports)
     {
-        return response()->json($reports->analytics($this->analyticsFilters($request))['revenueHealth']);
+        return response()->json($reports->analyticsRevenue($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsPipeline(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'bookingPipeline' => $analytics['bookingPipeline'],
-            'upcomingWorkload' => $analytics['upcomingWorkload'],
-        ]);
+        return response()->json($reports->analyticsPipeline($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsMenuPerformance(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'packagePerformance' => $analytics['packagePerformance'],
-            'menuPerformance' => $analytics['menuPerformance'],
-        ]);
+        return response()->json($reports->analyticsMenuPerformance($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsCustomerExperience(Request $request, AdminReportService $reports)
     {
-        return response()->json($reports->analytics($this->analyticsFilters($request))['customerExperience']);
+        return response()->json($reports->analyticsCustomerExperience($this->analyticsFilters($request)));
     }
 
     public function getAnalyticsOperations(Request $request, AdminReportService $reports)
     {
-        $analytics = $reports->analytics($this->analyticsFilters($request));
-        return response()->json([
-            'operationsLoad' => $analytics['operationsLoad'],
-            'alerts' => $analytics['alerts'],
-        ]);
+        return response()->json($reports->analyticsOperations($this->analyticsFilters($request)));
+    }
+
+    public function getAnalyticsForecasts(Request $request, AdminReportService $reports)
+    {
+        return response()->json($reports->analyticsForecasts($this->analyticsFilters($request)));
     }
 
     private function analyticsFilters(Request $request): array
@@ -512,7 +520,7 @@ class AdminController extends Controller
             'description'    => $request->description ?? '',
             'is_best_seller' => $request->is_best_seller ?? false,
         ]);
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json($item, 201);
     }
@@ -538,7 +546,7 @@ class AdminController extends Controller
             'name', 'category', 'cost_per_head', 'price_adj',
             'image', 'description', 'is_best_seller',
         ]));
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         return response()->json($item);
     }
@@ -551,7 +559,7 @@ class AdminController extends Controller
         }
 
         $item->delete();
-        Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
         return response()->json(['message' => 'Menu item deleted successfully']);
     }
 }

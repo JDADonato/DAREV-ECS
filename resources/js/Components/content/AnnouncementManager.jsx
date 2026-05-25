@@ -1,19 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Archive,
-    CalendarDays,
+    ChevronDown,
     Eye,
     Filter,
-    Image,
-    Link as LinkIcon,
     Mail,
-    Megaphone,
     Pencil,
     Save,
     Search,
     Send,
-    Sparkles,
-    Users,
+    Trash2,
+    X,
 } from 'lucide-react';
 
 const emptyForm = {
@@ -23,7 +20,7 @@ const emptyForm = {
     type: 'general',
     visibility: 'all_customers',
     visibility_roles: ['Client'],
-    specific_user_ids: '',
+    specific_user_ids: [],
     status: 'draft',
     starts_at: '',
     ends_at: '',
@@ -42,30 +39,40 @@ const typeLabels = {
     holiday_advisory: 'Holiday Advisory',
     menu_update: 'Menu Update',
     service_notice: 'Service Notice',
-    urgent: 'Urgent',
+    urgent: 'Urgent Notice',
 };
 
 const visibilityLabels = {
     all_customers: 'Homepage and all customers',
-    active_clients: 'Active clients only',
+    active_clients: 'Customers with bookings',
     specific_roles: 'Selected roles',
-    specific_users: 'Selected users',
+    specific_users: 'Selected people',
 };
 
-const statusStyles = {
-    draft: 'bg-slate-100 text-slate-700',
-    scheduled: 'bg-indigo-100 text-indigo-700',
-    published: 'bg-emerald-100 text-emerald-700',
-    archived: 'bg-stone-200 text-stone-700',
-};
+const tabs = [
+    { id: 'all', label: 'All' },
+    { id: 'draft', label: 'Drafts' },
+    { id: 'scheduled', label: 'Scheduled' },
+    { id: 'published', label: 'Published' },
+    { id: 'sent', label: 'Sent History' },
+    { id: 'archived', label: 'Archived' },
+];
 
 const roleOptions = ['Client', 'Marketing', 'Accounting', 'Admin'];
-const statusOptions = ['all', 'draft', 'published', 'scheduled', 'archived'];
 const typeOptions = ['all', ...Object.keys(typeLabels)];
-
-const formatDate = (value) => (value ? new Date(value).toLocaleString() : 'Not set');
-const isFutureDate = (value) => value && new Date(value).getTime() > Date.now();
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+const isFutureDate = (value) => value && new Date(value).getTime() > Date.now();
+
+const formatDate = (value) => {
+    if (!value) return 'Not set';
+    return new Date(value).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+};
 
 const imageUrl = (path) => {
     if (!path) return '';
@@ -82,9 +89,16 @@ const firstValidationMessage = (payload) => {
     return payload?.message || 'Request failed. Please check the announcement details.';
 };
 
+const statusCopy = (item) => {
+    if (item.status === 'scheduled') return `Scheduled for ${formatDate(item.starts_at)}`;
+    if (item.status === 'published') return `Live since ${formatDate(item.published_at || item.starts_at)}`;
+    if (item.status === 'archived') return 'Hidden from customers';
+    return 'Draft only';
+};
+
 const AnnouncementManager = ({ variant = 'marketing', user }) => {
     const [announcements, setAnnouncements] = useState([]);
-    const [filters, setFilters] = useState({ status: 'all', type: 'all', search: '' });
+    const [filters, setFilters] = useState({ tab: 'all', type: 'all', search: '' });
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [form, setForm] = useState(emptyForm);
     const [editingId, setEditingId] = useState(null);
@@ -93,44 +107,56 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
     const [message, setMessage] = useState(null);
     const [previewId, setPreviewId] = useState(null);
     const [testEmail, setTestEmail] = useState(user?.email || '');
+    const [audienceSearch, setAudienceSearch] = useState('');
+    const [audienceUsers, setAudienceUsers] = useState([]);
+    const [selectedUsers, setSelectedUsers] = useState([]);
+    const [deleteTarget, setDeleteTarget] = useState(null);
 
     const shellClass = variant === 'admin' ? 'admin-card' : 'marketing-panel';
-    const primaryClass = variant === 'admin'
-        ? 'inline-flex items-center justify-center gap-2 rounded-xl bg-[#720101] px-4 py-3 text-sm font-black text-white transition hover:bg-[#5a0101] disabled:opacity-60'
-        : 'marketing-primary-btn inline-flex items-center justify-center gap-2 px-4 py-3 text-sm disabled:opacity-60';
+    const primaryClass = 'inline-flex items-center justify-center gap-2 rounded-xl bg-[#720101] px-4 py-3 text-sm font-black text-white transition hover:bg-[#5a0101] disabled:opacity-60';
+    const secondaryClass = 'inline-flex items-center justify-center gap-2 rounded-xl border border-[#720101]/15 bg-white px-4 py-3 text-sm font-black text-[#720101] transition hover:bg-[#fff7e8] disabled:opacity-60';
+    const preview = editingId ? form : (announcements.find((item) => item.id === previewId) || form);
+    const publishLabel = isFutureDate(form.starts_at) ? 'Schedule Announcement' : 'Publish Now';
+
+    const stats = useMemo(() => announcements.reduce((acc, item) => {
+        acc.total += 1;
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        acc.homepage += item.status === 'published' && item.visibility === 'all_customers' ? 1 : 0;
+        acc.sent += Number(item.sent_count || 0);
+        acc.failed += Number(item.failed_count || 0);
+        acc.read += Number(item.read_count || 0);
+        return acc;
+    }, { total: 0, draft: 0, scheduled: 0, published: 0, archived: 0, homepage: 0, sent: 0, failed: 0, read: 0 }), [announcements]);
 
     const filteredItems = useMemo(() => {
         const search = filters.search.trim().toLowerCase();
 
         return announcements.filter((item) => {
-            const matchesStatus = filters.status === 'all' || item.status === filters.status;
-            const matchesType = filters.type === 'all' || item.type === filters.type;
-            const matchesSearch = !search || [item.title, item.summary, item.body]
+            const tabMatch = filters.tab === 'all'
+                || item.status === filters.tab
+                || (filters.tab === 'sent' && Number(item.sent_count || 0) + Number(item.failed_count || 0) > 0);
+            const typeMatch = filters.type === 'all' || item.type === filters.type;
+            const searchMatch = !search || [item.title, item.summary, item.body, item.email_subject]
                 .filter(Boolean)
                 .some((value) => value.toLowerCase().includes(search));
 
-            return matchesStatus && matchesType && matchesSearch;
+            return tabMatch && typeMatch && searchMatch;
         });
-    }, [filters, announcements]);
-
-    const stats = useMemo(() => {
-        return announcements.reduce((acc, item) => {
-            acc.total += 1;
-            acc[item.status] = (acc[item.status] || 0) + 1;
-            acc.homepage += item.status === 'published' && item.visibility === 'all_customers' ? 1 : 0;
-            acc.sent += Number(item.sent_count || 0);
-            acc.read += Number(item.read_count || 0);
-            return acc;
-        }, { total: 0, draft: 0, scheduled: 0, published: 0, archived: 0, homepage: 0, sent: 0, read: 0 });
-    }, [announcements]);
-
-    const selectedPreview = announcements.find((item) => item.id === previewId) || null;
-    const preview = editingId ? form : (selectedPreview || form);
-    const publishLabel = isFutureDate(form.starts_at) ? 'Schedule Publish' : 'Publish Now';
+    }, [announcements, filters]);
 
     useEffect(() => {
         fetchAnnouncements();
     }, []);
+
+    useEffect(() => {
+        if (form.visibility !== 'specific_users') return;
+
+        const timer = window.setTimeout(() => {
+            fetchAudienceUsers(audienceSearch);
+        }, 220);
+
+        return () => window.clearTimeout(timer);
+    }, [audienceSearch, form.visibility]);
 
     const requestJson = async (url, options = {}) => {
         const response = await fetch(url, {
@@ -159,8 +185,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
     const fetchAnnouncements = async () => {
         setLoading(true);
         try {
-            const payload = await requestJson('/api/admin/announcements');
-            setAnnouncements(payload);
+            setAnnouncements(await requestJson('/api/admin/announcements'));
         } catch (error) {
             flash(error.message || 'Unable to load announcements.', 'error');
         } finally {
@@ -168,17 +193,42 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
         }
     };
 
+    const fetchAudienceUsers = async (query = '') => {
+        try {
+            const params = new URLSearchParams({ q: query });
+            setAudienceUsers(await requestJson(`/api/admin/announcement-audience-users?${params.toString()}`));
+        } catch {
+            setAudienceUsers([]);
+        }
+    };
+
     const resetForm = () => {
         setForm(emptyForm);
         setEditingId(null);
         setPreviewId(null);
+        setSelectedUsers([]);
+        setAudienceSearch('');
     };
 
     const updateField = (field, value) => {
         setForm((current) => ({ ...current, [field]: value }));
     };
 
+    const addAudienceUser = (person) => {
+        if (form.specific_user_ids.includes(person.id)) return;
+        setSelectedUsers((current) => [...current, person]);
+        updateField('specific_user_ids', [...form.specific_user_ids, person.id]);
+        setAudienceSearch('');
+    };
+
+    const removeAudienceUser = (id) => {
+        setSelectedUsers((current) => current.filter((person) => person.id !== id));
+        updateField('specific_user_ids', form.specific_user_ids.filter((value) => value !== id));
+    };
+
     const startEdit = (item) => {
+        const ids = Array.isArray(item.specific_user_ids) ? item.specific_user_ids.map(Number) : [];
+
         setEditingId(item.id);
         setForm({
             title: item.title || '',
@@ -187,7 +237,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
             type: item.type || 'general',
             visibility: item.visibility || 'all_customers',
             visibility_roles: item.visibility_roles?.length ? item.visibility_roles : ['Client'],
-            specific_user_ids: Array.isArray(item.specific_user_ids) ? item.specific_user_ids.join(', ') : '',
+            specific_user_ids: ids,
             status: item.status || 'draft',
             starts_at: item.starts_at ? item.starts_at.slice(0, 16) : '',
             ends_at: item.ends_at ? item.ends_at.slice(0, 16) : '',
@@ -198,6 +248,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
             cta_url: item.cta_url || '',
             image_path: item.image_path || '',
         });
+        setSelectedUsers(ids.map((id) => ({ id, username: `User #${id}`, email: '', role: '' })));
         setPreviewId(item.id);
     };
 
@@ -214,9 +265,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
         cta_url: form.cta_url || null,
         image_path: form.image_path || null,
         visibility_roles: form.visibility === 'specific_roles' ? form.visibility_roles : [],
-        specific_user_ids: form.visibility === 'specific_users'
-            ? form.specific_user_ids.split(',').map((value) => Number(value.trim())).filter(Boolean)
-            : [],
+        specific_user_ids: form.visibility === 'specific_users' ? form.specific_user_ids : [],
     });
 
     const saveAnnouncement = async () => {
@@ -234,7 +283,7 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
 
             if (mode === 'publish') {
                 await requestJson(`/api/admin/announcements/${saved.id}/publish`, { method: 'POST' });
-                flash(isFutureDate(form.starts_at) ? 'Announcement scheduled for the homepage.' : 'Announcement published to customers.');
+                flash(isFutureDate(form.starts_at) ? 'Announcement scheduled.' : 'Announcement published.');
             } else {
                 flash(editingId ? 'Announcement updated.' : 'Announcement saved as draft.');
             }
@@ -253,6 +302,21 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
         try {
             await requestJson(`/api/admin/announcements/${item.id}/${actionName}`, { method: 'POST' });
             flash(actionName === 'publish' ? 'Announcement published.' : 'Announcement archived.');
+            await fetchAnnouncements();
+        } catch (error) {
+            flash(error.message, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const deleteAnnouncement = async (item) => {
+        setSaving(true);
+        try {
+            await requestJson(`/api/admin/announcements/${item.id}`, { method: 'DELETE' });
+            if (editingId === item.id) resetForm();
+            setDeleteTarget(null);
+            flash('Announcement deleted.');
             await fetchAnnouncements();
         } catch (error) {
             flash(error.message, 'error');
@@ -281,122 +345,151 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
         }
     };
 
+    const metricCards = [
+        ['Drafts', stats.draft],
+        ['Scheduled', stats.scheduled],
+        ['Published', stats.published],
+        ['Emails sent', stats.sent],
+        ['Reads', stats.read],
+    ];
+
     return (
         <div className="space-y-5">
+            {deleteTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm">
+                    <div className="w-full max-w-lg rounded-[1.5rem] border border-[#720101]/15 bg-[#fffaf3] p-6">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <p className="marketing-kicker">Delete Draft</p>
+                                <h3 className="mt-2 text-2xl font-black text-[#111827]">Remove this announcement?</h3>
+                            </div>
+                            <button type="button" aria-label="Close" onClick={() => setDeleteTarget(null)} className="rounded-xl border border-[#720101]/15 bg-white p-2 text-[#720101]">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">
+                            "{deleteTarget.title}" will be removed from drafts. Published announcements should be archived instead so the team keeps a record.
+                        </p>
+                        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                            <button type="button" onClick={() => setDeleteTarget(null)} className={secondaryClass}>
+                                Keep it
+                            </button>
+                            <button type="button" disabled={saving} onClick={() => deleteAnnouncement(deleteTarget)} className="inline-flex items-center justify-center rounded-xl bg-[#720101] px-4 py-3 text-sm font-black text-white transition hover:bg-[#5a0101] disabled:opacity-60">
+                                {saving ? 'Deleting...' : 'Delete announcement'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {message && (
-                <div className={`rounded-2xl border px-4 py-3 text-sm font-bold ${message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                <div className={`rounded-xl border px-4 py-3 text-sm font-bold ${message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#720101]/15 bg-[#fff7e8] text-[#720101]'}`}>
                     {message.text}
                 </div>
             )}
 
             <section className={`${shellClass} overflow-hidden`}>
-                <div className="grid gap-0 lg:grid-cols-[1fr_400px]">
+                <div className="grid gap-0 xl:grid-cols-[1fr_320px]">
                     <div className="p-5 lg:p-6">
-                        <div className="flex items-center gap-3">
-                            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#720101]/10 text-[#720101]">
-                                <Megaphone size={22} />
-                            </span>
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <p className="marketing-kicker">Announcement CMS</p>
-                                <h2 className="mt-1 text-2xl font-black text-slate-950">Customer homepage publishing desk</h2>
+                                <p className="marketing-kicker">Announcements</p>
+                                <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">
+                                    Draft, schedule, publish, and email customer announcements from one place.
+                                </p>
                             </div>
+                            <button type="button" onClick={resetForm} className={secondaryClass}>
+                                New announcement
+                            </button>
                         </div>
-                        <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-500">
-                            Create announcements for the public homepage, client dashboard, and optional email delivery. Published announcements with all-customer visibility appear on the website homepage.
-                        </p>
-                        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-5">
-                            {[
-                                ['Drafts', stats.draft],
-                                ['Published', stats.published],
-                                ['Homepage', stats.homepage],
-                                ['Emails Sent', stats.sent],
-                                ['Reads', stats.read],
-                            ].map(([label, value]) => (
-                                <div key={label} className="rounded-2xl border border-slate-100 bg-white p-4">
+
+                        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+                            {metricCards.map(([label, value]) => (
+                                <div key={label} className="rounded-xl border border-[#720101]/10 bg-white p-4">
                                     <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">{label}</span>
-                                    <strong className="mt-1 block text-2xl font-black text-slate-950">{value}</strong>
+                                    <strong className="mt-1 block text-2xl font-black text-[#111827]">{value}</strong>
                                 </div>
                             ))}
                         </div>
                     </div>
-                    <div className="border-t border-slate-100 bg-[#fffaf3] p-5 lg:border-l lg:border-t-0">
-                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-[#720101]">
-                            <Eye size={15} />
-                            Customer Preview
-                        </div>
-                        <div className="mt-3 overflow-hidden rounded-3xl border border-amber-100 bg-white shadow-sm">
+
+                    <div className="border-t border-[#720101]/10 bg-[#fffaf3] p-5 xl:border-l xl:border-t-0">
+                        <p className="marketing-kicker">Preview</p>
+                        <div className="mt-3 overflow-hidden rounded-2xl border border-[#720101]/12 bg-white">
                             {imageUrl(preview.image_path) && (
-                                <img src={imageUrl(preview.image_path)} alt="" className="h-36 w-full object-cover" />
+                                <img src={imageUrl(preview.image_path)} alt="" className="h-32 w-full object-cover" />
                             )}
                             <div className="p-5">
-                                <span className="rounded-full bg-[#720101]/10 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-[#720101]">
-                                    {typeLabels[preview.type] || 'General'}
-                                </span>
-                                <h3 className="mt-4 text-xl font-black text-slate-950">{preview.title || 'Announcement title'}</h3>
-                                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{preview.summary || preview.body || 'A short customer-facing summary will appear here.'}</p>
+                                <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">{typeLabels[preview.type] || 'General'}</p>
+                                <h3 className="mt-2 text-xl font-black text-[#111827]">{preview.title || 'Announcement title'}</h3>
+                                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                                    {preview.summary || preview.body || 'Write a short summary customers can understand at a glance.'}
+                                </p>
                                 {preview.cta_label && (
-                                    <span className="mt-4 inline-flex rounded-xl bg-[#f0aa0b] px-4 py-2 text-sm font-black text-[#1a1a1a]">
+                                    <span className="mt-4 inline-flex rounded-xl bg-[#720101] px-4 py-2 text-sm font-black text-white">
                                         {preview.cta_label}
                                     </span>
                                 )}
                             </div>
                         </div>
+                        <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">
+                            Homepage announcements are visible to everyone. Targeted announcements appear only inside the customer dashboard.
+                        </p>
                     </div>
                 </div>
             </section>
 
-            <div className="grid gap-5 xl:grid-cols-[460px_1fr]">
+            <div className="grid gap-5 2xl:grid-cols-[460px_1fr]">
                 <form onSubmit={(event) => submit(event, 'draft')} className={`${shellClass} p-5 lg:p-6`}>
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-start justify-between gap-3">
                         <div>
                             <p className="marketing-kicker">{editingId ? 'Editing' : 'Composer'}</p>
-                            <h3 className="mt-1 text-xl font-black text-slate-950">{editingId ? 'Update announcement' : 'New announcement'}</h3>
+                            <h3 className="mt-1 text-2xl font-black text-[#111827]">{editingId ? 'Update announcement' : 'New announcement'}</h3>
                         </div>
                         {editingId && (
-                            <button type="button" onClick={resetForm} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-50">
-                                New
+                            <button type="button" onClick={resetForm} className="rounded-xl border border-[#720101]/12 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#fff7e8]">
+                                Clear
                             </button>
                         )}
                     </div>
 
                     <div className="mt-5 space-y-4">
-                        <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
+                        <label className="block text-xs font-black uppercase tracking-widest text-slate-500">
                             Title
-                            <input required value={form.title} onChange={(event) => updateField('title', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
+                            <input required value={form.title} onChange={(event) => updateField('title', event.target.value)} placeholder="Short, customer-friendly headline" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
                         </label>
-                        <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
+
+                        <label className="block text-xs font-black uppercase tracking-widest text-slate-500">
                             Short summary
-                            <textarea value={form.summary} onChange={(event) => updateField('summary', event.target.value)} rows={2} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
+                            <textarea value={form.summary} onChange={(event) => updateField('summary', event.target.value)} placeholder="One or two lines customers can scan quickly." rows={2} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
                         </label>
-                        <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
-                            Full announcement
-                            <textarea value={form.body} onChange={(event) => updateField('body', event.target.value)} rows={5} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
+
+                        <label className="block text-xs font-black uppercase tracking-widest text-slate-500">
+                            Full message
+                            <textarea value={form.body} onChange={(event) => updateField('body', event.target.value)} placeholder="Add the full update, advisory, promo, or reminder." rows={4} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold normal-case tracking-normal outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10" />
                         </label>
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
                                 Type
-                                <select value={form.type} onChange={(event) => updateField('type', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none">
+                                <select value={form.type} onChange={(event) => updateField('type', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none">
                                     {Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                                 </select>
                             </label>
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
                                 Audience
-                                <select value={form.visibility} onChange={(event) => updateField('visibility', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none">
+                                <select value={form.visibility} onChange={(event) => updateField('visibility', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none">
                                     {Object.entries(visibilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                                 </select>
                             </label>
                         </div>
 
                         {form.visibility === 'specific_roles' && (
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-500">
-                                    <Users size={14} />
-                                    Roles
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
+                            <div className="rounded-xl border border-[#720101]/10 bg-[#fff7e8] p-4">
+                                <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Choose roles</p>
+                                <div className="mt-3 grid grid-cols-2 gap-2">
                                     {roleOptions.map((role) => (
-                                        <label key={role} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                                        <label key={role} className="flex items-center gap-2 rounded-lg border border-[#720101]/10 bg-white px-3 py-2 text-sm font-bold text-slate-700">
                                             <input
                                                 type="checkbox"
                                                 checked={form.visibility_roles.includes(role)}
@@ -415,67 +508,86 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                         )}
 
                         {form.visibility === 'specific_users' && (
-                            <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
-                                User IDs
-                                <input value={form.specific_user_ids} onChange={(event) => updateField('specific_user_ids', event.target.value)} placeholder="Example: 12, 18, 27" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
-                            </label>
+                            <div className="rounded-xl border border-[#720101]/10 bg-[#fff7e8] p-4">
+                                <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Choose people</p>
+                                <label className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                    <Search size={16} className="text-slate-400" />
+                                    <input value={audienceSearch} onChange={(event) => setAudienceSearch(event.target.value)} placeholder="Search name, email, or role" className="w-full text-sm font-bold outline-none" />
+                                </label>
+                                {audienceSearch && audienceUsers.length > 0 && (
+                                    <div className="mt-2 max-h-48 overflow-auto rounded-xl border border-slate-200 bg-white">
+                                        {audienceUsers.map((person) => (
+                                            <button key={person.id} type="button" onClick={() => addAudienceUser(person)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-[#fff7e8]">
+                                                <span>
+                                                    {person.username}
+                                                    <span className="block text-xs font-semibold text-slate-500">{person.email}</span>
+                                                </span>
+                                                <span className="text-xs font-black uppercase text-[#9f6500]">{person.role}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                {selectedUsers.length > 0 && (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {selectedUsers.map((person) => (
+                                            <span key={person.id} className="inline-flex items-center gap-2 rounded-lg border border-[#720101]/12 bg-white px-3 py-2 text-xs font-black text-slate-700">
+                                                {person.username}
+                                                <button type="button" aria-label={`Remove ${person.username}`} onClick={() => removeAudienceUser(person.id)} className="text-[#720101]">
+                                                    <X size={13} />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                Starts
-                                <input type="datetime-local" value={form.starts_at} onChange={(event) => updateField('starts_at', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                Publish from
+                                <input type="datetime-local" value={form.starts_at} onChange={(event) => updateField('starts_at', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
                             </label>
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                Ends
-                                <input type="datetime-local" value={form.ends_at} onChange={(event) => updateField('ends_at', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                Hide after
+                                <input type="datetime-local" value={form.ends_at} onChange={(event) => updateField('ends_at', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
                             </label>
                         </div>
-
-                        <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
-                            Image URL or storage path
-                            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3">
-                                <Image size={16} className="text-slate-400" />
-                                <input value={form.image_path} onChange={(event) => updateField('image_path', event.target.value)} placeholder="https://... or announcements/banner.jpg" className="w-full text-sm font-bold outline-none" />
-                            </div>
-                        </label>
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                CTA label
-                                <input value={form.cta_label} onChange={(event) => updateField('cta_label', event.target.value)} placeholder="Book now" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                Button text
+                                <input value={form.cta_label} onChange={(event) => updateField('cta_label', event.target.value)} placeholder="Optional" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
                             </label>
-                            <label className="text-xs font-black uppercase tracking-widest text-slate-400">
-                                CTA link
-                                <div className="mt-2 flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3">
-                                    <LinkIcon size={16} className="text-slate-400" />
-                                    <input value={form.cta_url} onChange={(event) => updateField('cta_url', event.target.value)} placeholder="/book" className="w-full text-sm font-bold outline-none" />
-                                </div>
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                Button link
+                                <input value={form.cta_url} onChange={(event) => updateField('cta_url', event.target.value)} placeholder="/book" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
                             </label>
                         </div>
 
-                        <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                            <span className="flex items-center gap-2 text-sm font-black text-slate-700">
-                                <Mail size={16} />
-                                Send as email on publish
-                            </span>
+                        <label className="block text-xs font-black uppercase tracking-widest text-slate-500">
+                            Image URL or storage path
+                            <input value={form.image_path} onChange={(event) => updateField('image_path', event.target.value)} placeholder="Optional" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
+                        </label>
+
+                        <label className="flex items-center justify-between rounded-xl border border-[#720101]/10 bg-[#fff7e8] px-4 py-3">
+                            <span className="text-sm font-black text-[#111827]">Send by email when published</span>
                             <input type="checkbox" checked={form.send_email} onChange={(event) => updateField('send_email', event.target.checked)} className="h-5 w-5" />
                         </label>
 
                         {form.send_email && (
-                            <div className="space-y-3 rounded-2xl border border-amber-100 bg-amber-50 p-4">
-                                <input value={form.email_subject} onChange={(event) => updateField('email_subject', event.target.value)} placeholder="Email subject" className="w-full rounded-xl border border-amber-100 px-4 py-3 text-sm font-bold outline-none" />
-                                <textarea value={form.email_body} onChange={(event) => updateField('email_body', event.target.value)} placeholder="Email body. Leave blank to reuse announcement body." rows={3} className="w-full rounded-xl border border-amber-100 px-4 py-3 text-sm font-semibold outline-none" />
+                            <div className="space-y-3 rounded-xl border border-[#720101]/10 bg-white p-4">
+                                <input value={form.email_subject} onChange={(event) => updateField('email_subject', event.target.value)} placeholder="Email subject. Leave blank to use the title." className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold outline-none focus:border-[#720101]" />
+                                <textarea value={form.email_body} onChange={(event) => updateField('email_body', event.target.value)} placeholder="Email message. Leave blank to reuse the announcement." rows={3} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-[#720101]" />
                             </div>
                         )}
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <button type="submit" disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60">
-                                <Save size={17} />
+                            <button type="submit" disabled={saving} className={secondaryClass}>
+                                <Save size={16} />
                                 {editingId ? 'Save Changes' : 'Save Draft'}
                             </button>
                             <button type="button" disabled={saving} onClick={(event) => submit(event, 'publish')} className={primaryClass}>
-                                <Send size={17} />
+                                <Send size={16} />
                                 {saving ? 'Saving...' : publishLabel}
                             </button>
                         </div>
@@ -483,27 +595,34 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                 </form>
 
                 <section className={`${shellClass} overflow-hidden`}>
-                    <div className="border-b border-slate-100 p-5">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div>
-                                <p className="marketing-kicker">Publishing Desk</p>
-                                <h3 className="mt-1 text-xl font-black text-slate-950">Announcements</h3>
-                            </div>
-                            <button onClick={() => setFiltersOpen((open) => !open)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#720101]/15 bg-[#fffaf3] px-4 py-3 text-xs font-black uppercase tracking-wider text-[#720101] transition hover:border-[#720101]/30">
+                    <div className="border-b border-[#720101]/10 p-5">
+                        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                            <p className="marketing-kicker">Publishing Desk</p>
+                            <button onClick={() => setFiltersOpen((open) => !open)} className={secondaryClass}>
                                 <Filter size={16} />
                                 Filters
                             </button>
                         </div>
 
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {tabs.map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setFilters((current) => ({ ...current, tab: tab.id }))}
+                                    className={`rounded-xl border px-4 py-2 text-sm font-black transition ${filters.tab === tab.id ? 'border-[#720101] bg-[#720101] text-white' : 'border-[#720101]/12 bg-white text-[#720101] hover:bg-[#fff7e8]'}`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+
                         {filtersOpen && (
-                            <div className="mt-4 grid gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 lg:grid-cols-[1fr_auto_auto]">
+                            <div className="mt-4 grid gap-3 rounded-xl border border-[#720101]/10 bg-[#fff7e8] p-4 lg:grid-cols-[1fr_220px]">
                                 <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                                     <Search size={16} className="text-slate-400" />
-                                    <input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Search title or message" className="w-full text-sm font-bold outline-none" />
+                                    <input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Search announcements" className="w-full text-sm font-bold outline-none" />
                                 </label>
-                                <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">
-                                    {statusOptions.map((status) => <option key={status} value={status}>{status === 'all' ? 'All statuses' : status}</option>)}
-                                </select>
                                 <select value={filters.type} onChange={(event) => setFilters({ ...filters, type: event.target.value })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">
                                     {typeOptions.map((type) => <option key={type} value={type}>{type === 'all' ? 'All types' : typeLabels[type]}</option>)}
                                 </select>
@@ -514,55 +633,56 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                     {loading ? (
                         <div className="p-8 text-center text-sm font-bold text-slate-400">Loading announcements...</div>
                     ) : filteredItems.length === 0 ? (
-                        <div className="p-8 text-center text-sm font-bold text-slate-400">No announcements match these filters.</div>
+                        <div className="p-8 text-center text-sm font-bold text-slate-400">No announcements match this view.</div>
                     ) : (
-                        <div className="divide-y divide-slate-100">
+                        <div className="divide-y divide-[#720101]/10">
                             {filteredItems.map((item) => {
-                                const showsOnHomepage = item.status === 'published' && item.visibility === 'all_customers';
+                                const canDelete = ['draft', 'scheduled'].includes(item.status);
+                                const emailTotal = Number(item.sent_count || 0) + Number(item.failed_count || 0) + Number(item.pending_count || 0);
 
                                 return (
-                                    <article key={item.id} className="p-5 transition hover:bg-slate-50">
-                                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <article key={item.id} className="p-5 transition hover:bg-[#fffaf3]">
+                                        <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
                                             <div className="min-w-0">
-                                                <div className="mb-2 flex flex-wrap items-center gap-2">
-                                                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${statusStyles[item.status] || statusStyles.draft}`}>{item.status}</span>
-                                                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase text-amber-800">{typeLabels[item.type] || item.type}</span>
-                                                    {showsOnHomepage && <span className="rounded-full bg-[#720101]/10 px-2.5 py-1 text-[11px] font-black uppercase text-[#720101]">Homepage</span>}
+                                                <div className="flex flex-wrap items-center gap-3 text-xs font-black uppercase tracking-widest">
+                                                    <span className="text-[#9f6500]">{typeLabels[item.type] || item.type}</span>
+                                                    <span className="text-slate-400">{visibilityLabels[item.visibility] || item.visibility}</span>
+                                                    <span className="text-[#720101]">{statusCopy(item)}</span>
                                                 </div>
-                                                <h4 className="truncate text-lg font-black text-slate-950">{item.title}</h4>
-                                                <p className="mt-1 line-clamp-2 text-sm font-medium leading-6 text-slate-500">{item.summary || item.body || 'No summary yet.'}</p>
-                                                <div className="mt-3 flex flex-wrap gap-3 text-xs font-black uppercase tracking-wider text-slate-400">
-                                                    <span className="inline-flex items-center gap-1"><CalendarDays size={13} /> {formatDate(item.starts_at)}</span>
+                                                <h4 className="mt-2 truncate text-xl font-black text-[#111827]">{item.title}</h4>
+                                                <p className="mt-1 line-clamp-2 text-sm font-semibold leading-6 text-slate-500">{item.summary || item.body || 'No summary yet.'}</p>
+                                                <div className="mt-3 grid gap-2 text-xs font-black uppercase tracking-wider text-slate-400 sm:grid-cols-4">
                                                     <span>{item.sent_count || 0} sent</span>
                                                     <span>{item.failed_count || 0} failed</span>
                                                     <span>{item.read_count || 0} reads</span>
+                                                    <span>{emailTotal} email records</span>
                                                 </div>
                                             </div>
-                                            <div className="flex flex-wrap gap-2 lg:justify-end">
-                                                <button onClick={() => setPreviewId(item.id)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">
-                                                    <Eye size={14} />
-                                                    Preview
+                                            <div className="flex flex-wrap gap-2 xl:justify-end">
+                                                <button type="button" onClick={() => setPreviewId(item.id)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-[#fff7e8]">
+                                                    <Eye size={14} className="inline" /> Preview
                                                 </button>
-                                                <button onClick={() => startEdit(item)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">
-                                                    <Pencil size={14} />
-                                                    Edit
+                                                <button type="button" onClick={() => startEdit(item)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-[#fff7e8]">
+                                                    <Pencil size={14} className="inline" /> Edit
                                                 </button>
                                                 {item.send_email && (
-                                                    <button disabled={saving} onClick={() => sendTest(item)} className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 hover:bg-amber-100">
-                                                        <Mail size={14} />
-                                                        Test
+                                                    <button type="button" disabled={saving} onClick={() => sendTest(item)} className="rounded-xl border border-[#9f6500]/20 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-white">
+                                                        <Mail size={14} className="inline" /> Test
                                                     </button>
                                                 )}
-                                                {item.status !== 'published' && (
-                                                    <button disabled={saving} onClick={() => runAction(item, 'publish')} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700">
-                                                        <Send size={14} />
-                                                        Publish
+                                                {item.status !== 'published' && item.status !== 'archived' && (
+                                                    <button type="button" disabled={saving} onClick={() => runAction(item, 'publish')} className="rounded-xl bg-[#720101] px-3 py-2 text-xs font-black text-white hover:bg-[#5a0101]">
+                                                        <Send size={14} className="inline" /> Publish
                                                     </button>
                                                 )}
                                                 {item.status === 'published' && (
-                                                    <button disabled={saving} onClick={() => runAction(item, 'archive')} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-2 text-xs font-black text-white hover:bg-slate-900">
-                                                        <Archive size={14} />
-                                                        Archive
+                                                    <button type="button" disabled={saving} onClick={() => runAction(item, 'archive')} className="rounded-xl border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#fff7e8]">
+                                                        <Archive size={14} className="inline" /> Archive
+                                                    </button>
+                                                )}
+                                                {canDelete && (
+                                                    <button type="button" disabled={saving} onClick={() => setDeleteTarget(item)} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-700 hover:bg-red-50">
+                                                        <Trash2 size={14} className="inline" /> Delete
                                                     </button>
                                                 )}
                                             </div>
@@ -573,15 +693,18 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                         </div>
                     )}
 
-                    <div className="border-t border-slate-100 bg-[#fffaf3] p-5">
-                        <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-                            <div className="flex items-start gap-3">
-                                <Sparkles size={18} className="mt-0.5 text-[#720101]" />
-                                <p className="text-sm font-semibold leading-6 text-slate-600">
-                                    Homepage visibility uses published announcements with the audience set to "Homepage and all customers". Targeted announcements remain available to authenticated customers only.
+                    <div className="border-t border-[#720101]/10 bg-[#fffaf3] p-5">
+                        <div className="grid gap-3 xl:grid-cols-[1fr_280px] xl:items-center">
+                            <details className="group rounded-xl border border-[#720101]/10 bg-white p-4">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-[#111827]">
+                                    How publishing works
+                                    <ChevronDown size={16} className="transition group-open:rotate-180" />
+                                </summary>
+                                <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
+                                    Save as draft while writing. Choose a future publish date to schedule it. Published homepage announcements appear publicly; targeted announcements appear in customer dashboards.
                                 </p>
-                            </div>
-                            <input value={testEmail} onChange={(event) => setTestEmail(event.target.value)} placeholder="Test email address" className="rounded-xl border border-amber-100 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-[#720101]" />
+                            </details>
+                            <input value={testEmail} onChange={(event) => setTestEmail(event.target.value)} placeholder="Test email address" className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-[#720101]" />
                         </div>
                     </div>
                 </section>

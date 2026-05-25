@@ -53,19 +53,17 @@ class BookingValidationService
         // ─── Capacity Per Day Validation ───
         if (isset($data['event_date'])) {
             $eventDate = Carbon::parse($data['event_date'])->startOfDay();
-            
-            // Count existing bookings for this date (excluding current booking if updating)
-            $query = Booking::whereDate('event_date', $eventDate)
-                ->whereNotIn('status', ['cancelled', 'Cancelled']);
+            $availability = app(CalendarAvailabilityService::class)->availabilityForDate($eventDate->toDateString(), $booking);
+            $requestedPax = isset($data['pax'])
+                ? (int) $data['pax']
+                : ($booking ? (int) $booking->pax : 0);
 
-            if ($booking) {
-                $query->where('id', '!=', $booking->id);
-            }
-
-            $bookingsOnDate = $query->count();
-
-            if ($bookingsOnDate >= $rules->maximum_capacity_per_day) {
-                $errors['event_date'] = "No availability on {$eventDate->format('Y-m-d')}. Maximum {$rules->maximum_capacity_per_day} events per day. Try another date.";
+            if ($availability['isLocked']) {
+                $errors['event_date'] = "No availability on {$eventDate->format('Y-m-d')}. This date is locked by the team.";
+            } elseif ($availability['remainingEvents'] < 1) {
+                $errors['event_date'] = "No availability on {$eventDate->format('Y-m-d')}. Maximum event slots for this date have been reached.";
+            } elseif ($requestedPax > $availability['remainingPax']) {
+                $errors['pax'] = "Only {$availability['remainingPax']} guest slots are available on {$eventDate->format('Y-m-d')}.";
             }
         }
 

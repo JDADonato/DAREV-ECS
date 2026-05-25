@@ -14,15 +14,18 @@ class AnnouncementService
 {
     public function publish(Announcement $announcement, User $actor): Announcement
     {
+        $startsAt = $announcement->starts_at;
+        $isScheduled = $startsAt && $startsAt->isFuture();
+
         $announcement->update([
-            'status' => 'published',
-            'published_at' => now(),
+            'status' => $isScheduled ? 'scheduled' : 'published',
+            'published_at' => $isScheduled ? null : now(),
             'approved_by' => $actor->id,
             'updated_by' => $actor->id,
-            'starts_at' => $announcement->starts_at ?: now(),
+            'starts_at' => $startsAt ?: now(),
         ]);
 
-        if ($announcement->send_email) {
+        if (!$isScheduled && $announcement->send_email) {
             $this->queueEmailDelivery($announcement);
         }
 
@@ -37,6 +40,40 @@ class AnnouncementService
         ]);
 
         return $announcement->fresh(['recipients', 'reads']);
+    }
+
+    public function deleteDraft(Announcement $announcement): void
+    {
+        if (!in_array($announcement->status, ['draft', 'scheduled'], true)) {
+            abort(422, 'Only draft or scheduled announcements can be deleted. Published announcements should be archived instead.');
+        }
+
+        $announcement->delete();
+    }
+
+    public function publishDueScheduled(): int
+    {
+        $count = 0;
+
+        Announcement::where('status', 'scheduled')
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '<=', now())
+            ->chunkById(50, function ($announcements) use (&$count) {
+                foreach ($announcements as $announcement) {
+                    $announcement->update([
+                        'status' => 'published',
+                        'published_at' => now(),
+                    ]);
+
+                    if ($announcement->send_email) {
+                        $this->queueEmailDelivery($announcement);
+                    }
+
+                    $count++;
+                }
+            });
+
+        return $count;
     }
 
     public function resolveRecipients(Announcement $announcement): Collection

@@ -156,7 +156,7 @@ Selection cards should be clear and calm:
 
 Use subtle color differences only to help distinguish choices, not to decorate heavily.
 
-Selected state should use visual changes rather than extra “Selected” pills:
+Selected state should use visual changes rather than extra "Selected" pills:
 
 - Slight red border
 - Warm cream background
@@ -283,16 +283,16 @@ Use clear, customer-facing language.
 
 Good wording:
 
-- “Review your event plan”
-- “Choose your preferred date”
-- “Check your choices before sending”
-- “Estimated total”
-- “Food tasting lets you sample selected dishes before the event”
+- "Review your event plan"
+- "Choose your preferred date"
+- "Check your choices before sending"
+- "Estimated total"
+- "Food tasting lets you sample selected dishes before the event"
 
 Avoid internal or misleading terms:
 
-- “AI-assisted” unless truly AI-powered
-- “System will…” if it feels technical or impersonal
+- "AI-assisted" unless truly AI-powered
+- "System will..." if it feels technical or impersonal
 - Debug/status wording customers should not see
 - Overly formal or jargon-heavy text
 

@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from '../Components/charts/LazyRecharts';
 import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
-import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
-import AnnouncementManager from '../Components/content/AnnouncementManager';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import { getListData } from '../utils/apiResponses';
@@ -21,6 +19,9 @@ import {
     normalizeStatus,
     paginate,
 } from '../utils/dashboardUtils';
+
+const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
+const PaymentTermEditorModal = lazy(() => import('../Components/finance/PaymentTermEditorModal'));
 
 const paymentLabel = (type) => ({
     Reservation: 'Reservation Fee',
@@ -81,6 +82,10 @@ const DEFAULT_ANALYTICS_FILTERS = {
     snapshot_window: 'all',
 };
 
+const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=100';
+const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=100';
+const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=100';
+
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
     type: defaultType,
@@ -117,6 +122,15 @@ const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('dashboard');
+    const [profileForm, setProfileForm] = useState({
+        username: user?.username || '',
+        email: user?.email || '',
+        phone: user?.phone || '',
+        current_password: '',
+        new_password: '',
+    });
+    const [profileProcessing, setProfileProcessing] = useState(false);
+    const [profileErrors, setProfileErrors] = useState({});
 
     // ==========================================
     // EMPLOYEE MANAGEMENT STATE
@@ -126,7 +140,7 @@ const DashboardAdmin = () => {
     const [empLoading, setEmpLoading] = useState(false);
     const [customerLoading, setCustomerLoading] = useState(false);
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
-    const [empForm, setEmpForm] = useState({ username: '', password: '', role: 'Marketing', email: '', phone: '' });
+    const [empForm, setEmpForm] = useState({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
     const [empFormLoading, setEmpFormLoading] = useState(false);
 
     // ==========================================
@@ -213,12 +227,30 @@ const DashboardAdmin = () => {
         filters: { date_from: '', date_to: '', booking_status: '', payment_status: '', city: '' },
     });
     const [reportPreview, setReportPreview] = useState([]);
+    const [reportView, setReportView] = useState('build');
+    const [reportDraggedIndex, setReportDraggedIndex] = useState(null);
+    const [reportDraggedWidgetId, setReportDraggedWidgetId] = useState(null);
+    const [reportDropIndex, setReportDropIndex] = useState(null);
+    const [reportLibraryCollapsed, setReportLibraryCollapsed] = useState(false);
+    const [reportLibraryExpanded, setReportLibraryExpanded] = useState(false);
+    const [reportSetupOpen, setReportSetupOpen] = useState(false);
+    const [reportLibraryDropActive, setReportLibraryDropActive] = useState(false);
     const [reportLoading, setReportLoading] = useState(false);
     const [reportSaving, setReportSaving] = useState(false);
+    const reportPreviewTimerRef = useRef(null);
     const [audits, setAudits] = useState([]);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
     const [auditRoleFilter, setAuditRoleFilter] = useState('All');
+    const [availabilityMonth, setAvailabilityMonth] = useState(() => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    });
+    const [availabilityOverrides, setAvailabilityOverrides] = useState([]);
+    const [availabilityLoading, setAvailabilityLoading] = useState(false);
+    const [availabilitySaving, setAvailabilitySaving] = useState(false);
+    const [availabilityDate, setAvailabilityDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [availabilityForm, setAvailabilityForm] = useState({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
 
     const analyticsSummary = analytics?.summary || {};
     const revenueTrendData = analytics?.revenueTrends || [];
@@ -283,6 +315,20 @@ const DashboardAdmin = () => {
         operationalAlerts.filter(alert => alertFilters.severity === 'all' || alert.severity === alertFilters.severity)
     ), [operationalAlerts, alertFilters.severity]);
     const maxPackageRevenue = Math.max(...visiblePackagePerformanceData.map(pkg => Number(pkg.revenue || 0)), 1);
+    const visibleReportWidgetIds = reportBuilder.widgets;
+    const reportCanvasOffset = 0;
+    const visibleReportLibraryWidgets = reportLibraryExpanded ? reportWidgets : reportWidgets.slice(0, 6);
+    const reportBookingStatusOptions = useMemo(() => {
+        const statuses = bookings.map(booking => booking.status).filter(Boolean);
+        return Array.from(new Set(['Pending', 'Confirmed', 'Reserved', 'Completed', 'Cancelled', ...statuses]));
+    }, [bookings]);
+    const reportPaymentStatusOptions = useMemo(() => {
+        const statuses = bookings.flatMap(booking => (booking.payments || []).map(payment => payment.status)).filter(Boolean);
+        return Array.from(new Set(['Pending', 'Paid', 'Verified', 'Refunded', 'Overdue', ...statuses]));
+    }, [bookings]);
+    const reportCityOptions = useMemo(() => (
+        Array.from(new Set(bookings.map(booking => booking.venue_city || booking.city).filter(Boolean))).sort()
+    ), [bookings]);
 
     // Toast notification
     const [toast, setToast] = useState(null);
@@ -296,8 +342,40 @@ const DashboardAdmin = () => {
     const [auditPage, setAuditPage] = useState(1);
     const rowsPerPage = 8;
 
+    useEffect(() => {
+        setProfileForm(prev => ({
+            ...prev,
+            username: user?.username || '',
+            email: user?.email || '',
+            phone: user?.phone || '',
+        }));
+    }, [user?.username, user?.email, user?.phone]);
+
     const handleLogout = () => {
         router.post('/logout');
+    };
+
+    const updateProfileField = (field, value) => {
+        setProfileForm(prev => ({ ...prev, [field]: value }));
+        setProfileErrors(prev => ({ ...prev, [field]: undefined }));
+    };
+
+    const submitProfile = (event) => {
+        event.preventDefault();
+        setProfileProcessing(true);
+        router.put('/profile', profileForm, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setProfileForm(prev => ({ ...prev, current_password: '', new_password: '' }));
+                setProfileErrors({});
+                showToast('Profile updated.');
+            },
+            onError: (errors) => {
+                setProfileErrors(errors || {});
+                showToast('Please review the profile fields.', 'error');
+            },
+            onFinish: () => setProfileProcessing(false),
+        });
     };
 
     const showToast = (message, type = 'success') => {
@@ -313,7 +391,7 @@ const DashboardAdmin = () => {
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
         if (activeTab === 'users') {
-            bustAdminCache('/api/admin/employees', '/api/admin/customers');
+            bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
             fetchEmployees({ silent });
             fetchCustomers({ silent });
         } else if (activeTab === 'configuration') {
@@ -328,11 +406,13 @@ const DashboardAdmin = () => {
             fetchReportBuilder({ silent });
             fetchReportPreview({ silent });
         } else if (activeTab === 'bookings') {
-            bustAdminCache('/api/admin/bookings');
+            bustAdminCache(ADMIN_BOOKINGS_URL);
             fetchBookings({ silent });
         } else if (activeTab === 'refunds') {
             bustAdminCache('/api/admin/refunds/queue');
             fetchRefundQueue({ silent });
+        } else if (activeTab === 'availability') {
+            fetchAvailabilityOverrides({ silent });
         } else if (activeTab === 'audits') {
             bustAdminCache('/api/admin/audits?per_page=100');
             fetchAudits({ silent });
@@ -345,29 +425,39 @@ const DashboardAdmin = () => {
     };
     const pageMeta = {
         dashboard: {
-            eyebrow: 'Command overview',
-            title: 'Service Operations',
-            description: 'Revenue, demand, and booking movement from live records.',
+            eyebrow: 'Daily work',
+            title: 'Overview',
+            description: 'Priority bookings, payments, refunds, and activity that need attention.',
         },
         analytics: {
-            eyebrow: 'Decision support',
-            title: 'Business Intelligence',
-            description: 'Forecast demand, inspect sales velocity, and spot peak capacity windows.',
+            eyebrow: 'Business insight',
+            title: 'Analytics',
+            description: 'Understand revenue, bookings, menu demand, and operational workload.',
         },
         configuration: {
-            eyebrow: 'Catalog control',
-            title: 'Menu & Pricing Studio',
-            description: 'Maintain packages, event types, and menu pricing without touching code.',
+            eyebrow: 'Management',
+            title: 'Business Setup',
+            description: 'Maintain packages, event types, pricing, and operating rules.',
         },
         reports: {
-            eyebrow: 'Governance',
-            title: 'Reports Center',
-            description: 'Operational exports and management snapshots.',
+            eyebrow: 'Admin reporting',
+            title: 'Report Builder',
+            description: 'Choose the exact information to preview, save, or export.',
+        },
+        profile: {
+            eyebrow: 'Admin profile',
+            title: 'My Account',
+            description: 'Update your admin contact details and password.',
         },
         content: {
             eyebrow: 'Customer communications',
-            title: 'Content Studio',
+            title: 'Announcements',
             description: 'Publish customer announcements, advisories, promos, and email-ready updates.',
+        },
+        availability: {
+            eyebrow: 'Calendar control',
+            title: 'Availability',
+            description: 'Lock dates and control remaining event slots or guest capacity.',
         },
         users: {
             eyebrow: 'Access & clients',
@@ -375,8 +465,8 @@ const DashboardAdmin = () => {
             description: 'Staff credentials, client accounts, and booking activity.',
         },
         bookings: {
-            eyebrow: 'Booking desk',
-            title: 'Event Pipeline',
+            eyebrow: 'Daily work',
+            title: 'Bookings',
             description: 'Approve requests, review payment exposure, and manage adjustments.',
         },
         refunds: {
@@ -386,10 +476,38 @@ const DashboardAdmin = () => {
         },
         audits: {
             eyebrow: 'Control history',
-            title: 'Audit Trail',
+            title: 'Audits',
             description: 'Monitor staff and admin activity across Eloquente operations.',
         },
     };
+    const adminNavGroups = [
+        {
+            label: 'Daily Work',
+            items: [
+                { id: 'dashboard', label: 'Overview' },
+                { id: 'bookings', label: 'Bookings' },
+                { id: 'refunds', label: 'Refunds' },
+            ],
+        },
+        {
+            label: 'Business Insight',
+            items: [
+                { id: 'analytics', label: 'Analytics' },
+                { id: 'reports', label: 'Reports' },
+            ],
+        },
+        {
+            label: 'Management',
+            items: [
+                { id: 'content', label: 'Announcements' },
+                { id: 'availability', label: 'Availability' },
+                { id: 'users', label: 'Users' },
+                { id: 'configuration', label: 'Business Setup' },
+                { id: 'audits', label: 'Audits' },
+                { id: 'profile', label: 'Profile' },
+            ],
+        },
+    ];
     const currentPage = pageMeta[activeTab] || pageMeta.dashboard;
     const bookingStats = useMemo(() => {
         const activeBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'confirmed');
@@ -525,17 +643,25 @@ const DashboardAdmin = () => {
             fetchBookings();
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
+        } else if (activeTab === 'availability') {
+            fetchAvailabilityOverrides();
         } else if (activeTab === 'audits') {
             fetchAudits();
         }
-    }, [activeTab]);
+    }, [activeTab, availabilityMonth]);
 
     useSmartRefresh({
-        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'audits'].includes(activeTab),
+        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
         interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
     });
+
+    useEffect(() => () => {
+        if (reportPreviewTimerRef.current) {
+            clearTimeout(reportPreviewTimerRef.current);
+        }
+    }, []);
 
     useEffect(() => {
         setMenuItemPage(1);
@@ -549,10 +675,98 @@ const DashboardAdmin = () => {
         setAuditPage(1);
     }, [auditSearch, auditRoleFilter]);
 
+    const fetchAvailabilityOverrides = async ({ silent = false } = {}) => {
+        if (!silent) setAvailabilityLoading(true);
+        try {
+            const response = await fetch(`/api/calendar-availability?month=${availabilityMonth}`, {
+                headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) throw new Error('Availability load failed');
+            const data = await response.json();
+            setAvailabilityOverrides(getListData(data));
+        } catch (error) {
+            console.error(error);
+            showToast('Could not load availability controls', 'error');
+        } finally {
+            if (!silent) setAvailabilityLoading(false);
+        }
+    };
+
+    const selectAvailabilityDate = async (date) => {
+        setAvailabilityDate(date);
+        const existing = availabilityOverrides.find(item => item.date === date);
+        if (existing) {
+            setAvailabilityForm({
+                is_locked: Boolean(existing.is_locked),
+                remaining_events: existing.remainingEvents ?? '',
+                remaining_pax: existing.remainingPax ?? '',
+                note: existing.note || '',
+            });
+            return;
+        }
+
+        setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+        try {
+            const response = await fetch(`/api/bookings/availability/${date}`, { headers: { Accept: 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            setAvailabilityForm({
+                is_locked: Boolean(data.isLocked),
+                remaining_events: data.remainingEvents ?? '',
+                remaining_pax: data.remainingPax ?? '',
+                note: '',
+            });
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const saveAvailabilityOverride = async (event) => {
+        event.preventDefault();
+        setAvailabilitySaving(true);
+        try {
+            const payload = {
+                is_locked: availabilityForm.is_locked,
+                remaining_events: availabilityForm.remaining_events === '' ? null : Number(availabilityForm.remaining_events),
+                remaining_pax: availabilityForm.remaining_pax === '' ? null : Number(availabilityForm.remaining_pax),
+                note: availabilityForm.note,
+            };
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok) throw new Error('Save failed');
+            showToast('Availability updated.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            showToast('Could not save availability override', 'error');
+        } finally {
+            setAvailabilitySaving(false);
+        }
+    };
+
+    const clearAvailabilityOverride = async () => {
+        setAvailabilitySaving(true);
+        try {
+            const response = await fetch(`/api/calendar-availability/${availabilityDate}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error('Clear failed');
+            setAvailabilityForm({ is_locked: false, remaining_events: '', remaining_pax: '', note: '' });
+            showToast('Availability override cleared.');
+            fetchAvailabilityOverrides({ silent: true });
+        } catch (error) {
+            console.error(error);
+            showToast('Could not clear availability override', 'error');
+        } finally {
+            setAvailabilitySaving(false);
+        }
+    };
+
     const fetchEmployees = async ({ silent = false } = {}) => {
         if (!silent) setEmpLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/employees', 60000);
+            const data = await fetchCachedJson(ADMIN_EMPLOYEES_URL, 60000);
             setEmployees(getListData(data));
         } catch (error) {
             console.error(error);
@@ -565,7 +779,7 @@ const DashboardAdmin = () => {
     const fetchCustomers = async ({ silent = false } = {}) => {
         if (!silent) setCustomerLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/customers', 60000);
+            const data = await fetchCachedJson(ADMIN_CUSTOMERS_URL, 60000);
             setCustomers(getListData(data));
         } catch (error) {
             console.error(error);
@@ -884,11 +1098,42 @@ const DashboardAdmin = () => {
         if (!silent) setAnalyticsLoading(true);
         try {
             const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''));
-            const path = `/api/admin/analytics${params.toString() ? `?${params.toString()}` : ''}`;
-            const res = await fetch(path);
-            if (!res.ok) throw new Error('Analytics request failed');
-            const data = await res.json();
-            setAnalytics(data);
+            const query = params.toString() ? `?${params.toString()}` : '';
+            const fetchPart = async (path) => {
+                const res = await fetch(`${path}${query}`);
+                if (!res.ok) throw new Error(`Analytics request failed: ${path}`);
+                return res.json();
+            };
+            const [summary, revenueHealth, pipeline, menu, customerExperience, operations, forecasts] = await Promise.all([
+                fetchPart('/api/admin/analytics/summary'),
+                fetchPart('/api/admin/analytics/revenue'),
+                fetchPart('/api/admin/analytics/pipeline'),
+                fetchPart('/api/admin/analytics/menu-performance'),
+                fetchPart('/api/admin/analytics/customer-experience'),
+                fetchPart('/api/admin/analytics/operations'),
+                fetchPart('/api/admin/analytics/forecasts'),
+            ]);
+
+            setAnalytics({
+                summary: summary.summary || {},
+                businessSnapshot: summary.businessSnapshot || {},
+                revenueTrends: revenueHealth.settledRevenueOverTime || [],
+                revenueHealth,
+                paymentAging: revenueHealth.paymentAging || [],
+                bookingPipeline: pipeline.bookingPipeline || [],
+                upcomingWorkload: pipeline.upcomingWorkload || [],
+                packagePerformance: menu.packagePerformance || [],
+                menuPerformance: menu.menuPerformance || [],
+                customerExperience,
+                operationsLoad: operations.operationsLoad || [],
+                alerts: operations.alerts || [],
+                operationalAlerts: operations.alerts || [],
+                revenueForecast: forecasts.revenueForecast || {},
+                paxDemandProjection: forecasts.paxDemandProjection || {},
+                projectedPaxDemand: forecasts.projectedPaxDemand || [],
+                topSellers: menu.packagePerformance || [],
+                peakSeasons: operations.operationsLoad || [],
+            });
         } catch (error) {
             console.error(error);
         } finally {
@@ -935,6 +1180,21 @@ const DashboardAdmin = () => {
         }
     };
 
+    const scheduleReportPreview = ({ builder = reportBuilder, delay = 350 } = {}) => {
+        if (reportPreviewTimerRef.current) {
+            clearTimeout(reportPreviewTimerRef.current);
+        }
+
+        reportPreviewTimerRef.current = setTimeout(() => {
+            fetchReportPreview({ silent: true, builder });
+        }, delay);
+    };
+
+    const previewReport = async () => {
+        setReportView('preview');
+        await fetchReportPreview();
+    };
+
     const saveReportTemplate = async () => {
         setReportSaving(true);
         try {
@@ -954,18 +1214,56 @@ const DashboardAdmin = () => {
             const template = await res.json();
             setReportTemplateId(String(template.id));
             await fetchReportBuilder({ silent: true });
-            showToast('Report template saved');
+            showToast('Saved report updated');
             return template;
         } catch (error) {
             console.error(error);
-            showToast('Could not save report template', 'error');
+            showToast('Could not save report', 'error');
             return null;
         } finally {
             setReportSaving(false);
         }
     };
 
-    const runReportExport = async () => {
+    const createNewSavedReport = () => {
+        setReportTemplateId('');
+        setReportBuilder({
+            name: 'Management Snapshot',
+            description: 'Finance, bookings, menu performance, and operational alerts.',
+            widgets: ['revenue_summary', 'payment_breakdown', 'booking_pipeline', 'operational_alerts'],
+            filters: { date_from: '', date_to: '', booking_status: '', payment_status: '', city: '' },
+        });
+        setReportView('build');
+        setReportSetupOpen(true);
+    };
+
+    const duplicateSavedReport = () => {
+        setReportTemplateId('');
+        setReportBuilder(prev => ({
+            ...prev,
+            name: `${prev.name || 'Report'} Copy`,
+        }));
+        setReportSetupOpen(true);
+        showToast('Editing a new copy. Save it when ready.');
+    };
+
+    const deleteSavedReport = async () => {
+        if (!reportTemplateId) return;
+        if (!window.confirm('Delete this saved report?')) return;
+
+        try {
+            const res = await fetch(`/api/admin/report-templates/${reportTemplateId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Delete failed');
+            setReportTemplateId('');
+            await fetchReportBuilder({ silent: true });
+            showToast('Saved report deleted');
+        } catch (error) {
+            console.error(error);
+            showToast('Could not delete saved report', 'error');
+        }
+    };
+
+    const runReportExport = async (format = 'csv') => {
         const template = await saveReportTemplate();
         if (!template?.id) return;
         try {
@@ -976,7 +1274,7 @@ const DashboardAdmin = () => {
             });
             if (!res.ok) throw new Error('Run failed');
             const run = await res.json();
-            window.location.href = `/api/admin/report-runs/${run.id}/export`;
+            window.location.href = `/api/admin/report-runs/${run.id}/export?format=${format}`;
         } catch (error) {
             console.error(error);
             showToast('Could not download report', 'error');
@@ -998,18 +1296,86 @@ const DashboardAdmin = () => {
             filters: template.filters_json || reportBuilder.filters,
         };
         setReportBuilder(nextBuilder);
-        fetchReportPreview({ builder: nextBuilder });
+        setReportView('build');
+        scheduleReportPreview({ builder: nextBuilder });
+    };
+
+    const reorderReportWidgets = (fromIndex, toIndex) => {
+        const next = [...reportBuilder.widgets];
+        if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return;
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= next.length || toIndex >= next.length || fromIndex === toIndex) return;
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
+        const nextBuilder = { ...reportBuilder, widgets: next };
+        setReportBuilder(nextBuilder);
+        scheduleReportPreview({ builder: nextBuilder });
+    };
+
+    const addReportWidgetAt = (widgetId, index = reportBuilder.widgets.length) => {
+        if (!widgetId || reportBuilder.widgets.includes(widgetId)) return;
+        const next = [...reportBuilder.widgets];
+        next.splice(Math.max(0, Math.min(index, next.length)), 0, widgetId);
+        const nextBuilder = { ...reportBuilder, widgets: next };
+        setReportBuilder(nextBuilder);
+        setReportView('build');
+        scheduleReportPreview({ builder: nextBuilder });
+    };
+
+    const handleReportDrop = (index) => {
+        if (reportDraggedWidgetId) {
+            addReportWidgetAt(reportDraggedWidgetId, index);
+        } else if (Number.isInteger(reportDraggedIndex)) {
+            reorderReportWidgets(reportDraggedIndex, index);
+        }
+        setReportDraggedWidgetId(null);
+        setReportDraggedIndex(null);
+        setReportDropIndex(null);
+    };
+
+    const removeDraggedReportWidget = () => {
+        if (!Number.isInteger(reportDraggedIndex)) return;
+        const nextBuilder = {
+            ...reportBuilder,
+            widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== reportDraggedIndex),
+        };
+        setReportBuilder(nextBuilder);
+        scheduleReportPreview({ builder: nextBuilder });
+        setReportDraggedIndex(null);
+        setReportDraggedWidgetId(null);
+        setReportDropIndex(null);
+        setReportLibraryDropActive(false);
     };
 
     const moveReportWidget = (index, direction) => {
-        const next = [...reportBuilder.widgets];
-        const target = index + direction;
-        if (target < 0 || target >= next.length) return;
-        [next[index], next[target]] = [next[target], next[index]];
-        const nextBuilder = { ...reportBuilder, widgets: next };
-        setReportBuilder(nextBuilder);
-        fetchReportPreview({ silent: true, builder: nextBuilder });
+        reorderReportWidgets(index, index + direction);
     };
+
+    const formatReportPreviewValue = (key, value) => {
+        if (value === null || value === undefined || value === '') return 'None';
+        if (typeof value === 'number') {
+            const lowerKey = String(key).toLowerCase();
+            if (lowerKey.includes('revenue') || lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('value') || lowerKey.includes('balance')) {
+                return formatCurrency(value);
+            }
+            if (lowerKey.includes('rate') || lowerKey.includes('percent')) {
+                return `${Number(value || 0).toLocaleString()}%`;
+            }
+            return Number(value).toLocaleString();
+        }
+        return String(value);
+    };
+
+    const humanizeReportKey = (key) => String(key || '')
+        .replace(/[_-]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, char => char.toUpperCase());
+
+    const getReportSummaryMetrics = (data = {}) => Object.entries(data)
+        .filter(([key, value]) => key !== 'action' && !Array.isArray(value) && value !== null && typeof value !== 'object')
+        .map(([key, value]) => ({
+            label: humanizeReportKey(key),
+            value: formatReportPreviewValue(key, value),
+        }));
 
     const updateReportFilter = (key, value) => {
         setReportBuilder({ ...reportBuilder, filters: { ...reportBuilder.filters, [key]: value } });
@@ -1074,7 +1440,7 @@ const DashboardAdmin = () => {
     const fetchBookings = async ({ silent = false } = {}) => {
         if (!silent) setBookingsLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/bookings', 30000);
+            const data = await fetchCachedJson(ADMIN_BOOKINGS_URL, 30000);
             setBookings(getListData(data));
         } catch (error) {
             console.error(error);
@@ -1110,7 +1476,7 @@ const DashboardAdmin = () => {
 
             if (res.ok) {
                 showToast("Booking approved and customer notified");
-                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchBookings();
             } else {
                 const err = await res.json().catch(() => ({}));
@@ -1140,7 +1506,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast("Discount applied successfully");
                 setDiscountModal({ open: false, data: null });
-                bustAdminCache('/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchBookings();
             } else {
                 showToast("Could not apply discount", 'error');
@@ -1215,7 +1581,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully`);
                 setEmpModal({ open: false, mode: 'add', data: null });
-                bustAdminCache('/api/admin/employees', '/api/admin/customers');
+                bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
                 fetchEmployees();
                 fetchCustomers();
             } else {
@@ -1240,7 +1606,7 @@ const DashboardAdmin = () => {
             });
             if (res.ok) {
                 showToast("Employee deleted successfully");
-                bustAdminCache('/api/admin/employees');
+                bustAdminCache(ADMIN_EMPLOYEES_URL);
                 fetchEmployees();
             } else {
                 showToast("Could not delete employee", 'error');
@@ -1260,7 +1626,7 @@ const DashboardAdmin = () => {
             });
             if (res.ok) {
                 showToast("Customer deleted successfully");
-                bustAdminCache('/api/admin/customers', '/api/admin/bookings', '/api/admin/analytics');
+                bustAdminCache(ADMIN_CUSTOMERS_URL, ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchCustomers();
             } else {
                 const err = await res.json().catch(() => ({}));
@@ -1274,9 +1640,10 @@ const DashboardAdmin = () => {
 
     const openEmpModal = (mode, employee = null) => {
         if (mode === 'add') {
-            setEmpForm({ username: '', password: '', role: 'Marketing', email: '', phone: '' });
+            setEmpForm({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
         } else {
             setEmpForm({
+                full_name: employee.full_name || '',
                 username: employee.username,
                 password: '', // blank password for editing implies no change
                 role: employee.role,
@@ -1289,6 +1656,7 @@ const DashboardAdmin = () => {
 
     const openCustomerModal = (customer) => {
         setEmpForm({
+            full_name: customer.full_name || '',
             username: customer.username,
             password: '',
             role: 'Client',
@@ -1303,51 +1671,43 @@ const DashboardAdmin = () => {
         <div className="admin-page min-h-screen overflow-hidden">
             {/* Sidebar Navigation */}
             <aside className="fixed inset-y-0 left-0 z-30 flex w-72 admin-sidebar flex-col">
-                <div className="p-5 pb-3">
-                    <div className="admin-brand-mark flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#720101] flex items-center justify-center">
-                            <svg className="w-5 h-5 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
-                        </div>
+                <div className="p-5 pb-2">
+                    <div className="admin-brand-mark">
                         <div>
-                            <h1 className="text-xl font-bold font-display tracking-wide text-[#241612]">Eloquente</h1>
-                            <p className="text-xs font-bold uppercase text-[#720101]/55">Service Control</p>
+                            <p className="admin-kicker">Eloquente Catering</p>
+                            <h1 className="text-2xl font-black font-display tracking-wide text-[#720101]">Admin Console</h1>
+                            <p className="mt-1 text-xs font-bold uppercase text-[#5c4b45]">Owner operations</p>
                         </div>
                     </div>
                 </div>
 
-                <nav className="absolute left-0 right-0 top-[4.75rem] bottom-[9.75rem] space-y-1.5 overflow-y-auto px-4 py-3">
-                        {[
-                            { id: 'dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Dashboard' },
-                            { id: 'analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'Analytics' },
-                            { id: 'configuration', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM12 15a3 3 0 100-6 3 3 0 000 6z', label: 'Configuration' },
-                            { id: 'reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', label: 'Reports' },
-                            { id: 'content', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v8a2 2 0 01-2 2zM14 4v6h6M8 13h8M8 17h5', label: 'Content' },
-                            { id: 'users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', label: 'Users' },
-                            { id: 'bookings', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Bookings' },
-                            { id: 'refunds', icon: 'M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 12H6L5 9zm7 4v4m-3-2h6', label: 'Refunds' },
-                            { id: 'audits', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z', label: 'Audits' },
-                        ].map(item => (
-                            <button
-                                key={item.id}
-                                onClick={() => setActiveTab(item.id)}
-                                className={`admin-nav-item w-full flex items-center gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
-                            >
-                                <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                                </svg>
-                                <span className="font-medium text-sm">{item.label}</span>
-                            </button>
-                        ))}
+                <nav className="flex-1 overflow-y-auto px-4 py-3">
+                    {adminNavGroups.map((group) => (
+                        <div key={group.label} className="staff-nav-group">
+                            <p className="staff-nav-section-label">{group.label}</p>
+                            <div className="mt-2 space-y-1">
+                                {group.items.map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setActiveTab(item.id)}
+                                        className={`admin-nav-item w-full flex items-center justify-between gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
+                                    >
+                                        <span className="font-bold text-sm">{item.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
                 </nav>
 
-                <div className="absolute inset-x-0 bottom-0 border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
+                <div className="border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-[#720101] flex items-center justify-center text-[#f0aa0b] font-bold">
                             {user?.username?.charAt(0).toUpperCase() || 'A'}
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-[#241612] truncate">{user?.username}</p>
-                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Top Admin</p>
+                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Administrator</p>
                         </div>
                     </div>
                     <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#720101] hover:bg-[#5f0101] text-white rounded-lg transition-colors text-sm font-bold">
@@ -1365,10 +1725,6 @@ const DashboardAdmin = () => {
                         <h2 className="text-2xl font-bold text-[#1a1a1a]">{currentPage.title}</h2>
                         <p className="mt-1 text-sm font-medium text-slate-500">{currentPage.description}</p>
                     </div>
-                    <div className="hidden items-center gap-3 rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-bold text-[#720101] shadow-sm md:flex">
-                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-                        Live records
-                    </div>
                 </header>
 
                 <div className="p-8">
@@ -1378,9 +1734,9 @@ const DashboardAdmin = () => {
                                 <section className="admin-panel overflow-hidden">
                                     <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 xl:flex-row xl:items-center xl:justify-between">
                                         <div>
-                                            <p className="admin-kicker">Command overview</p>
-                                            <h3 className="mt-1 text-2xl font-black text-gray-950">Overall Business & System Performance</h3>
-                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A one-view pulse of revenue, demand, collections, bookings, alerts, and sales mix from live records.</p>
+                                            <p className="admin-kicker">Daily work</p>
+                                            <h3 className="mt-1 text-2xl font-black text-gray-950">What needs attention today</h3>
+                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A focused view of bookings, collections, refunds, and activity that may need staff action.</p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             {renderDashboardFilterButton('dashboardSnapshot', businessSnapshot.label || 'Timeframe')}
@@ -2618,147 +2974,443 @@ const DashboardAdmin = () => {
                     )}
                     {
                         activeTab === 'reports' && (
-                            <div className="animate-fadeIn space-y-6">
-                                <div className="admin-panel p-6">
-                                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Saved template</label>
-                                            <select value={reportTemplateId} onChange={(e) => loadReportTemplate(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100">
-                                                <option value="">New custom report</option>
+                            <div className="animate-fadeIn admin-report-page">
+                                <section className="admin-report-setup admin-report-setup-compact">
+                                    <div className="admin-report-setup-summary">
+                                        <div>
+                                            <p className="admin-kicker">Report setup</p>
+                                            <h3 className="mt-1 text-lg font-black text-gray-950">{reportBuilder.name || 'Untitled report'}</h3>
+                                            <p className="mt-1 text-sm font-semibold text-gray-500">{reportBuilder.description || 'Choose blocks, apply filters, then export.'}</p>
+                                        </div>
+                                        <div className="admin-report-filter-chips">
+                                            {Object.entries(reportBuilder.filters || {}).filter(([, value]) => value).slice(0, 3).map(([key, value]) => (
+                                                <span key={key}>{humanizeReportKey(key)}: {value}</span>
+                                            ))}
+                                            {!Object.values(reportBuilder.filters || {}).some(Boolean) && <span>No filters applied</span>}
+                                        </div>
+                                        <div className="admin-report-summary-actions">
+                                            <button type="button" onClick={() => setReportSetupOpen(open => !open)} className="admin-button-secondary px-4 py-2 text-sm font-black">
+                                                {reportSetupOpen ? 'Hide Details' : 'Edit Report'}
+                                            </button>
+                                            <button type="button" onClick={createNewSavedReport} className="admin-button-secondary px-4 py-2 text-sm font-black">New Report</button>
+                                        </div>
+                                    </div>
+
+                                    {reportSetupOpen && (
+                                    <div className="mt-5">
+                                    <div className="grid gap-4 xl:grid-cols-[1fr_1fr_1.5fr]">
+                                        <label className="admin-field-label">
+                                            Saved report
+                                            <select value={reportTemplateId} onChange={(e) => loadReportTemplate(e.target.value)} className="admin-input mt-2">
+                                                <option value="">Unsaved report</option>
                                                 {reportTemplates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
                                             </select>
-                                        </div>
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Report name</label>
-                                            <input value={reportBuilder.name} onChange={(e) => setReportBuilder({ ...reportBuilder, name: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
-                                        </div>
-                                        <div className="xl:col-span-4">
-                                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">Description</label>
-                                            <input value={reportBuilder.description} onChange={(e) => setReportBuilder({ ...reportBuilder, description: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-100" />
-                                        </div>
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Report name
+                                            <input value={reportBuilder.name} onChange={(e) => setReportBuilder({ ...reportBuilder, name: e.target.value })} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Short description
+                                            <input value={reportBuilder.description} onChange={(e) => setReportBuilder({ ...reportBuilder, description: e.target.value })} className="admin-input mt-2" />
+                                        </label>
                                     </div>
-                                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
-                                        {[
-                                            ['date_from', 'From', 'date'],
-                                            ['date_to', 'To', 'date'],
-                                            ['booking_status', 'Booking status', 'text'],
-                                            ['payment_status', 'Payment status', 'text'],
-                                            ['city', 'City', 'text'],
-                                        ].map(([key, label, type]) => (
-                                            <label key={key} className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                                {label}
-                                                <input type={type} value={reportBuilder.filters[key] || ''} onChange={(e) => updateReportFilter(key, e.target.value)} placeholder={type === 'text' ? 'All' : undefined} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold normal-case tracking-normal text-gray-800 outline-none focus:ring-2 focus:ring-amber-100" />
-                                            </label>
-                                        ))}
+                                    <div className="admin-report-manage-actions">
+                                        <button type="button" onClick={createNewSavedReport} className="admin-mini-button">Start New</button>
+                                        <button type="button" onClick={duplicateSavedReport} className="admin-mini-button" disabled={!reportTemplateId}>Save As Copy</button>
+                                        <button type="button" onClick={deleteSavedReport} className="admin-mini-button admin-mini-button-danger" disabled={!reportTemplateId}>Delete Saved Report</button>
                                     </div>
-                                    <div className="mt-5 flex flex-wrap gap-3">
-                                        <button onClick={() => fetchReportPreview()} disabled={reportLoading} className="admin-button-primary px-5 py-2.5 text-sm font-black">{reportLoading ? 'Building...' : 'Preview Report'}</button>
-                                        <button onClick={saveReportTemplate} disabled={reportSaving} className="admin-button-secondary px-5 py-2.5 text-sm font-black">{reportSaving ? 'Saving...' : 'Save Template'}</button>
-                                        <button onClick={runReportExport} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download Spreadsheet</button>
+                                    <div className="admin-report-filter-grid">
+                                        <label className="admin-field-label">
+                                            From
+                                            <input type="date" value={reportBuilder.filters.date_from || ''} onChange={(e) => updateReportFilter('date_from', e.target.value)} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            To
+                                            <input type="date" value={reportBuilder.filters.date_to || ''} onChange={(e) => updateReportFilter('date_to', e.target.value)} className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Booking status
+                                            <input list="report-booking-status-options" value={reportBuilder.filters.booking_status || ''} onChange={(e) => updateReportFilter('booking_status', e.target.value)} placeholder="All booking statuses" className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            Payment status
+                                            <input list="report-payment-status-options" value={reportBuilder.filters.payment_status || ''} onChange={(e) => updateReportFilter('payment_status', e.target.value)} placeholder="All payment statuses" className="admin-input mt-2" />
+                                        </label>
+                                        <label className="admin-field-label">
+                                            City
+                                            <input list="report-city-options" value={reportBuilder.filters.city || ''} onChange={(e) => updateReportFilter('city', e.target.value)} placeholder="All cities" className="admin-input mt-2" />
+                                        </label>
+                                        <datalist id="report-booking-status-options">
+                                            {reportBookingStatusOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
+                                        <datalist id="report-payment-status-options">
+                                            {reportPaymentStatusOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
+                                        <datalist id="report-city-options">
+                                            {reportCityOptions.map(option => <option key={option} value={option} />)}
+                                        </datalist>
                                     </div>
+                                    </div>
+                                    )}
+                                </section>
+
+                                <div className="admin-report-actions">
+                                    <div className="admin-report-view-toggle">
+                                        <button type="button" onClick={() => setReportView('build')} className={reportView === 'build' ? 'is-active' : ''}>Build</button>
+                                        <button type="button" onClick={previewReport} className={reportView === 'preview' ? 'is-active' : ''}>Preview</button>
+                                    </div>
+                                    <button onClick={saveReportTemplate} disabled={reportSaving} className="admin-button-secondary px-5 py-2.5 text-sm font-black">{reportSaving ? 'Saving...' : 'Save Report'}</button>
+                                    <button onClick={() => runReportExport('csv')} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download Spreadsheet</button>
+                                    <button onClick={() => runReportExport('pdf')} className="admin-button-secondary px-5 py-2.5 text-sm font-black">Download PDF</button>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-                                    <aside className="admin-panel p-5 xl:col-span-3">
-                                        <h3 className="text-lg font-black text-gray-950">Widget Library</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Add only the blocks the admin wants to see.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportWidgets.map(widget => {
+                                <div className={`admin-report-workspace ${reportLibraryCollapsed ? 'is-library-collapsed' : ''}`}>
+                                    <aside
+                                        className={`admin-report-rail ${reportLibraryCollapsed ? 'is-collapsed' : ''} ${reportLibraryDropActive ? 'is-drop-active' : ''}`}
+                                        onDragOver={(event) => {
+                                            if (Number.isInteger(reportDraggedIndex)) {
+                                                event.preventDefault();
+                                                setReportLibraryDropActive(true);
+                                            }
+                                        }}
+                                        onDragLeave={() => setReportLibraryDropActive(false)}
+                                        onDrop={(event) => {
+                                            event.preventDefault();
+                                            removeDraggedReportWidget();
+                                        }}
+                                    >
+                                        <div className="admin-report-rail-head">
+                                            <div>
+                                                <p className="admin-kicker">1. Choose blocks</p>
+                                                <h3 className="mt-1 text-lg font-black text-gray-950">Report Library</h3>
+                                                {!reportLibraryCollapsed && <p className="mt-1 text-sm font-semibold text-gray-500">Drag blocks into the report canvas.</p>}
+                                            </div>
+                                            <button type="button" onClick={() => setReportLibraryCollapsed(collapsed => !collapsed)} className="admin-mini-button">
+                                                {reportLibraryCollapsed ? 'Open' : 'Collapse'}
+                                            </button>
+                                        </div>
+                                        {!reportLibraryCollapsed && (
+                                        <div className="admin-report-library-drop">Drop used blocks here to remove them</div>
+                                        )}
+                                        {!reportLibraryCollapsed && (
+                                        <div className="mt-4 grid gap-2">
+                                            {visibleReportLibraryWidgets.map(widget => {
                                                 const selected = reportBuilder.widgets.includes(widget.id);
                                                 return (
                                                     <button
                                                         key={widget.id}
                                                         type="button"
+                                                        draggable={!selected}
                                                         disabled={selected}
+                                                        onDragStart={() => {
+                                                            if (!selected) {
+                                                                setReportDraggedWidgetId(widget.id);
+                                                                setReportDraggedIndex(null);
+                                                            }
+                                                        }}
+                                                        onDragEnd={() => {
+                                                            setReportDraggedWidgetId(null);
+                                                            setReportDropIndex(null);
+                                                        }}
                                                         onClick={() => {
                                                             const nextBuilder = { ...reportBuilder, widgets: [...reportBuilder.widgets, widget.id] };
                                                             setReportBuilder(nextBuilder);
-                                                            fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                            scheduleReportPreview({ builder: nextBuilder });
                                                         }}
-                                                        className={`w-full rounded-2xl border p-4 text-left transition ${selected ? 'border-emerald-100 bg-emerald-50 opacity-75' : 'border-gray-100 bg-white hover:border-amber-200 hover:bg-amber-50'}`}
+                                                        className={`admin-report-widget ${selected ? 'admin-report-widget-selected' : ''}`}
                                                     >
-                                                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">{widget.category}</span>
-                                                        <span className="mt-1 block text-sm font-black text-gray-950">{widget.name}</span>
-                                                        <span className="mt-1 block text-xs font-semibold text-gray-500">{widget.description}</span>
+                                                        <span>
+                                                            {widget.name}
+                                                            <small>{widget.category}</small>
+                                                        </span>
+                                                        <strong>{selected ? 'Used' : 'Drag'}</strong>
                                                     </button>
                                                 );
                                             })}
+                                            {reportWidgets.length > 6 && (
+                                                <button type="button" onClick={() => setReportLibraryExpanded(expanded => !expanded)} className="admin-report-library-more">
+                                                    {reportLibraryExpanded ? 'Show less' : `See all ${reportWidgets.length} blocks`}
+                                                </button>
+                                            )}
                                         </div>
+                                        )}
                                     </aside>
 
-                                    <section className="admin-panel p-5 xl:col-span-5">
-                                        <h3 className="text-lg font-black text-gray-950">Report Layout</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Reorder the report blocks before saving or exporting.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportBuilder.widgets.map((id, index) => {
-                                                const meta = reportWidgets.find(widget => widget.id === id) || { name: id, category: 'Custom' };
-                                                return (
-                                                    <div key={`${id}-${index}`} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                                                        <div className="flex items-start justify-between gap-4">
+                                    <section className="admin-report-main">
+                                        <div className="admin-report-canvas-head">
+                                            <div>
+                                                <p className="admin-kicker">{reportView === 'preview' ? 'Report preview' : 'Report canvas'}</p>
+                                                <h3 className="mt-1 text-xl font-black text-gray-950">{reportView === 'preview' ? reportBuilder.name || 'Preview' : 'Arrange Selected Blocks'}</h3>
+                                                <p className="mt-1 text-sm font-semibold text-gray-500">
+                                                    {reportView === 'preview'
+                                                        ? 'This is how the report will read before you download or save it.'
+                                                        : 'Drag blocks to reorder them, or use the move buttons for precise control.'}
+                                                </p>
+                                            </div>
+                                            <div className="admin-report-canvas-tools">
+                                                <span>{reportBuilder.widgets.length} blocks</span>
+                                            </div>
+                                        </div>
+
+                                        {reportView === 'build' ? (
+                                        <div
+                                            className={`admin-report-canvas-body ${reportDraggedWidgetId !== null || reportDraggedIndex !== null ? 'is-drop-ready' : ''}`}
+                                            onDragOver={(event) => {
+                                                event.preventDefault();
+                                                if (!reportBuilder.widgets.length) setReportDropIndex(0);
+                                            }}
+                                            onDrop={() => handleReportDrop(reportBuilder.widgets.length)}
+                                        >
+                                            <div className="mt-4 space-y-2">
+                                                <div
+                                                    className={`admin-report-drop-zone ${reportDropIndex === 0 ? 'is-active' : ''}`}
+                                                    onDragOver={(event) => {
+                                                        event.preventDefault();
+                                                        setReportDropIndex(0);
+                                                    }}
+                                                    onDrop={(event) => {
+                                                        event.stopPropagation();
+                                                        handleReportDrop(0);
+                                                    }}
+                                                />
+                                                {visibleReportWidgetIds.map((id, visibleIndex) => {
+                                                    const index = reportCanvasOffset + visibleIndex;
+                                                    const meta = reportWidgets.find(widget => widget.id === id) || { name: id, category: 'Custom' };
+                                                    return (
+                                                        <React.Fragment key={`${id}-${index}`}>
+                                                        <div
+                                                            className={`admin-report-selected-row ${reportDraggedIndex === index ? 'is-dragging' : ''}`}
+                                                            draggable
+                                                            onDragStart={() => {
+                                                                setReportDraggedIndex(index);
+                                                                setReportDraggedWidgetId(null);
+                                                            }}
+                                                            onDragOver={(event) => {
+                                                                event.preventDefault();
+                                                                setReportDropIndex(index);
+                                                            }}
+                                                            onDrop={(event) => {
+                                                                event.stopPropagation();
+                                                                handleReportDrop(index);
+                                                            }}
+                                                            onDragEnd={() => {
+                                                                setReportDraggedIndex(null);
+                                                                setReportDropIndex(null);
+                                                            }}
+                                                        >
                                                             <div>
-                                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Block {index + 1} · {meta.category}</p>
+                                                                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Block {index + 1} - {meta.category}</p>
                                                                 <p className="mt-1 font-black text-gray-950">{meta.name}</p>
+                                                                {meta.description && <p className="mt-1 text-sm font-semibold text-gray-500">{meta.description}</p>}
                                                             </div>
-                                                            <div className="flex gap-2">
-                                                                <button onClick={() => moveReportWidget(index, -1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Up</button>
-                                                                <button onClick={() => moveReportWidget(index, 1)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Down</button>
+                                                            <div className="flex flex-wrap justify-end gap-2">
+                                                                <button onClick={() => moveReportWidget(index, -1)} className="admin-mini-button">Up</button>
+                                                                <button onClick={() => moveReportWidget(index, 1)} className="admin-mini-button">Down</button>
                                                                 <button
                                                                     onClick={() => {
                                                                         const nextBuilder = { ...reportBuilder, widgets: reportBuilder.widgets.filter((_, itemIndex) => itemIndex !== index) };
                                                                         setReportBuilder(nextBuilder);
-                                                                        fetchReportPreview({ silent: true, builder: nextBuilder });
+                                                                        scheduleReportPreview({ builder: nextBuilder });
                                                                     }}
-                                                                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100"
+                                                                    className="admin-mini-button admin-mini-button-danger"
                                                                 >
                                                                     Remove
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                );
-                                            })}
-                                            {!reportBuilder.widgets.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Choose at least one widget to build a report.</div>}
+                                                        <div
+                                                            className={`admin-report-drop-zone ${reportDropIndex === index + 1 ? 'is-active' : ''}`}
+                                                            onDragOver={(event) => {
+                                                                event.preventDefault();
+                                                                setReportDropIndex(index + 1);
+                                                            }}
+                                                            onDrop={(event) => {
+                                                                event.stopPropagation();
+                                                                handleReportDrop(index + 1);
+                                                            }}
+                                                        />
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                                {!reportBuilder.widgets.length && <div className="admin-empty-state">Choose at least one block to build a report.</div>}
+                                            </div>
                                         </div>
-                                    </section>
-
-                                    <section className="admin-panel p-5 xl:col-span-4">
-                                        <h3 className="text-lg font-black text-gray-950">Live Preview</h3>
-                                        <p className="mt-1 text-sm font-semibold text-gray-500">Previewed from the latest matching activity.</p>
-                                        <div className="mt-5 space-y-3">
-                                            {reportPreview.map(widget => {
-                                                const meta = reportWidgets.find(item => item.id === widget.id) || { name: widget.id };
-                                                const rows = widget.data?.rows || [];
-                                                return (
-                                                    <div key={widget.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                                                        <div className="flex items-start justify-between gap-3">
-                                                            <div>
-                                                                <p className="font-black text-gray-950">{meta.name}</p>
-                                                                <p className="mt-1 text-xs font-semibold text-gray-500">{widget.data?.action || summarizeReportWidget(widget)}</p>
+                                        ) : (
+                                        <div className="admin-report-preview-canvas">
+                                            <div className="space-y-4">
+                                                {reportPreview.map(widget => {
+                                                    const meta = reportWidgets.find(item => item.id === widget.id) || { name: widget.id };
+                                                    const data = widget.data || {};
+                                                    const rows = widget.data?.rows || [];
+                                                    const summaryMetrics = getReportSummaryMetrics(data);
+                                                    return (
+                                                        <div key={widget.id} className="admin-report-preview-block">
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div>
+                                                                    <p className="font-black text-gray-950">{meta.name}</p>
+                                                                    <p className="mt-1 text-xs font-semibold text-gray-500">{widget.data?.action || summarizeReportWidget(widget)}</p>
+                                                                </div>
+                                                                {!!rows.length && <span className="text-xs font-black uppercase tracking-wider text-[#9f6500]">{summarizeReportWidget(widget)}</span>}
                                                             </div>
-                                                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-700 shadow-sm">{summarizeReportWidget(widget)}</span>
+                                                            {summaryMetrics.length > 0 && (
+                                                                <div className="admin-report-metric-grid">
+                                                                    {summaryMetrics.map(metric => (
+                                                                        <div key={`${widget.id}-${metric.label}`} className="admin-report-metric">
+                                                                            <span>{metric.label}</span>
+                                                                            <strong>{metric.value}</strong>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {rows.length > 0 && (
+                                                                <div className="mt-3 divide-y divide-gray-100">
+                                                                    {rows.slice(0, 12).map((row, i) => (
+                                                                        <div key={i} className="flex items-center justify-between gap-3 py-2">
+                                                                            <span className="text-xs font-bold text-gray-700">{row.label || row.client || row.date || 'Row'}</span>
+                                                                            <span className="text-xs font-black text-gray-950">{row.total ? formatCurrency(row.total) : row.value ? formatCurrency(row.value) : row.revenue ? formatCurrency(row.revenue) : row.count ?? row.selections ?? row.pax ?? ''}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                        {rows.length > 0 && (
-                                                            <div className="mt-4 max-h-48 overflow-y-auto rounded-xl bg-white">
-                                                                {rows.slice(0, 8).map((row, i) => (
-                                                                    <div key={i} className="flex items-center justify-between gap-3 border-b border-gray-50 px-3 py-2 last:border-b-0">
-                                                                        <span className="text-xs font-bold text-gray-700">{row.label || row.client || row.date || 'Row'}</span>
-                                                                        <span className="text-xs font-black text-gray-950">{row.total ? formatCurrency(row.total) : row.value ? formatCurrency(row.value) : row.revenue ? formatCurrency(row.revenue) : row.count ?? row.selections ?? row.pax ?? ''}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                            {!reportPreview.length && <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-400">Preview your report to see results here.</div>}
+                                                    );
+                                                })}
+                                                {!reportPreview.length && <div className="admin-empty-state">Preview your report to check the result before saving or downloading.</div>}
+                                            </div>
                                         </div>
+                                        )}
                                     </section>
                                 </div>
                             </div>
                         )
                     }
                     {activeTab === 'content' && (
-                        <AnnouncementManager variant="admin" user={user} />
+                        <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
+                            <AnnouncementManager variant="admin" user={user} />
+                        </Suspense>
+                    )}
+                    {activeTab === 'profile' && (
+                        <div className="animate-fadeIn admin-profile-page">
+                            <section className="admin-profile-identity">
+                                <div className="admin-profile-avatar">
+                                    {user?.username?.charAt(0).toUpperCase() || 'A'}
+                                </div>
+                                <div>
+                                    <p className="admin-kicker">Administrator</p>
+                                    <h3 className="mt-1 text-2xl font-black text-gray-950">{user?.username || 'Admin user'}</h3>
+                                    <p className="mt-1 text-sm font-semibold text-gray-500">{user?.email || 'No email saved'}</p>
+                                </div>
+                            </section>
+
+                            <form onSubmit={submitProfile} className="admin-profile-form">
+                                <div>
+                                    <p className="admin-kicker">Account details</p>
+                                    <h3 className="mt-1 text-xl font-black text-gray-950">Profile Settings</h3>
+                                    <p className="mt-1 text-sm font-semibold text-gray-500">Keep the admin contact information accurate for system records.</p>
+                                </div>
+
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <label className="admin-field-label">
+                                        Username
+                                        <input value={profileForm.username} onChange={(event) => updateProfileField('username', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.username && <span className="admin-field-error">{profileErrors.username}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        Email address
+                                        <input type="email" value={profileForm.email} onChange={(event) => updateProfileField('email', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.email && <span className="admin-field-error">{profileErrors.email}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        Phone number
+                                        <input value={profileForm.phone} onChange={(event) => updateProfileField('phone', event.target.value)} className="admin-input mt-2" />
+                                        {profileErrors.phone && <span className="admin-field-error">{profileErrors.phone}</span>}
+                                    </label>
+                                    <div className="hidden md:block" />
+                                    <label className="admin-field-label">
+                                        Current password
+                                        <input type="password" value={profileForm.current_password} onChange={(event) => updateProfileField('current_password', event.target.value)} placeholder="Only needed to change password" className="admin-input mt-2" />
+                                        {profileErrors.current_password && <span className="admin-field-error">{profileErrors.current_password}</span>}
+                                    </label>
+                                    <label className="admin-field-label">
+                                        New password
+                                        <input type="password" value={profileForm.new_password} onChange={(event) => updateProfileField('new_password', event.target.value)} placeholder="Leave blank to keep current" className="admin-input mt-2" />
+                                        {profileErrors.new_password && <span className="admin-field-error">{profileErrors.new_password}</span>}
+                                    </label>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#720101]/10 pt-5">
+                                    <p className="text-sm font-semibold text-gray-500">Password fields can stay blank if you are only updating contact details.</p>
+                                    <button type="submit" disabled={profileProcessing} className="admin-button-primary px-5 py-2.5 text-sm font-black">
+                                        {profileProcessing ? 'Saving...' : 'Save Profile'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+                    {activeTab === 'availability' && (
+                        <div className="animate-fadeIn grid gap-6 lg:grid-cols-[1fr_360px]">
+                            <form onSubmit={saveAvailabilityOverride} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Selected date</p>
+                                        <h3 className="mt-1 text-xl font-black text-gray-950">Control daily availability</h3>
+                                    </div>
+                                    <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="admin-input max-w-48" />
+                                </div>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Date</span>
+                                        <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="admin-input mt-2" />
+                                    </label>
+                                    <label className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50/50 px-4 py-3">
+                                        <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} className="h-4 w-4" />
+                                        <span className="text-sm font-black text-red-800">Fully lock this date</span>
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining event slots</span>
+                                        <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="admin-input mt-2" />
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining pax</span>
+                                        <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="admin-input mt-2" />
+                                    </label>
+                                </div>
+                                <label className="mt-4 block">
+                                    <span className="text-xs font-black uppercase tracking-widest text-gray-500">Internal note</span>
+                                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="admin-input mt-2" placeholder="Reason for lock or capacity adjustment" />
+                                </label>
+                                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-black text-gray-600 hover:bg-gray-50 disabled:opacity-50">Clear Override</button>
+                                    <button type="submit" disabled={availabilitySaving} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-black text-white hover:bg-indigo-700 disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save Availability'}</button>
+                                </div>
+                            </form>
+
+                            <aside className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-gray-900">Month overrides</h3>
+                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{availabilityOverrides.length}</span>
+                                </div>
+                                {availabilityLoading ? (
+                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">Loading availability...</p>
+                                ) : availabilityOverrides.length === 0 ? (
+                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">No overrides for this month.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {availabilityOverrides.map((item) => (
+                                            <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50 hover:bg-white'}`}>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-black text-gray-950">{formatDate(item.date)}</span>
+                                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Locked' : 'Limited'}</span>
+                                                </div>
+                                                <p className="mt-2 text-xs font-bold text-gray-500">{item.remainingEvents} slots / {Number(item.remainingPax || 0).toLocaleString()} pax remaining</p>
+                                                {item.note && <p className="mt-2 text-xs font-semibold text-gray-400">{item.note}</p>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </aside>
+                        </div>
                     )}
                     {
                         activeTab === 'users' && (
@@ -2803,11 +3455,11 @@ const DashboardAdmin = () => {
                                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                                     <div className="flex items-center">
                                                                         <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-indigo-100 to-blue-200 flex items-center justify-center text-indigo-700 font-bold">
-                                                                            {emp.username.charAt(0).toUpperCase()}
+                                                                            {(emp.full_name || emp.username).charAt(0).toUpperCase()}
                                                                         </div>
                                                                         <div className="ml-4">
-                                                                            <div className="text-sm font-bold text-gray-900">{emp.username}</div>
-                                                                            <div className="text-xs text-gray-500">{emp.phone || 'No phone'}</div>
+                                                                            <div className="text-sm font-bold text-gray-900">{emp.full_name || emp.username}</div>
+                                                                            <div className="text-xs text-gray-500">@{emp.username}{emp.phone ? ` / ${emp.phone}` : ' / No phone'}</div>
                                                                         </div>
                                                                     </div>
                                                                 </td>
@@ -3255,6 +3907,12 @@ const DashboardAdmin = () => {
                             </div>
                             <form onSubmit={handleEmpSubmit} className="p-6">
                                 <div className="space-y-4">
+                                    {empModal.data?.role !== 'Client' && (
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Full Name</label>
+                                            <input type="text" required value={empForm.full_name} onChange={e => setEmpForm({ ...empForm, full_name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Username</label>
                                         <input type="text" required value={empForm.username} onChange={e => setEmpForm({ ...empForm, username: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
@@ -3269,10 +3927,17 @@ const DashboardAdmin = () => {
                                             <input type="text" value={empForm.phone} onChange={e => setEmpForm({ ...empForm, phone: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
                                         </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Password</label>
-                                        <input type="text" required={empModal.mode === 'add'} minLength="6" value={empForm.password} onChange={e => setEmpForm({ ...empForm, password: e.target.value })} placeholder={empModal.mode === 'edit' ? "Leave blank to keep current" : ""} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
-                                    </div>
+                                    {empModal.mode === 'add' && empModal.data?.role !== 'Client' && (
+                                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-800">
+                                            Default password: eloquestaff@2026
+                                        </div>
+                                    )}
+                                    {empModal.mode === 'edit' && (
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">New Password</label>
+                                            <input type="text" minLength="6" value={empForm.password} onChange={e => setEmpForm({ ...empForm, password: e.target.value })} placeholder="Leave blank to keep current" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Privilege Level</label>
                                         {empModal.data?.role === 'Client' ? (
@@ -3528,18 +4193,22 @@ const DashboardAdmin = () => {
                 )
             }
 
-            <PaymentTermEditorModal
-                isOpen={editPaymentModal.isOpen}
-                onClose={() => setEditPaymentModal({ isOpen: false, payment: null, booking: null })}
-                booking={editPaymentModal.booking}
-                payment={editPaymentModal.payment}
-                onSuccess={() => {
-                    setEditPaymentModal({ isOpen: false, payment: null, booking: null });
-                    setEventDetailsModal({ open: false, data: null });
-                    showToast('Payment terms updated');
-                    fetchBookings();
-                }}
-            />
+            {editPaymentModal.isOpen && (
+                <Suspense fallback={null}>
+                    <PaymentTermEditorModal
+                        isOpen={editPaymentModal.isOpen}
+                        onClose={() => setEditPaymentModal({ isOpen: false, payment: null, booking: null })}
+                        booking={editPaymentModal.booking}
+                        payment={editPaymentModal.payment}
+                        onSuccess={() => {
+                            setEditPaymentModal({ isOpen: false, payment: null, booking: null });
+                            setEventDetailsModal({ open: false, data: null });
+                            showToast('Payment terms updated');
+                            fetchBookings();
+                        }}
+                    />
+                </Suspense>
+            )}
 
             {/* Add New Menu Item Modal */}
             {menuItemModal.open && (
@@ -3675,7 +4344,7 @@ const DashboardAdmin = () => {
             {/* Toast */}
             {
                 toast && (
-                    <div className="pointer-events-none fixed bottom-5 left-5 z-50 animate-slideUp">
+                    <div className="pointer-events-none fixed right-5 top-24 z-50 animate-slideUp">
                         <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                             <span className={`min-w-0 flex-1 font-semibold leading-5 ${toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]'}`}>{toast.message}</span>
                         </div>

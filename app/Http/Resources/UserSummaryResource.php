@@ -11,6 +11,7 @@ class UserSummaryResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'full_name' => $this->full_name,
             'username' => $this->username,
             'email' => $this->email,
             'phone' => $this->phone,

@@ -7,6 +7,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            DB::table('business_rules')->update(['maximum_capacity_per_day' => 7]);
+            return;
+        }
+
         DB::unprepared(<<<'SQL'
             create schema if not exists app;
 
@@ -108,6 +113,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         foreach ($this->tables() as $table) {
             DB::statement("alter table public.{$table} disable row level security");
         }

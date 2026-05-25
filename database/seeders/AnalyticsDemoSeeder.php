@@ -31,6 +31,7 @@ class AnalyticsDemoSeeder extends Seeder
 
         Cache::forget('admin.analytics.v3');
         Cache::forget('admin.analytics.v4');
+        Cache::put('admin.analytics.version', (int) Cache::get('admin.analytics.version', 1) + 1);
 
         $this->command?->info('Seeded analytics demo data: 125 clients, 216 bookings from 2024-2026, payments, and booking menu items.');
     }

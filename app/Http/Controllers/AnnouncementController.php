@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\AnnouncementEmail;
 use App\Models\Announcement;
 use App\Models\AnnouncementRead;
+use App\Models\User;
 use App\Services\AnnouncementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -18,10 +19,15 @@ class AnnouncementController extends Controller
 
     public function index(Request $request)
     {
+        $this->service->publishDueScheduled();
+
         $query = Announcement::with(['creator:id,username', 'recipients', 'reads'])
             ->withCount([
                 'recipients as sent_count' => fn ($q) => $q->where('status', 'sent'),
                 'recipients as failed_count' => fn ($q) => $q->where('status', 'failed'),
+                'recipients as pending_count' => fn ($q) => $q->where('status', 'pending'),
+                'recipients as opened_count' => fn ($q) => $q->whereNotNull('opened_at'),
+                'recipients as clicked_count' => fn ($q) => $q->whereNotNull('clicked_at'),
                 'reads as read_count',
             ])
             ->latest();
@@ -35,6 +41,8 @@ class AnnouncementController extends Controller
 
     public function publicIndex(Request $request)
     {
+        $this->service->publishDueScheduled();
+
         $limit = min(max((int) $request->query('limit', 4), 1), 8);
 
         $announcements = Announcement::visibleNow()
@@ -81,6 +89,35 @@ class AnnouncementController extends Controller
         return response()->json($this->service->archive($announcement, $request->user()));
     }
 
+    public function destroy(Announcement $announcement)
+    {
+        $this->service->deleteDraft($announcement);
+
+        return response()->json(['message' => 'Announcement deleted.']);
+    }
+
+    public function audienceUsers(Request $request)
+    {
+        $search = trim((string) $request->query('q', ''));
+
+        $users = User::query()
+            ->select('id', 'username', 'email', 'role')
+            ->whereNotNull('email')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('username', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('role', 'like', "%{$search}%");
+                });
+            })
+            ->orderByRaw("CASE WHEN role = 'Client' THEN 0 ELSE 1 END")
+            ->orderBy('username')
+            ->limit(20)
+            ->get();
+
+        return response()->json($users);
+    }
+
     public function sendTest(Request $request, Announcement $announcement)
     {
         $data = $request->validate(['email' => 'required|email']);
@@ -91,6 +128,8 @@ class AnnouncementController extends Controller
 
     public function customerIndex(Request $request)
     {
+        $this->service->publishDueScheduled();
+
         $user = $request->user();
         $hasBookings = $user->bookings()->exists();
 
@@ -145,7 +184,7 @@ class AnnouncementController extends Controller
             'image_path' => 'nullable|string|max:255',
         ]);
 
-        $data['send_email'] = $request->boolean('send_email') ? 'true' : 'false';
+        $data['send_email'] = $request->boolean('send_email');
 
         return $data;
     }

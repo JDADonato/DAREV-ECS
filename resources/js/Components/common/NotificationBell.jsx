@@ -92,6 +92,22 @@ const NotificationBell = ({ variant = 'light' }) => {
         }
     };
 
+    const removeNotification = async (id) => {
+        const target = notifications.find(notification => notification.id === id);
+
+        try {
+            const res = await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+            if (!res.ok) return;
+
+            setNotifications(prev => prev.filter(notification => notification.id !== id));
+            if (target && !target.read_at) {
+                setUnreadCount(prev => Math.max(0, prev - 1));
+            }
+        } catch (e) {
+            console.error('Failed to remove notification');
+        }
+    };
+
     const getIcon = (type) => {
         switch (type) {
             case 'booking_confirmed':
@@ -196,7 +212,22 @@ const NotificationBell = ({ variant = 'light' }) => {
                                         </p>
                                         <p className="mt-1 text-[11px] font-bold text-slate-400">{notification.time_ago}</p>
                                     </div>
-                                    {!notification.read_at && (
+                                    {notification.read_at ? (
+                                        <button
+                                            type="button"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                removeNotification(notification.id);
+                                            }}
+                                            className="mt-0.5 rounded-full p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
+                                            aria-label="Remove notification"
+                                            title="Remove notification"
+                                        >
+                                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    ) : (
                                         <div className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-[#720101]"></div>
                                     )}
                                 </div>

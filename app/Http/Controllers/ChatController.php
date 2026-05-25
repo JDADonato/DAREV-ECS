@@ -35,20 +35,21 @@ class ChatController extends Controller
      * - Client: their own conversations
      * - Marketing/Admin: two lists (unassigned + my active chats)
      */
-    public function conversations()
+    public function conversations(Request $request)
     {
         $user = Auth::user();
+        $limit = $this->pageLimit($request);
 
         if ($user->role === 'Client') {
             return response()->json([
-                'conversations' => $this->getClientConversations($user),
+                'conversations' => $this->getClientConversations($user, $limit),
             ]);
         }
 
         // Staff gets both lists
         return response()->json([
-            'unassigned' => $this->getUnassignedQueue(),
-            'my_chats' => $this->getMyActiveChats($user),
+            'unassigned' => $this->getUnassignedQueue($limit),
+            'my_chats' => $this->getMyActiveChats($user, $limit),
         ]);
     }
 
@@ -58,9 +59,9 @@ class ChatController extends Controller
      * Fetch conversations where staff_id is null (the unassigned queue).
      * Only accessible by Marketing/Admin.
      */
-    public function unassigned()
+    public function unassigned(Request $request)
     {
-        return response()->json($this->getUnassignedQueue());
+        return response()->json($this->getUnassignedQueue($this->pageLimit($request)));
     }
 
     /**
@@ -68,10 +69,10 @@ class ChatController extends Controller
      *
      * Fetch active conversations claimed by the authenticated staff member.
      */
-    public function myChats()
+    public function myChats(Request $request)
     {
         $user = Auth::user();
-        return response()->json($this->getMyActiveChats($user));
+        return response()->json($this->getMyActiveChats($user, $this->pageLimit($request)));
     }
 
     // ─────────────────────────────────────────────
@@ -84,14 +85,25 @@ class ChatController extends Controller
      * Fetch all messages for a given conversation.
      * Authorization: user must be the client or the assigned staff (or any staff for unassigned).
      */
-    public function messages(Conversation $conversation)
+    public function messages(Request $request, Conversation $conversation)
     {
         $user = Auth::user();
         $this->authorizeConversationAccess($user, $conversation);
 
-        $messages = $conversation->messages()
+        $limit = $this->pageLimit($request, 30, 75);
+        $query = $conversation->messages()
             ->with('sender:id,username,role')
-            ->get()
+            ->latest('id');
+
+        if ($request->filled('before_id')) {
+            $query->where('id', '<', (int) $request->query('before_id'));
+        }
+
+        $rows = $query->limit($limit + 1)->get();
+        $hasMore = $rows->count() > $limit;
+        $messages = $rows->take($limit)
+            ->reverse()
+            ->values()
             ->map(fn ($msg) => $this->formatMessage($msg, $user));
 
         // Mark unread messages from the other party as read
@@ -100,7 +112,13 @@ class ChatController extends Controller
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
 
-        return response()->json($messages);
+        return response()->json([
+            'data' => $messages,
+            'pagination' => [
+                'has_more' => $hasMore,
+                'before_id' => $messages->first()['id'] ?? null,
+            ],
+        ]);
     }
 
     /**
@@ -480,7 +498,12 @@ class ChatController extends Controller
     /**
      * Get conversations in the unassigned queue.
      */
-    private function getUnassignedQueue(): array
+    private function pageLimit(Request $request, int $default = 25, int $max = 50): int
+    {
+        return min(max((int) $request->query('limit', $default), 1), $max);
+    }
+
+    private function getUnassignedQueue(int $limit = 25): array
     {
         return Conversation::unassigned()
             ->with(['client:id,username,email', 'latestMessage.sender:id,username'])
@@ -488,6 +511,7 @@ class ChatController extends Controller
                 $q->whereNull('read_at');
             }])
             ->latest()
+            ->limit($limit)
             ->get()
             ->map(fn ($conv) => [
                 'id' => $conv->id,
@@ -510,7 +534,7 @@ class ChatController extends Controller
     /**
      * Get active conversations claimed by the given staff user.
      */
-    private function getMyActiveChats($user): array
+    private function getMyActiveChats($user, int $limit = 25): array
     {
         return Conversation::claimedBy($user->id)
             ->with(['client:id,username,email', 'latestMessage.sender:id,username'])
@@ -518,6 +542,7 @@ class ChatController extends Controller
                 $q->where('sender_id', '!=', $user->id)->whereNull('read_at');
             }])
             ->latest()
+            ->limit($limit)
             ->get()
             ->map(fn ($conv) => [
                 'id' => $conv->id,
@@ -540,7 +565,7 @@ class ChatController extends Controller
     /**
      * Get conversations for a client user.
      */
-    private function getClientConversations($user): array
+    private function getClientConversations($user, int $limit = 10): array
     {
         return Conversation::where('client_id', $user->id)
             ->where('status', 'active')
@@ -549,6 +574,7 @@ class ChatController extends Controller
                 $q->where('sender_id', '!=', $user->id)->whereNull('read_at');
             }])
             ->latest()
+            ->limit($limit)
             ->get()
             ->map(fn ($conv) => [
                 'id' => $conv->id,

@@ -33,8 +33,8 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
     };
 
     const handleNext = () => {
-        if (!selected) return;
-        updateBooking({ eventType: selected, eventName });
+        if (!selected || !eventName.trim()) return;
+        updateBooking({ eventType: selected, eventName: eventName.trim() });
         onNext(true);
     };
 
@@ -48,13 +48,14 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                     <div className="booking-step-copy">
                         <p className="booking-step-kicker">Occasion</p>
                         <h2>Start with the celebration.</h2>
-                        <p>Pick the closest event type and optionally give it a name. This keeps the next choices relevant without asking for too much too early.</p>
+                        <p>Pick the closest event type and give the event a clear name so it is easy to track from your dashboard.</p>
                     </div>
 
-                    <label htmlFor="eventName" className="booking-field-label">Event name or note <span>Optional</span></label>
+                    <label htmlFor="eventName" className="booking-field-label">Event name</label>
                     <input
                         id="eventName"
                         type="text"
+                        required
                         value={eventName}
                         onChange={(event) => {
                             setEventName(event.target.value);
@@ -110,7 +111,7 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                 {onBack ? (
                     <button onClick={onBack} className="booking-secondary-btn">Back</button>
                 ) : <span />}
-                <button onClick={handleNext} disabled={!selected} className="booking-primary-btn">
+                <button onClick={handleNext} disabled={!selected || !eventName.trim()} className="booking-primary-btn">
                     Continue
                 </button>
             </div>

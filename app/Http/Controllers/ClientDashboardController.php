@@ -54,13 +54,15 @@ class ClientDashboardController extends Controller
         $payments = Payment::whereHas('booking', function ($q) use ($userId) {
                 $q->where('user_id', $userId);
             })
-            ->with('booking:id,event_date,client_full_name,total_cost')
+            ->with('booking:id,event_date,event_name,event_type,client_full_name,total_cost')
             ->orderBy('booking_id')
             ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 END")
             ->get()
             ->map(function ($p) {
                 $data = $p->toArray();
                 $data['event_date'] = $p->booking->event_date ?? null;
+                $data['event_name'] = $p->booking->event_name ?? null;
+                $data['event_type'] = $p->booking->event_type ?? null;
                 $data['client_full_name'] = $p->booking->client_full_name ?? null;
                 $data['total_cost'] = $p->booking->total_cost ?? null;
                 return $data;
