@@ -8,6 +8,40 @@ import logoImg from '../../images/ECS_LOGO.png';
 /* ── SVG Icons ── */
 const settledStatuses = ['Paid', 'Verified'];
 const isSettled = (status) => settledStatuses.includes(status);
+const sharedSelectedBookingKey = 'ecs_selected_booking_id';
+const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
+const paymentLabel = (type) => ({
+    Reservation: 'Reservation Fee',
+    DownPayment: 'Down Payment',
+    Downpayment: 'Down Payment',
+    Final: 'Final Payment',
+}[type] || type || 'Payment');
+const readSharedSelectedBooking = () => {
+    if (typeof window === 'undefined') return null;
+    try {
+        const stored = localStorage.getItem(sharedSelectedBookingKey);
+        return stored ? Number(stored) : null;
+    } catch (e) {
+        return null;
+    }
+};
+const writeSharedSelectedBooking = (id) => {
+    if (typeof window === 'undefined' || !id) return;
+    try {
+        localStorage.setItem(sharedSelectedBookingKey, String(id));
+    } catch (e) {
+        // Ignore local storage issues; the tracker still works without persistence.
+    }
+};
+const hasSelectedMenu = (selectedMenu) => {
+    if (!selectedMenu) return false;
+    try {
+        const parsed = typeof selectedMenu === 'string' ? JSON.parse(selectedMenu || '{}') : selectedMenu;
+        return Object.values(parsed || {}).some(items => Array.isArray(items) ? items.length > 0 : Boolean(items));
+    } catch (e) {
+        return Boolean(selectedMenu);
+    }
+};
 const IcoBudget = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const IcoMenu = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>;
 const IcoChart = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
@@ -43,6 +77,8 @@ const Counter = ({ end, suffix = '' }) => {
 const EventJourneyTracker = ({ booking, payments }) => {
     if (!booking) return null;
     const steps = buildFloatingJourneySteps(booking, payments);
+    const completedCount = steps.filter(s => s.done).length;
+    const progressWidth = steps.length > 1 ? (completedCount / (steps.length - 1)) * 100 : (completedCount ? 100 : 0);
     const activeStepIndex = steps.findIndex(s => !s.done);
     const activeStep = activeStepIndex === -1 ? steps.length : activeStepIndex;
 
@@ -52,7 +88,7 @@ const EventJourneyTracker = ({ booking, payments }) => {
                 <div className="flex justify-between items-end mb-8">
                     <div>
                         <p className="text-[#f0aa0b] text-xs font-bold uppercase tracking-widest mb-1">Your Event Journey</p>
-                        <h2 className="text-[#1a1a1a] text-2xl font-display font-bold">Event on {new Date(booking.event_date).toLocaleDateString()}</h2>
+                        <h2 className="text-[#1a1a1a] text-2xl font-display font-bold">{eventDisplayName(booking)}</h2>
                     </div>
                     <button 
                         onClick={() => router.get('/dashboard/client')}
@@ -64,21 +100,32 @@ const EventJourneyTracker = ({ booking, payments }) => {
                 
                 <div className="relative pt-4 pb-12">
                     <div className="absolute top-[2.1rem] left-0 w-full h-1 bg-gray-100 rounded-full"></div>
-                    <div className="absolute top-[2.1rem] left-0 h-1 bg-[#720101] rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(114,1,1,0.3)]" style={{ width: `${(steps.filter(s => s.done).length / (steps.length - 1)) * 100}%` }}></div>
+                    <div className="absolute top-[2.1rem] left-0 h-1 bg-[#720101] rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(114,1,1,0.3)]" style={{ width: `${progressWidth}%` }}></div>
                     
-                    <div className="relative flex justify-between">
+                    <div
+                        className="relative grid gap-3 pb-2"
+                        style={{ gridTemplateColumns: `repeat(${Math.max(steps.length, 1)}, minmax(0, 1fr))` }}
+                    >
                         {steps.map((step, idx) => {
                             const isCompleted = step.done;
                             const isActive = idx === activeStep;
                             const isLocked = step.locked;
                             
                             return (
-                                <div key={idx} className="flex flex-col items-center group">
+                                <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                        if (!step.locked) router.get(`/dashboard/client?tab=${step.tab}&booking=${booking.id}${step.target ? `&target=${step.target}` : ''}`);
+                                    }}
+                                    disabled={step.locked}
+                                    className="group flex min-w-0 flex-col items-center disabled:cursor-not-allowed"
+                                >
                                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-all duration-500 z-10 
                                         ${isCompleted ? 'bg-[#720101] border-[#720101] text-white' : 
                                           isActive ? 'bg-white border-[#720101] text-[#720101] shadow-xl' : 
                                           'bg-white border-gray-100 text-gray-300'}`}>
-                                        {isCompleted ? '✓' : isLocked ? (
+                                        {isCompleted ? 'OK' : isLocked ? (
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                                         ) : idx + 1}
                                     </div>
@@ -86,7 +133,7 @@ const EventJourneyTracker = ({ booking, payments }) => {
                                         ${isActive ? 'text-[#720101]' : isCompleted ? 'text-gray-800' : 'text-gray-400'}`}>
                                         {step.label}
                                     </p>
-                                </div>
+                                </button>
                             );
                         })}
                     </div>
@@ -104,25 +151,41 @@ const buildFloatingJourneySteps = (booking, payments) => {
         .filter((payment) => isSettled(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     
-    const isApproved = booking.status === 'Confirmed';
+    const isApproved = ['Confirmed', 'Reserved', 'Completed'].includes(booking.status);
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettled(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
-    const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettled(payment.status));
 
-    return [
-        { label: 'Booking submitted', done: true, action: 'Review event details', tab: 'details' },
-        { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices', tab: 'menu' },
-        { label: 'Booking approved', done: isApproved, action: 'Awaiting approval', tab: 'details', isPendingGate: !isApproved },
+    const needsClarification = Boolean(booking.clarification_request && !booking.clarification_response);
+    const needsMenuSelection = !hasSelectedMenu(booking.selected_menu);
+    const steps = [
+        { label: 'Booking approved', done: isApproved, action: 'Awaiting approval', tab: 'details', target: 'approval-status-panel', isPendingGate: !isApproved },
         { label: 'Reservation payment', done: hasReservation, action: 'Complete payment', tab: 'payments', locked: !isApproved },
-        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline/motif', tab: 'details' },
-        { label: 'Payment balance', done: paymentsDone, action: 'Review final balance', tab: 'payments', locked: !isApproved },
+        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline/motif', tab: 'details', target: 'event-details-panel' },
+        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${paymentLabel(booking.nextPaymentDue.payment_type)}` : 'Review final balance', tab: 'payments', locked: !isApproved },
     ];
+
+    if (needsMenuSelection) {
+        steps.unshift({ label: 'Menu selection', done: false, action: 'Choose dishes', tab: 'menu' });
+    }
+
+    if (needsClarification) {
+        steps.unshift({
+            label: 'Staff request',
+            done: false,
+            action: 'Answer requested details',
+            tab: 'details',
+            target: 'staff-request-panel',
+            isPendingGate: true,
+        });
+    }
+
+    return steps;
 };
 
 const FloatingJourneyTracker = ({ bookings, payments }) => {
     const activeBookings = bookings.filter((booking) => !['Cancelled', 'cancelled', 'Completed'].includes(booking.status));
-    const [selectedId, setSelectedId] = useState(null);
+    const [selectedId, setSelectedId] = useState(() => readSharedSelectedBooking());
     const [open, setOpen] = useState(false);
     const [isDocked, setIsDocked] = useState(false);
     const inlineRef = useRef(null);
@@ -133,6 +196,12 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
             setSelectedId(activeBookings[0].id);
         }
     }, [activeBookings, selectedId]);
+
+    useEffect(() => {
+        if (booking?.id) {
+            writeSharedSelectedBooking(booking.id);
+        }
+    }, [booking?.id]);
 
     useEffect(() => {
         const el = inlineRef.current;
@@ -183,7 +252,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                     <h2 className="mt-1 text-base font-display font-bold text-[#1a1a1a]">
                         {remaining.length === 0 ? 'All steps complete' : `${remaining.length} step${remaining.length > 1 ? 's' : ''} remaining`}
                     </h2>
-                    <p className="mt-1 text-xs font-semibold text-gray-500">Event on {new Date(booking.event_date).toLocaleDateString()}</p>
+                    <p className="mt-1 text-xs font-semibold text-gray-500">{eventDisplayName(booking)} - Booking #{booking.id}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                     <button onClick={() => router.get('/dashboard/client')} className="rounded-full bg-[#720101] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[#5a0101]">
@@ -197,7 +266,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                 <select value={booking.id} onChange={(event) => setSelectedId(Number(event.target.value))} className="mb-3 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 outline-none focus:border-[#720101]">
                     {activeBookings.map((item) => (
                         <option key={item.id} value={item.id}>
-                            {item.client_full_name || 'Eloquente event'} - {new Date(item.event_date).toLocaleDateString()}
+                            #{item.id} - {eventDisplayName(item)} - {new Date(item.event_date).toLocaleDateString()}
                         </option>
                     ))}
                 </select>
@@ -213,12 +282,15 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                 </div>
             </div>
 
-            <div className="grid gap-2.5">
+            <div
+                className="grid gap-2.5 pb-1"
+                style={{ gridTemplateColumns: `repeat(${Math.max(steps.length, 1)}, minmax(0, 1fr))` }}
+            >
                 {steps.map((step, index) => (
                     <button 
                         key={step.label} 
-                        onClick={() => { if (!step.locked) router.get(`/dashboard/client?tab=${step.tab}`); }} 
-                        className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all ${step.locked ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'bg-gray-50/50 hover:bg-[#720101]/5 active:scale-[0.98]'}`}
+                        onClick={() => { if (!step.locked) router.get(`/dashboard/client?tab=${step.tab}&booking=${booking.id}${step.target ? `&target=${step.target}` : ''}`); }}
+                        className={`flex min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition-all ${step.locked ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'bg-gray-50/50 hover:bg-[#720101]/5 active:scale-[0.98]'}`}
                         disabled={step.locked}
                     >
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all ${
@@ -227,7 +299,7 @@ const FloatingJourneyTracker = ({ bookings, payments }) => {
                             step.isPendingGate ? 'bg-[#720101] text-white' :
                             'bg-white text-[#720101] ring-2 ring-[#720101]/10'
                         }`}>
-                            {step.done ? '✓' : step.locked ? (
+                            {step.done ? 'OK' : step.locked ? (
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                             ) : index + 1}
                         </div>
@@ -394,14 +466,14 @@ const LandingPage = () => {
                             Catering that makes the whole event feel considered.
                         </h1>
                         <p className="hidden">
-                            Premium catering for weddings, corporate events, and private celebrations — crafted with precision, served with heart.
+                            Premium catering for weddings, corporate events, and private celebrations - crafted with precision, served with heart.
                         </p>
                         <p className="text-white/85 text-base md:text-lg leading-relaxed max-w-xl mb-8 mx-auto lg:mx-0" style={{opacity:0,animation:'fadeUp .7s .55s forwards'}}>
                             Premium menus, polished setup, transparent planning, and service teams prepared for weddings, company events, and private celebrations.
                         </p>
                         <div className="flex flex-col items-center gap-3 sm:flex-row lg:items-start" style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
                             <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
-                                Book Eloquente Now →
+                                Book Eloquente Now
                             </button>
                             <button onClick={()=>router.get('/food-tasting')} className="rounded-full border border-white/25 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:border-[#f0aa0b] hover:text-[#f0aa0b]">
                                 Book Tasting
@@ -501,7 +573,7 @@ const LandingPage = () => {
                         {[
                             {icon:<IcoBudget c="#f0aa0b"/>,title:'Budget-Guided Menu Builder',text:'Set a target budget and get a practical dish selection to review, adjust, and confirm before submitting your booking.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=500'},
                             {icon:<IcoMenu c="#f0aa0b"/>,title:'Guided Menu Selection',text:'Choose from packages or build your own menu with clear dish counts, per-head pricing, and running totals as you decide.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoChart c="#f0aa0b"/>,title:'Decision Support',text:'Live availability, transparent pricing, and instant cost estimates — so you book with total confidence, not guesswork.',img:'https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&q=80&w=500'},
+                            {icon:<IcoChart c="#f0aa0b"/>,title:'Decision Support',text:'Live availability, transparent pricing, and instant cost estimates - so you book with total confidence, not guesswork.',img:'https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&q=80&w=500'},
                             {icon:<IcoFilter c="#f0aa0b"/>,title:'Smart Menu Guidance',text:'Dietary needs, venue details, and seasonal availability are checked as you plan so your choices stay practical.',img:'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?auto=format&fit=crop&q=80&w=500'},
                         ].map((item,i)=>(
                             <div key={i} className={`flex flex-col ${i%2===0?'md:flex-row':'md:flex-row-reverse'} items-center gap-10 md:gap-16`}>
@@ -611,7 +683,7 @@ const LandingPage = () => {
                                 <p className="text-[#720101] text-xs font-bold uppercase tracking-[.2em] mb-3">Try Before You Buy</p>
                                 <h2 className="font-display text-[#1a1a1a] text-3xl md:text-4xl mb-4">Schedule a Private Food Tasting</h2>
                                 <p className="text-[#1a1a1a]/60 leading-relaxed mb-8 max-w-md">
-                                    Not ready to book yet? Come experience our culinary excellence firsthand. Meet our chefs, taste our bestsellers, and discuss your vision—no strings attached.
+                                    Not ready to book yet? Come experience our culinary excellence firsthand. Meet our chefs, taste our bestsellers, and discuss your vision-no strings attached.
                                 </p>
                                 <button onClick={()=>router.get('/food-tasting')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3.5 px-8 rounded-full text-sm uppercase tracking-wider transition-all shadow-md hover:shadow-lg inline-flex items-center gap-2">
                                     Book Tasting
@@ -658,7 +730,7 @@ const LandingPage = () => {
                             {[
                                 {pct:'10%',label:'Reservation Fee',text:'Secure your date with a non-refundable fee. We start planning your event right away.',color:'#f0aa0b',side:'left'},
                                 {pct:'70%',label:'Down Payment',text:'Due 1 month before. Funds sourcing, staffing, and full logistics preparation.',color:'#720101',side:'right'},
-                                {pct:'20%',label:'Final Balance',text:'Due 10 days before. After this, relax — we handle everything on the big day.',color:'#ffffff',side:'left'},
+                                {pct:'20%',label:'Final Balance',text:'Due 10 days before. After this, relax - we handle everything on the big day.',color:'#ffffff',side:'left'},
                             ].map((s,i)=>(
                                 <Rv key={i} d={`rv-d${i+1}`}>
                                     <div className={`md:flex items-center gap-8 ${s.side==='right'?'md:flex-row-reverse':''} mb-8`}>
@@ -738,8 +810,8 @@ const LandingPage = () => {
                     </Rv>
                     <div className="grid gap-5">
                         {[
-                            {name:'Maria Santos',role:'Bride · Dec 2025',text:'Eloquente made our wedding reception flawless. 350 guests served on time, every dish was incredible. Our families still talk about the lechon.'},
-                            {name:'James Reyes',role:'HR Director · Accenture PH',text:"We've used them for three annual company dinners. Consistent quality, transparent pricing, and the booking system is genuinely useful."},
+                            {name:'Maria Santos',role:'Bride - Dec 2025',text:'Eloquente made our wedding reception flawless. 350 guests served on time, every dish was incredible. Our families still talk about the lechon.'},
+                            {name:'James Reyes',role:'HR Director - Accenture PH',text:"We've used them for three annual company dinners. Consistent quality, transparent pricing, and the booking system is genuinely useful."},
                             {name:'Angela Cruz',role:'Event Planner',text:"As a planner, I need reliable caterers. Eloquente's budget tool helped my client get premium food within a tight budget. Highly recommended."},
                         ].map((t,i)=>(
                             <Rv key={i} d={`rv-d${i+1}`}>
@@ -770,9 +842,9 @@ const LandingPage = () => {
                     <Rv>
                         <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">Ready when you are</p>
                         <h2 className="font-display text-white text-3xl md:text-4xl lg:text-5xl leading-tight mb-5">Let's make your next event unforgettable.</h2>
-                        <p className="text-white/40 mb-10 max-w-sm mx-auto">From planning to cleanup — we handle every detail so you enjoy the moment.</p>
+                        <p className="text-white/40 mb-10 max-w-sm mx-auto">From planning to cleanup - we handle every detail so you enjoy the moment.</p>
                         <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
-                            Book Eloquente Now →
+                            Book Eloquente Now
                         </button>
                     </Rv>
                 </div>

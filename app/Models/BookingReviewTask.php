@@ -29,6 +29,11 @@ class BookingReviewTask extends Model
         ];
     }
 
+    public function setCustomerVisibleAttribute($value): void
+    {
+        $this->attributes['customer_visible'] = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+    }
+
     public function booking()
     {
         return $this->belongsTo(Booking::class);
