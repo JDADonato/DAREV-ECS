@@ -89,11 +89,12 @@ class AuthController extends Controller
 
         try {
             Mail::to($user->email)->send(new VerifyEmailOTP($otp));
-            error_log("\n--- OTP FOR {$user->email} IS: {$otp} ---\n");
-            Log::info("OTP Verification code for {$user->email}: {$otp}");
+            Log::info('OTP verification email sent.', ['user_id' => $user->id]);
         } catch (\Exception $e) {
-            error_log("\n--- FAILED TO SEND OTP TO {$user->email}. OTP IS: {$otp} ---\n" . $e->getMessage());
-            Log::error("Failed to send OTP email: " . $e->getMessage());
+            Log::error('Failed to send OTP email.', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         Auth::login($user);
@@ -161,11 +162,12 @@ class AuthController extends Controller
 
         try {
             Mail::to($user->email)->send(new VerifyEmailOTP($otp));
-            error_log("\n--- RESENT OTP FOR {$user->email} IS: {$otp} ---\n");
-            Log::info("Resent OTP Verification code for {$user->email}: {$otp}");
+            Log::info('OTP verification email resent.', ['user_id' => $user->id]);
         } catch (\Exception $e) {
-            error_log("\n--- FAILED TO SEND OTP TO {$user->email}. OTP IS: {$otp} ---\n" . $e->getMessage());
-            Log::error("Failed to resend OTP email: " . $e->getMessage());
+            Log::error('Failed to resend OTP email.', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return back()->with('message', 'A new verification code has been sent to your email.');

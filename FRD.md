@@ -1,7 +1,7 @@
 # Functional Requirements Document
 
-Project: Eloquente Catering Event Catering System  
-Date: 2026-05-25  
+Project: Eloquente Catering Event Catering System
+Date: 2026-05-25
 Prepared for: Development team, project evaluators, and business stakeholders
 
 ## 1. Document Purpose

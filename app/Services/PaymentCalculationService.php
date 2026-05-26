@@ -224,15 +224,8 @@ class PaymentCalculationService
             'live_status' => $this->bookingLiveStatus($paidRatio),
         ];
 
-        if (in_array($booking->status, ['Completed', 'Cancelled', 'cancelled'], true)) {
-            $booking->update($updates);
-            return;
-        }
-
-        if ($paidRatio >= 0.10) {
-            $updates['status'] = 'Reserved';
-        }
-
+        // Payment progress is tracked separately from the booking's operational status.
+        // Marketing owns statuses like Confirmed, Completed, and Cancelled.
         $booking->update($updates);
     }
 

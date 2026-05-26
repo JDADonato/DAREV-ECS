@@ -463,6 +463,11 @@ These items stay unchecked until they are executed against the real production s
    ```bash
    php artisan migrate --force
    ```
+   If baseline catalog/config data must be seeded, run only the guarded default seeder:
+   ```bash
+   php artisan db:seed --force
+   ```
+   Do not run `php artisan db:seed --class=AnalyticsDemoSeeder` on staging or production. That command is local-only demo data for analytics screenshots and test dashboards.
 7. [ ] Link storage:
    ```bash
    php artisan storage:link

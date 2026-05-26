@@ -43,6 +43,7 @@ const SECURITY_OPTIONS = [
 
 const MARKETING_BOOKINGS_URL = '/api/marketing/bookings?paginated=1&per_page=100';
 const BOOKING_BACKED_TABS = ['calendar', 'intake', 'documents'];
+const ACTIVE_CALENDAR_STATUSES = ['Confirmed', 'Reserved'];
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -77,6 +78,9 @@ const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value 
 const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
 const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
 const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
+const isActiveCalendarBooking = (booking) => (
+    Boolean(booking?.event_date) && ACTIVE_CALENDAR_STATUSES.includes(booking.status)
+);
 
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
@@ -214,7 +218,7 @@ const DashboardMarketing = () => {
             setLeadData(await response.json());
         } catch (error) {
             console.error(error);
-            if (!silent) toast.error('Could not load public leads.');
+            if (!silent) toast.error('Could not load guest inquiries.');
         } finally {
             if (!silent) setLeadLoading(false);
         }
@@ -663,11 +667,15 @@ const DashboardMarketing = () => {
         let pipeline = 0;
 
         bookings.forEach((booking) => {
+            const showOnCalendar = isActiveCalendarBooking(booking);
+
             if (booking.event_date) {
                 const dateKey = booking.event_date.substring(0, 10);
-                if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-                byDate.get(dateKey).push(booking);
-                if (booking.event_date.substring(0, 7) === monthKey) monthEvents += 1;
+                if (showOnCalendar) {
+                    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+                    byDate.get(dateKey).push(booking);
+                    if (booking.event_date.substring(0, 7) === monthKey) monthEvents += 1;
+                }
             }
 
             if (booking.status === 'Pending') {
@@ -694,11 +702,11 @@ const DashboardMarketing = () => {
 
     const dashboardSummary = marketingBookingIndexes;
 
-    const tabMeta = {
-        today: 'Today',
-        intake: 'Intake',
-        leads: 'Public Leads',
-        calendar: 'Calendar',
+        const tabMeta = {
+            today: 'Today',
+            intake: 'Intake',
+            leads: 'Guest Inquiries',
+            calendar: 'Calendar',
         availability: 'Availability',
         preparation: 'Preparation',
         inquiries: 'Booking Review',
@@ -708,11 +716,11 @@ const DashboardMarketing = () => {
         messages: 'Messages',
     };
 
-    const marketingSummary = useMemo(() => {
-        const pending = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
-        const needsDetails = pending.filter(b => String(b.review_status || '').toLowerCase() === 'needs customer details' || b.clarification_request);
-        const upcoming = bookings.filter(b => b.event_date && ['Confirmed', 'Reserved'].includes(b.status));
-        const now = new Date();
+        const marketingSummary = useMemo(() => {
+            const pending = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
+            const needsDetails = pending.filter(b => String(b.review_status || '').toLowerCase() === 'needs customer details' || b.clarification_request);
+            const upcoming = bookings.filter(b => b.event_date && ['Confirmed', 'Reserved'].includes(b.status));
+            const now = new Date();
         const nextSeven = new Date();
         nextSeven.setDate(now.getDate() + 7);
         const urgent = pending.filter(b => {
@@ -753,11 +761,11 @@ const DashboardMarketing = () => {
                             <StaffStatusBadge tone={marketingSummary.needsDetails > 0 ? 'danger' : 'good'}>{marketingSummary.needsDetails}</StaffStatusBadge>
                         </button>
                         <button type="button" onClick={() => setActiveTab('leads')} className="staff-priority-item">
-                            <div><h3>Public leads</h3><p>{leadData.summary?.open || 0} website inquiries need triage, assignment, or follow-up.</p></div>
+                            <div><h3>Guest inquiries</h3><p>{leadData.summary?.open || 0} contact-form messages need triage, assignment, or follow-up.</p></div>
                             <StaffStatusBadge tone={(leadData.summary?.open || 0) > 0 ? 'warn' : 'good'}>{leadData.summary?.open || 0}</StaffStatusBadge>
                         </button>
                         <button type="button" onClick={() => setActiveTab('preparation')} className="staff-priority-item">
-                            <div><h3>Upcoming handoffs</h3><p>{marketingSummary.upcoming} approved or reserved events need preparation visibility.</p></div>
+                            <div><h3>Upcoming handoffs</h3><p>{marketingSummary.upcoming} confirmed or reserved events need preparation visibility.</p></div>
                             <StaffStatusBadge tone={marketingSummary.upcoming > 0 ? 'warn' : 'good'}>{marketingSummary.upcoming}</StaffStatusBadge>
                         </button>
                         <button type="button" onClick={() => setActiveTab('messages')} className="staff-priority-item">
@@ -1416,21 +1424,21 @@ const DashboardMarketing = () => {
             <div className="marketing-panel overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
-                        <thead className="border-b border-amber-100 bg-[#fffaf3] text-xs font-black uppercase tracking-widest text-slate-500">
-                            <tr>
-                                <th className="px-5 py-4">Lead</th>
-                                <th className="px-5 py-4">Concern</th>
+                         <thead className="border-b border-amber-100 bg-[#fffaf3] text-xs font-black uppercase tracking-widest text-slate-500">
+                             <tr>
+                                <th className="px-5 py-4">Guest</th>
+                                 <th className="px-5 py-4">Concern</th>
                                 <th className="px-5 py-4">Event</th>
                                 <th className="px-5 py-4">Status</th>
                                 <th className="px-5 py-4 text-right">Action</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-amber-100/70">
-                            {leadLoading ? (
-                                <tr><td colSpan="5" className="px-5 py-10 text-center font-bold text-slate-500">Loading public leads...</td></tr>
+                         <tbody className="divide-y divide-amber-100/70">
+                             {leadLoading ? (
+                                <tr><td colSpan="5" className="px-5 py-10 text-center font-bold text-slate-500">Loading guest inquiries...</td></tr>
                             ) : leadData.data.length === 0 ? (
-                                <tr><td colSpan="5" className="px-5 py-10"><StaffEmptyState title="No public leads found" message="New contact inquiries from the website will appear here." /></td></tr>
-                            ) : leadData.data.map((lead) => (
+                                <tr><td colSpan="5" className="px-5 py-10"><StaffEmptyState title="No guest inquiries found" message="Questions from the Contact page will appear here." /></td></tr>
+                             ) : leadData.data.map((lead) => (
                                 <tr key={lead.id} className="hover:bg-[#fffaf3]">
                                     <td className="px-5 py-4">
                                         <p className="font-black text-slate-950">{lead.full_name}</p>
@@ -1456,11 +1464,11 @@ const DashboardMarketing = () => {
 
             {selectedLead && (
                 <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
-                    <aside className="custom-scrollbar h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <p className="marketing-kicker">Public lead</p>
-                                <h3 className="mt-2 text-2xl font-black text-slate-950">{selectedLead.full_name}</h3>
+                     <aside className="custom-scrollbar h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                         <div className="flex items-start justify-between gap-4">
+                             <div>
+                                <p className="marketing-kicker">Guest inquiry</p>
+                                 <h3 className="mt-2 text-2xl font-black text-slate-950">{selectedLead.full_name}</h3>
                                 <p className="mt-1 text-sm font-bold text-slate-500">{selectedLead.email}{selectedLead.phone ? ` / ${selectedLead.phone}` : ''}</p>
                             </div>
                             <button type="button" onClick={() => setSelectedLead(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-500">Close</button>
@@ -2100,11 +2108,11 @@ const DashboardMarketing = () => {
             navGroups={[
                 {
                     label: 'Daily work',
-                    items: [
-                        { id: 'today', label: 'Today', count: marketingSummary.pending + marketingSummary.needsDetails },
-                        { id: 'intake', label: 'Intake', count: dashboardSummary.pending },
-                        { id: 'leads', label: 'Public Leads', count: leadData.summary?.open || 0 },
-                        { id: 'calendar', label: 'Calendar', count: dashboardSummary.monthEvents },
+                     items: [
+                         { id: 'today', label: 'Today', count: marketingSummary.pending + marketingSummary.needsDetails },
+                         { id: 'intake', label: 'Intake', count: dashboardSummary.pending },
+                        { id: 'leads', label: 'Guest Inquiries', count: leadData.summary?.open || 0 },
+                         { id: 'calendar', label: 'Calendar', count: dashboardSummary.monthEvents },
                         { id: 'preparation', label: 'Preparation', count: marketingSummary.upcoming },
                         { id: 'messages', label: 'Messages' },
                     ],

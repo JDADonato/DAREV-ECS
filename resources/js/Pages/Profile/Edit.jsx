@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { Bell, Check, Clock, Crop, Grip, KeyRound, MailCheck, RotateCcw, ShieldCheck, Timer, Upload, X, ZoomIn } from 'lucide-react';
 import DefaultLayout from '../../Layouts/DefaultLayout';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 
@@ -80,14 +81,44 @@ const EditActions = ({ onCancel, onSave, processing, saveLabel = 'Save changes' 
     </div>
 );
 
+const ToggleSwitch = ({ checked, disabled, onChange }) => (
+    <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={onChange}
+        className={`relative h-7 w-12 rounded-full p-1 transition ${checked ? 'bg-emerald-500' : 'bg-slate-300'} disabled:opacity-60`}
+    >
+        <span className={`block h-5 w-5 rounded-full bg-white shadow transition ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+);
+
 const ProfileEdit = () => {
     const { auth, flash } = usePage().props;
     const user = auth?.user || {};
     const fileInputRef = useRef(null);
+    const cropImageRef = useRef(null);
     const [activeTab, setActiveTab] = useState('overview');
     const [editing, setEditing] = useState(null);
     const [activity, setActivity] = useState([]);
     const [showPasswords, setShowPasswords] = useState(false);
+    const [photoModalOpen, setPhotoModalOpen] = useState(false);
+    const [photoDraftUrl, setPhotoDraftUrl] = useState(null);
+    const [photoDraftName, setPhotoDraftName] = useState('profile-photo.jpg');
+    const [photoZoom, setPhotoZoom] = useState(1);
+    const [photoOffsetX, setPhotoOffsetX] = useState(0);
+    const [photoOffsetY, setPhotoOffsetY] = useState(0);
+    const [photoRotation, setPhotoRotation] = useState(0);
+    const [photoDragStart, setPhotoDragStart] = useState(null);
+    const [showPhotoHint, setShowPhotoHint] = useState(false);
+    const [passwordCodeSent, setPasswordCodeSent] = useState(false);
+    const [passwordCodeMessage, setPasswordCodeMessage] = useState('');
+    const [passwordCodeError, setPasswordCodeError] = useState('');
+    const [sendingPasswordCode, setSendingPasswordCode] = useState(false);
+    const [passwordCodeExpiresAt, setPasswordCodeExpiresAt] = useState(null);
+    const [passwordCodeSecondsRemaining, setPasswordCodeSecondsRemaining] = useState(0);
+    const [pendingNotificationToggle, setPendingNotificationToggle] = useState(null);
 
     const displayName = user.full_name || user.username || 'Profile';
     const initial = displayName.charAt(0).toUpperCase();
@@ -96,7 +127,7 @@ const ProfileEdit = () => {
     const notificationPrefs = user.notification_preferences || {};
     const profilePrefs = user.profile_preferences || {};
 
-    const { data, setData, post, processing, errors, reset, isDirty } = useForm({
+    const { data, setData, post, processing, errors, reset, isDirty, transform } = useForm({
         _method: 'PUT',
         full_name: user.full_name || '',
         username: user.username || '',
@@ -117,6 +148,7 @@ const ProfileEdit = () => {
         current_password: '',
         new_password: '',
         new_password_confirmation: '',
+        password_verification_code: '',
         avatar: null,
         remove_avatar: false,
     });
@@ -127,6 +159,33 @@ const ProfileEdit = () => {
             .then((payload) => setActivity(payload.data || []))
             .catch(() => setActivity([]));
     }, []);
+
+    useEffect(() => {
+        if (!photoModalOpen) return undefined;
+
+        setShowPhotoHint(true);
+        const timeout = window.setTimeout(() => setShowPhotoHint(false), 3200);
+
+        return () => window.clearTimeout(timeout);
+    }, [photoModalOpen, photoDraftUrl]);
+
+    useEffect(() => {
+        if (!passwordCodeExpiresAt) return undefined;
+
+        const updateRemaining = () => {
+            const remaining = Math.max(0, Math.ceil((new Date(passwordCodeExpiresAt).getTime() - Date.now()) / 1000));
+            setPasswordCodeSecondsRemaining(remaining);
+            if (remaining === 0) {
+                setPasswordCodeSent(false);
+                setPasswordCodeMessage('Verification code expired. Send a new code to continue.');
+            }
+        };
+
+        updateRemaining();
+        const interval = window.setInterval(updateRemaining, 1000);
+
+        return () => window.clearInterval(interval);
+    }, [passwordCodeExpiresAt]);
 
     const dashboardHref = user.role === 'Client'
         ? '/dashboard/client'
@@ -159,6 +218,8 @@ const ProfileEdit = () => {
 
     const completion = useMemo(() => Math.round((readinessItems.filter((item) => item.complete).length / readinessItems.length) * 100), [readinessItems]);
     const missingReadiness = readinessItems.filter((item) => !item.complete);
+    const passwordCodeExpired = Boolean(passwordCodeExpiresAt) && passwordCodeSecondsRemaining === 0;
+    const passwordCodeCountdown = `${Math.floor(passwordCodeSecondsRemaining / 60)}:${String(passwordCodeSecondsRemaining % 60).padStart(2, '0')}`;
 
     const avatarPreview = data.avatar ? URL.createObjectURL(data.avatar) : (data.remove_avatar ? null : user.avatar_url);
     const selectedAvatarLabel = data.avatar
@@ -169,12 +230,184 @@ const ProfileEdit = () => {
                 ? 'Current profile photo'
                 : 'No photo uploaded';
 
+    const resetPhotoEditor = () => {
+        setPhotoZoom(1);
+        setPhotoOffsetX(0);
+        setPhotoOffsetY(0);
+        setPhotoRotation(0);
+        setPhotoDragStart(null);
+        setShowPhotoHint(true);
+    };
+
     const chooseAvatar = () => fileInputRef.current?.click();
+
+    const openPhotoModal = () => {
+        if (avatarPreview) {
+            setPhotoDraftUrl(avatarPreview);
+            setPhotoDraftName(data.avatar?.name || 'profile-photo.jpg');
+            resetPhotoEditor();
+            setShowPhotoHint(true);
+            setPhotoModalOpen(true);
+            return;
+        }
+
+        chooseAvatar();
+    };
 
     const clearAvatar = () => {
         setData('avatar', null);
         setData('remove_avatar', Boolean(user.avatar_url));
         if (fileInputRef.current) fileInputRef.current.value = '';
+        setPhotoModalOpen(false);
+        setPhotoDraftUrl(null);
+        resetPhotoEditor();
+    };
+
+    const saveNotificationPreferences = (nextPreferences) => {
+        setData('notification_preferences', nextPreferences);
+        transform((formData) => ({
+            ...formData,
+            notification_preferences: nextPreferences,
+        }));
+        post('/profile', {
+            forceFormData: true,
+            preserveScroll: true,
+            onFinish: () => transform((formData) => formData),
+        });
+    };
+
+    const requestNotificationToggle = (key) => {
+        const nextValue = !data.notification_preferences[key];
+
+        if (!nextValue) {
+            setPendingNotificationToggle(key);
+            return;
+        }
+
+        saveNotificationPreferences({ ...data.notification_preferences, [key]: true });
+    };
+
+    const confirmNotificationOff = () => {
+        if (!pendingNotificationToggle) return;
+
+        saveNotificationPreferences({
+            ...data.notification_preferences,
+            [pendingNotificationToggle]: false,
+        });
+        setPendingNotificationToggle(null);
+    };
+
+    const loadAvatarFile = (file) => {
+        if (!file) return;
+
+        setPhotoDraftUrl(URL.createObjectURL(file));
+        setPhotoDraftName(file.name || 'profile-photo.jpg');
+        resetPhotoEditor();
+        setShowPhotoHint(true);
+        setPhotoModalOpen(true);
+    };
+
+    const movePhoto = (deltaX, deltaY) => {
+        setPhotoOffsetX((value) => Math.max(-140, Math.min(140, value + deltaX)));
+        setPhotoOffsetY((value) => Math.max(-140, Math.min(140, value + deltaY)));
+    };
+
+    const handlePhotoKeyDown = (event) => {
+        const distance = event.shiftKey ? 10 : 4;
+        const moves = {
+            ArrowLeft: [-distance, 0],
+            ArrowRight: [distance, 0],
+            ArrowUp: [0, -distance],
+            ArrowDown: [0, distance],
+        };
+
+        if (!moves[event.key]) return;
+
+        event.preventDefault();
+        setShowPhotoHint(false);
+        movePhoto(...moves[event.key]);
+    };
+
+    const saveEditedAvatar = () => {
+        const image = cropImageRef.current;
+        if (!image) return;
+
+        const canvas = document.createElement('canvas');
+        const size = 720;
+        const scale = size / 320;
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#720101';
+        context.fillRect(0, 0, size, size);
+        context.translate(size / 2, size / 2);
+        context.rotate((photoRotation * Math.PI) / 180);
+        context.scale(photoZoom, photoZoom);
+
+        const imageRatio = image.naturalWidth / image.naturalHeight;
+        const baseWidth = imageRatio >= 1 ? size * imageRatio : size;
+        const baseHeight = imageRatio >= 1 ? size : size / imageRatio;
+        context.drawImage(
+            image,
+            -baseWidth / 2 + photoOffsetX * scale,
+            -baseHeight / 2 + photoOffsetY * scale,
+            baseWidth,
+            baseHeight,
+        );
+
+        canvas.toBlob((blob) => {
+            if (!blob) return;
+            const editedFile = new File([blob], photoDraftName.replace(/\.[^.]+$/, '') + '-profile.jpg', { type: 'image/jpeg' });
+            setData('avatar', editedFile);
+            setData('remove_avatar', false);
+            transform((formData) => ({
+                ...formData,
+                avatar: editedFile,
+                remove_avatar: false,
+            }));
+            post('/profile', {
+                forceFormData: true,
+                preserveScroll: true,
+                onSuccess: () => {
+                    setEditing(null);
+                    reset('avatar', 'remove_avatar');
+                    setPhotoModalOpen(false);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                },
+                onFinish: () => transform((formData) => formData),
+            });
+        }, 'image/jpeg', 0.9);
+    };
+
+    const sendPasswordCode = async () => {
+        setSendingPasswordCode(true);
+        setPasswordCodeError('');
+        setPasswordCodeMessage('');
+
+        try {
+            const response = await fetch('/profile/password-code', {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(payload.message || 'We could not send the verification code.');
+            }
+
+            setPasswordCodeSent(true);
+            setPasswordCodeExpiresAt(payload.expires_at || null);
+            setPasswordCodeSecondsRemaining(payload.expires_in_seconds || 600);
+            setPasswordCodeMessage(payload.message || 'Verification code sent to your email.');
+        } catch (error) {
+            setPasswordCodeError(error.message || 'We could not send the verification code.');
+        } finally {
+            setSendingPasswordCode(false);
+        }
     };
 
     const submit = () => {
@@ -187,7 +420,12 @@ const ProfileEdit = () => {
             preserveScroll: true,
             onSuccess: () => {
                 setEditing(null);
-                reset('current_password', 'new_password', 'new_password_confirmation', 'avatar', 'remove_avatar');
+                reset('current_password', 'new_password', 'new_password_confirmation', 'password_verification_code', 'avatar', 'remove_avatar');
+                setPasswordCodeSent(false);
+                setPasswordCodeMessage('');
+                setPasswordCodeError('');
+                setPasswordCodeExpiresAt(null);
+                setPasswordCodeSecondsRemaining(0);
                 if (fileInputRef.current) fileInputRef.current.value = '';
             },
         });
@@ -197,6 +435,12 @@ const ProfileEdit = () => {
         setEditing(null);
         reset();
         if (fileInputRef.current) fileInputRef.current.value = '';
+        setPhotoModalOpen(false);
+        setPasswordCodeSent(false);
+        setPasswordCodeMessage('');
+        setPasswordCodeError('');
+        setPasswordCodeExpiresAt(null);
+        setPasswordCodeSecondsRemaining(0);
     };
 
     const tabs = [
@@ -237,7 +481,7 @@ const ProfileEdit = () => {
                             >
                                 <div className="flex items-center gap-3">
                                     <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${item.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-[#fff1c2] text-[#9f6500]'}`}>
-                                        {item.complete ? 'OK' : '!'}
+                                        {item.complete ? <Check className="h-4 w-4" strokeWidth={3} /> : '!'}
                                     </span>
                                     <div className="min-w-0">
                                         <p className="font-black">{item.label}</p>
@@ -277,29 +521,34 @@ const ProfileEdit = () => {
                 {editing === 'personal' ? (
                     <div className="grid gap-6 xl:grid-cols-[260px_1fr]">
                         <div>
-                            <div className="h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md">
+                            <button
+                                type="button"
+                                onClick={chooseAvatar}
+                                className="group relative h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md"
+                                aria-label="Choose a new profile photo"
+                            >
                                 {avatarPreview ? <img src={avatarPreview} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-black">{initial}</div>}
-                            </div>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp"
-                                onChange={(e) => {
-                                    setData('avatar', e.target.files?.[0] || null);
-                                    setData('remove_avatar', false);
-                                }}
-                                className="hidden"
-                            />
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/55 px-3 text-center text-xs font-black uppercase tracking-widest opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                                    Change photo
+                                </span>
+                            </button>
                             <div className="mt-4 rounded-2xl border border-[#ead8cc] bg-white p-4 shadow-sm">
                                 <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Profile photo</p>
                                 <p className="mt-1 max-w-full truncate text-sm font-bold text-slate-500">{selectedAvatarLabel}</p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <button
                                         type="button"
-                                        onClick={chooseAvatar}
+                                        onClick={openPhotoModal}
                                         className="rounded-xl bg-[#720101] px-4 py-2.5 text-sm font-black text-white transition hover:bg-[#5a0101]"
                                     >
-                                        {data.avatar ? 'Choose another' : user.avatar_url && !data.remove_avatar ? 'Replace photo' : 'Upload photo'}
+                                        {avatarPreview ? 'Edit photo' : 'Upload photo'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={chooseAvatar}
+                                        className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2.5 text-sm font-black text-[#720101] transition hover:bg-[#fff7e8]"
+                                    >
+                                        Choose file
                                     </button>
                                     {(data.avatar || user.avatar_url) && (
                                         <button
@@ -352,9 +601,17 @@ const ProfileEdit = () => {
                 ) : (
                     <div className="grid gap-x-8 xl:grid-cols-[220px_1fr]">
                         <div className="mb-6 lg:mb-0">
-                            <div className="h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md">
+                            <button
+                                type="button"
+                                onClick={chooseAvatar}
+                                className="group relative h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md"
+                                aria-label="Choose a new profile photo"
+                            >
                                 {user.avatar_url ? <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-black">{initial}</div>}
-                            </div>
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/55 px-3 text-center text-xs font-black uppercase tracking-widest opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                                    Change photo
+                                </span>
+                            </button>
                         </div>
                         <div className="grid gap-x-8 sm:grid-cols-2 xl:grid-cols-3">
                             <InfoRow label="Full name" value={user.full_name} />
@@ -374,15 +631,27 @@ const ProfileEdit = () => {
         <>
             <PanelHeader
                 eyebrow={isClient ? 'Planning defaults' : 'Communication'}
-                title={isClient ? 'Planning preferences' : 'Notification preferences'}
-                text={isClient ? 'These defaults help future inquiries and bookings start with better context.' : 'Choose which staff notifications should actively reach you.'}
-                action={editing !== 'preferences' && <button type="button" onClick={() => setEditing('preferences')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white">Edit preferences</button>}
+                title={isClient ? 'Planning and alerts' : 'Notification preferences'}
+                text={isClient ? 'Set your usual event details and keep important booking alerts within reach.' : 'Choose which staff notifications should actively reach you.'}
+                action={isClient && editing !== 'preferences' && <button type="button" onClick={() => setEditing('preferences')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white">Set default event details</button>}
             />
             <div className="py-6">
-                {editing === 'preferences' ? (
-                    <div className="space-y-6">
-                        {isClient && (
-                            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+                    <div className="rounded-2xl border border-[#ead8cc] bg-[#fffaf3] p-5">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <p className="text-xs font-black uppercase tracking-[0.2em] text-[#9f6500]">Event defaults</p>
+                                <h3 className="mt-1 text-xl font-black text-slate-950">Your usual setup</h3>
+                                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">These details help new inquiries start faster.</p>
+                            </div>
+                            {isClient && editing !== 'preferences' && (
+                                <button type="button" onClick={() => setEditing('preferences')} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
+                                    Edit
+                                </button>
+                            )}
+                        </div>
+                        {editing === 'preferences' ? (
+                            <div className="mt-5 grid gap-4">
                                 <label>
                                     <span className="text-xs font-black uppercase tracking-widest text-slate-500">Default event city</span>
                                     <input value={data.profile_preferences.default_event_city} onChange={(e) => setData('profile_preferences', { ...data.profile_preferences, default_event_city: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
@@ -395,34 +664,41 @@ const ProfileEdit = () => {
                                     <span className="text-xs font-black uppercase tracking-widest text-slate-500">Planning notes</span>
                                     <textarea rows={4} value={data.profile_preferences.planning_notes} onChange={(e) => setData('profile_preferences', { ...data.profile_preferences, planning_notes: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
                                 </label>
+                                <EditActions onCancel={cancelEdit} onSave={submit} processing={processing} saveLabel="Save event defaults" />
                             </div>
-                        )}
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                            {Object.entries(notificationLabels).map(([key, label]) => (
-                                <button key={key} type="button" onClick={() => setData('notification_preferences', { ...data.notification_preferences, [key]: !data.notification_preferences[key] })} className={`rounded-2xl border px-4 py-4 text-left text-sm font-black ${data.notification_preferences[key] ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                    {label}
-                                    <span className="ml-2 text-xs uppercase">{data.notification_preferences[key] ? 'On' : 'Off'}</span>
-                                </button>
-                            ))}
-                        </div>
-                        <EditActions onCancel={cancelEdit} onSave={submit} processing={processing} />
-                    </div>
-                ) : (
-                    <div className="grid gap-8 xl:grid-cols-[1fr_1.25fr]">
-                        {isClient && (
-                            <div>
+                        ) : (
+                            <div className="mt-5 divide-y divide-[#f1e2d8]">
                                 <InfoRow label="Default city" value={profilePrefs.default_event_city} />
                                 <InfoRow label="Usual pax" value={profilePrefs.default_guest_count} />
                                 <InfoRow label="Planning notes" value={profilePrefs.planning_notes} />
                             </div>
                         )}
-                        <div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#ead8cc] bg-white p-5">
+                        <div className="flex items-start gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#fff1c2] text-[#9f6500]">
+                                <Bell className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-black uppercase tracking-[0.2em] text-[#9f6500]">Alert preferences</p>
+                                <h3 className="mt-1 text-xl font-black text-slate-950">Notifications and reminders</h3>
+                                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">These switches save immediately. Turning off an alert asks for confirmation first.</p>
+                            </div>
+                        </div>
+                        <div className="mt-5 grid gap-3">
                             {Object.entries(notificationLabels).map(([key, label]) => (
-                                <InfoRow key={key} label={label} value={(notificationPrefs[key] ?? true) ? 'On' : 'Off'} />
+                                <div key={key} className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 ${data.notification_preferences[key] ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
+                                    <div>
+                                        <p className="font-black text-slate-950">{label}</p>
+                                        <p className="mt-1 text-xs font-semibold text-slate-500">{data.notification_preferences[key] ? 'On and ready to reach you.' : 'Off until you turn it back on.'}</p>
+                                    </div>
+                                    <ToggleSwitch checked={Boolean(data.notification_preferences[key])} disabled={processing} onChange={() => requestNotificationToggle(key)} />
+                                </div>
                             ))}
                         </div>
                     </div>
-                )}
+                </div>
             </div>
         </>
     );
@@ -437,28 +713,99 @@ const ProfileEdit = () => {
             />
             <div className="py-6">
                 {editing === 'security' ? (
-                    <div className="rounded-2xl border border-[#ead8cc] bg-[#fffaf3] p-5">
-                        <div className="grid gap-4 lg:grid-cols-3">
-                            <label>
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Current password</span>
-                                <input type={showPasswords ? 'text' : 'password'} value={data.current_password} onChange={(e) => setData('current_password', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold" />
-                                <FieldError message={errors.current_password} />
-                            </label>
-                            <label>
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">New password</span>
-                                <input type={showPasswords ? 'text' : 'password'} value={data.new_password} onChange={(e) => setData('new_password', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold" />
-                                <FieldError message={errors.new_password} />
-                            </label>
-                            <label>
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Confirm password</span>
-                                <input type={showPasswords ? 'text' : 'password'} value={data.new_password_confirmation} onChange={(e) => setData('new_password_confirmation', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold" />
-                            </label>
-                        </div>
-                        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#ead8cc] pt-4">
-                            <button type="button" onClick={() => setShowPasswords((value) => !value)} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
-                                {showPasswords ? 'Hide passwords' : 'Show passwords'}
-                            </button>
-                            <EditActions onCancel={cancelEdit} onSave={submit} processing={processing} saveLabel="Save password" />
+                    <div className="overflow-hidden rounded-2xl border border-[#ead8cc] bg-[#fffaf3] shadow-sm">
+                        <div className="grid gap-0 lg:grid-cols-[0.92fr_1.28fr]">
+                            <div className="relative overflow-hidden border-b border-[#ead8cc] bg-[#211915] p-6 text-white lg:border-b-0 lg:border-r lg:border-[#ead8cc]/20">
+                                <div className="absolute -right-20 -top-20 h-48 w-48 rounded-full bg-[#f0aa0b]/20 blur-3xl" />
+                                <div className="absolute -bottom-20 left-10 h-40 w-40 rounded-full bg-[#720101]/45 blur-3xl" />
+                                <div className="relative">
+                                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f0aa0b] text-[#171412] shadow-lg shadow-black/20">
+                                        <ShieldCheck className="h-7 w-7" />
+                                    </div>
+                                    <p className="mt-5 text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">Secure password change</p>
+                                    <h3 className="mt-2 text-2xl font-black">Confirm it is really you</h3>
+                                    <p className="mt-3 text-sm font-semibold leading-6 text-white/70">A one-time code is sent directly to your account email before the new password can be saved.</p>
+                                </div>
+                                <div className="relative mt-5 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-white/45">Delivery address</p>
+                                    <p className="mt-1 break-all text-sm font-black text-white">{user.email}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={sendPasswordCode}
+                                    disabled={sendingPasswordCode}
+                                    className="relative mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-[#720101] transition hover:bg-[#fff7e8] disabled:opacity-60"
+                                >
+                                    <MailCheck className="h-4 w-4" />
+                                    {sendingPasswordCode ? 'Sending...' : passwordCodeSent ? 'Resend code' : 'Send code'}
+                                </button>
+                                {(passwordCodeMessage || passwordCodeError || passwordCodeSent) && (
+                                    <div className={`relative mt-4 rounded-2xl border px-4 py-4 ${passwordCodeError ? 'border-red-300/30 bg-red-400/10' : passwordCodeExpired ? 'border-[#f0aa0b]/35 bg-[#f0aa0b]/10' : 'border-emerald-300/30 bg-emerald-400/10'}`}>
+                                        <div className="flex items-start gap-3">
+                                            <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${passwordCodeError ? 'bg-red-400/20 text-red-100' : passwordCodeExpired ? 'bg-[#f0aa0b]/20 text-[#f0aa0b]' : 'bg-emerald-400/20 text-emerald-100'}`}>
+                                                {passwordCodeError ? <X className="h-4 w-4" /> : <Timer className="h-4 w-4" />}
+                                            </div>
+                                            <div>
+                                                <p className={`text-sm font-black ${passwordCodeError ? 'text-red-100' : passwordCodeExpired ? 'text-[#ffe3a1]' : 'text-emerald-100'}`}>{passwordCodeError || passwordCodeMessage}</p>
+                                                {passwordCodeSent && !passwordCodeExpired && (
+                                                    <p className="mt-1 text-xs font-bold text-white/60">Expires in {passwordCodeCountdown}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="p-6">
+                                <div className="mb-5 flex items-start gap-3 rounded-2xl border border-[#ead8cc] bg-white p-4 shadow-sm">
+                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#fff1c2] text-[#9f6500]">
+                                        <KeyRound className="h-5 w-5" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Verification details</p>
+                                        <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">Enter the active code, current password, and new password. Codes expire after 10 minutes.</p>
+                                    </div>
+                                </div>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <label className="sm:col-span-2">
+                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Verification code</span>
+                                        <div className="relative mt-2">
+                                            <input inputMode="numeric" maxLength={6} value={data.password_verification_code} onChange={(e) => setData('password_verification_code', e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-28 text-center text-lg font-black tracking-[0.45em] text-slate-950 focus:border-[#720101] focus:outline-none focus:ring-4 focus:ring-[#720101]/10" />
+                                            <span className={`absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-full px-3 py-1 text-xs font-black ${passwordCodeSent && !passwordCodeExpired ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                <Timer className="h-3.5 w-3.5" />
+                                                {passwordCodeSent && !passwordCodeExpired ? passwordCodeCountdown : 'No code'}
+                                            </span>
+                                        </div>
+                                        <FieldError message={errors.password_verification_code} />
+                                    </label>
+                                    <label>
+                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Current password</span>
+                                        <input type={showPasswords ? 'text' : 'password'} value={data.current_password} onChange={(e) => setData('current_password', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold focus:border-[#720101] focus:outline-none focus:ring-4 focus:ring-[#720101]/10" />
+                                        <FieldError message={errors.current_password} />
+                                    </label>
+                                    <label>
+                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">New password</span>
+                                        <input type={showPasswords ? 'text' : 'password'} value={data.new_password} onChange={(e) => setData('new_password', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold focus:border-[#720101] focus:outline-none focus:ring-4 focus:ring-[#720101]/10" />
+                                        <FieldError message={errors.new_password} />
+                                    </label>
+                                    <label className="sm:col-span-2">
+                                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Confirm password</span>
+                                        <input type={showPasswords ? 'text' : 'password'} value={data.new_password_confirmation} onChange={(e) => setData('new_password_confirmation', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold focus:border-[#720101] focus:outline-none focus:ring-4 focus:ring-[#720101]/10" />
+                                    </label>
+                                </div>
+                                <div className="mt-6 flex flex-col gap-3 border-t border-[#ead8cc] pt-5 sm:flex-row sm:items-center sm:justify-between">
+                                    <button type="button" onClick={() => setShowPasswords((value) => !value)} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
+                                        {showPasswords ? 'Hide passwords' : 'Show passwords'}
+                                    </button>
+                                    <div className="flex justify-end gap-3">
+                                        <button type="button" onClick={cancelEdit} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-600 hover:bg-slate-50">
+                                            Cancel
+                                        </button>
+                                        <button type="button" onClick={submit} disabled={processing || !passwordCodeSent || passwordCodeExpired} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-[#5a0101] disabled:cursor-not-allowed disabled:opacity-60">
+                                            {processing ? 'Saving...' : passwordCodeExpired ? 'Code expired' : 'Save password'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -471,8 +818,8 @@ const ProfileEdit = () => {
                         />
                         <DetailTile
                             eyebrow="Password rule"
-                            title="8+ characters"
-                            text="Password changes require your current password and confirmation."
+                            title="Email code plus current password"
+                            text="Password changes require a fresh email code, your current password, and confirmation."
                             tone="neutral"
                         />
                         <DetailTile
@@ -531,6 +878,14 @@ const ProfileEdit = () => {
                     </div>
 
                     {flash?.message && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-bold text-emerald-800">{flash.message}</div>}
+
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={(e) => loadAvatarFile(e.target.files?.[0])}
+                        className="hidden"
+                    />
 
                     <section className="relative overflow-hidden rounded-[1.75rem] border border-[#ead8cc] bg-[#171412] shadow-xl shadow-black/10">
                         <div className="pointer-events-none absolute -right-24 -top-28 h-72 w-72 rounded-full bg-[#f0aa0b]/20 blur-3xl" />
@@ -599,6 +954,138 @@ const ProfileEdit = () => {
                         {activeTab === 'activity' && renderActivity()}
                     </section>
 
+                    {photoModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171412]/75 px-4 py-6 backdrop-blur-sm">
+                            <div className="max-h-[94vh] w-full max-w-[760px] overflow-y-auto rounded-[1.5rem] border border-[#ead8cc] bg-[#fffaf3] text-slate-950 shadow-2xl">
+                                <div className="relative border-b border-[#ead8cc] bg-white px-6 py-5">
+                                    <p className="text-xs font-black uppercase tracking-[0.22em] text-[#9f6500]">Eloquente account</p>
+                                    <h3 className="mt-1 text-2xl font-black">Set profile picture</h3>
+                                    <p className="mt-2 text-sm font-semibold text-slate-500">Frame your photo for bookings, messages, and staff follow-ups.</p>
+                                    <button type="button" onClick={() => setPhotoModalOpen(false)} className="absolute right-5 top-5 rounded-full border border-[#ead8cc] bg-[#fffaf3] p-2 text-slate-500 hover:bg-white" aria-label="Close photo editor">
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
+                                <div className="space-y-6 p-5 sm:p-6">
+                                    <div
+                                        role="application"
+                                        tabIndex={0}
+                                        onKeyDown={handlePhotoKeyDown}
+                                        onPointerDown={(event) => {
+                                            event.currentTarget.setPointerCapture(event.pointerId);
+                                            setShowPhotoHint(false);
+                                            setPhotoDragStart({ x: event.clientX, y: event.clientY });
+                                        }}
+                                        onPointerMove={(event) => {
+                                            if (!photoDragStart) return;
+                                            movePhoto(event.clientX - photoDragStart.x, event.clientY - photoDragStart.y);
+                                            setPhotoDragStart({ x: event.clientX, y: event.clientY });
+                                        }}
+                                        onPointerUp={() => setPhotoDragStart(null)}
+                                        onPointerCancel={() => setPhotoDragStart(null)}
+                                        className="relative mx-auto h-[min(72vw,420px)] w-[min(72vw,420px)] cursor-grab overflow-hidden rounded-[1.25rem] border border-[#ead8cc] bg-[#2a211c] shadow-inner outline-none ring-offset-4 ring-offset-[#fffaf3] focus:ring-2 focus:ring-[#f0aa0b] active:cursor-grabbing"
+                                    >
+                                        <div className="absolute inset-0 opacity-60 blur-[1px]">
+                                            {photoDraftUrl && (
+                                                <img
+                                                    src={photoDraftUrl}
+                                                    alt=""
+                                                    className="h-full w-full object-cover"
+                                                    style={{
+                                                        transform: `translate(${photoOffsetX}px, ${photoOffsetY}px) rotate(${photoRotation}deg) scale(${photoZoom})`,
+                                                        transformOrigin: 'center',
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
+                                        <div className="absolute inset-0 bg-[#171412]/45" />
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="relative h-[78%] w-[78%] overflow-hidden rounded-full bg-[#720101] shadow-[0_0_0_999px_rgba(23,20,18,0.42)] ring-4 ring-[#f0aa0b]/70">
+                                                {photoDraftUrl && (
+                                                    <img
+                                                        ref={cropImageRef}
+                                                        src={photoDraftUrl}
+                                                        alt="Profile photo preview"
+                                                        className="h-full w-full object-cover"
+                                                        style={{
+                                                            transform: `translate(${photoOffsetX}px, ${photoOffsetY}px) rotate(${photoRotation}deg) scale(${photoZoom})`,
+                                                            transformOrigin: 'center',
+                                                        }}
+                                                    />
+                                                )}
+                                            </div>
+                                        </div>
+                                        {showPhotoHint && (
+                                            <div className="absolute left-1/2 top-[26%] flex max-w-[260px] -translate-x-1/2 items-center gap-2 rounded-xl bg-[#171412]/90 px-4 py-3 text-sm font-black text-white shadow-lg transition-opacity">
+                                                <Grip className="h-4 w-4 shrink-0 text-[#f0aa0b]" />
+                                                Drag or use arrow keys to reposition image
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="mx-auto flex max-w-md items-center gap-3">
+                                        <span className="text-2xl text-slate-400">-</span>
+                                        <input type="range" min="1" max="2.6" step="0.05" value={photoZoom} onChange={(e) => setPhotoZoom(Number(e.target.value))} className="w-full accent-[#720101]" aria-label="Zoom profile picture" />
+                                        <span className="text-2xl font-bold text-[#720101]">+</span>
+                                    </div>
+                                    <div className="flex flex-wrap justify-center gap-3">
+                                        <button type="button" onClick={resetPhotoEditor} className="inline-flex items-center gap-2 rounded-xl border border-[#ead8cc] bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
+                                            <Crop className="h-4 w-4" />
+                                            Reset crop
+                                        </button>
+                                        <button type="button" onClick={() => setPhotoRotation((value) => (value + 90) % 360)} className="inline-flex items-center gap-2 rounded-xl border border-[#ead8cc] bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
+                                            <RotateCcw className="h-4 w-4" />
+                                            Rotate
+                                        </button>
+                                        <button type="button" onClick={chooseAvatar} className="inline-flex items-center gap-2 rounded-xl border border-[#ead8cc] bg-white px-4 py-2.5 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">
+                                            <Upload className="h-4 w-4" />
+                                            Change file
+                                        </button>
+                                    </div>
+                                    <p className="mx-auto flex max-w-md items-center justify-center gap-2 rounded-2xl border border-[#ead8cc] bg-white px-4 py-3 text-center text-sm font-semibold text-slate-500">
+                                        <Clock className="h-4 w-4 text-[#9f6500]" />
+                                        Your profile picture is visible to staff handling your bookings.
+                                    </p>
+                                </div>
+                                <div className="flex justify-end gap-3 border-t border-[#ead8cc] bg-white p-4">
+                                    <button type="button" onClick={() => setPhotoModalOpen(false)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-600 hover:bg-slate-50">
+                                        Cancel
+                                    </button>
+                                    <div className="flex gap-3">
+                                        <button type="button" onClick={saveEditedAvatar} disabled={processing} className="rounded-xl bg-[#720101] px-7 py-3 text-sm font-black text-white hover:bg-[#5a0101] disabled:opacity-60">
+                                            {processing ? 'Saving...' : 'Save photo'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {pendingNotificationToggle && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm">
+                            <div className="w-full max-w-md rounded-2xl border border-[#ead8cc] bg-white p-6 shadow-2xl">
+                                <div className="flex items-start gap-4">
+                                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#fff1c2] text-[#9f6500]">
+                                        <Bell className="h-5 w-5" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black uppercase tracking-[0.2em] text-[#9f6500]">Important alert</p>
+                                        <h3 className="mt-1 text-xl font-black text-slate-950">Turn off {notificationLabels[pendingNotificationToggle]}?</h3>
+                                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                                            This alert helps you catch booking, payment, message, or announcement updates. You can turn it back on anytime.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="mt-6 flex justify-end gap-3">
+                                    <button type="button" onClick={() => setPendingNotificationToggle(null)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-600 hover:bg-slate-50">
+                                        Keep on
+                                    </button>
+                                    <button type="button" onClick={confirmNotificationOff} disabled={processing} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white hover:bg-[#5a0101] disabled:opacity-60">
+                                        Turn off
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {isDirty && editing && (
                         <div className="fixed bottom-5 left-1/2 z-30 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-[#ead8cc] bg-white/95 px-5 py-4 shadow-2xl backdrop-blur">
                             <p className="text-center text-sm font-black text-slate-700">You have unsaved profile changes.</p>
@@ -609,5 +1096,7 @@ const ProfileEdit = () => {
         </DefaultLayout>
     );
 };
+
+ProfileEdit.layout = (page) => page;
 
 export default ProfileEdit;

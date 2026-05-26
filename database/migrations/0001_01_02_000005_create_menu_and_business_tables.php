@@ -26,7 +26,7 @@ return new class extends Migration
             Schema::create('packages', function (Blueprint $table) {
                 $table->id();
                 $table->string('name');
-                $table->enum('type', ['wedding', 'corporate', 'social', 'other']);
+                $table->string('type');
                 $table->integer('base_price_per_head');
                 $table->integer('minimum_pax')->default(50);
                 $table->text('description')->nullable();

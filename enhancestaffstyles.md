@@ -1051,4 +1051,3 @@ The redesign is successful when:
 - Modals explain the next step and consequences.
 - The visual style clearly matches Eloquente public pages and booking wizard.
 - The UI feels premium, calm, and operational instead of demo-like.
-

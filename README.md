@@ -196,7 +196,31 @@ php artisan key:generate
 php artisan migrate --seed
 ```
 
-This creates all database tables and populates them with default data (users, menu items, packages, etc.).
+This creates all database tables and populates them with default data.
+
+Required seed data includes:
+- default user accounts
+- event types
+- menu items
+- packages
+- business rules
+
+Because this is a local first-time setup and `APP_ENV=local`, the default seeder may also load local demo analytics records so dashboards have sample bookings, payments, and clients to display.
+
+If you only need required baseline data on a production or staging server, keep `APP_ENV` set to `production` or `staging` and run:
+
+```powershell
+php artisan migrate --force
+php artisan db:seed --force
+```
+
+Do not run this command on production or staging:
+
+```powershell
+php artisan db:seed --class=AnalyticsDemoSeeder
+```
+
+That seeder is for local demo analytics only.
 
 ### Step 8: Set Up the ngrok Auth Token (First Time Only)
 
@@ -463,7 +487,9 @@ This re-syncs the webhook and updates the secret automatically.
 | One-time | `npm install` | Install JS packages |
 | One-time | `Copy-Item .env.example .env` | Create environment file |
 | One-time | `php artisan key:generate` | Generate app encryption key |
-| One-time | `php artisan migrate --seed` | Create tables + seed data |
+| One-time local setup | `php artisan migrate --seed` | Create tables + required local seed data; local demo analytics may also be seeded when `APP_ENV=local` |
+| Production/staging setup | `php artisan migrate --force` then `php artisan db:seed --force` | Create tables and required baseline data while skipping demo analytics |
+| Local demo only | `php artisan db:seed --class=AnalyticsDemoSeeder` | Refresh local analytics demo clients, bookings, payments, and generated demo menu rows |
 | One-time | `Invoke-WebRequest -Uri "https://curl.se/ca/cacert.pem" -OutFile "storage\app\cacert.pem"` | Download SSL certificates |
 | One-time | `ngrok config add-authtoken YOUR_TOKEN` | Authenticate ngrok |
 | Daily | `.\composer.bat run dev` | Start all services |

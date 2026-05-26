@@ -12,7 +12,6 @@ import EventSurcharges from '../../Components/client/EventSurcharges';
 import FoodTastingStep from '../../Components/client/FoodTastingStep';
 import BlueprintPanel from '../../Components/client/BlueprintPanel';
 import Modal from '../../Components/common/Modal';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import { getCustomerSafeValidationMessage } from '../../utils/dashboardUtils';
 
@@ -511,8 +510,6 @@ const BookingWizard = () => {
                     onToggle={() => setSummaryCollapsed(prev => !prev)}
                 />
             </div>
-
-            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

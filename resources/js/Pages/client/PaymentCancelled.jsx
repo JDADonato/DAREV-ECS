@@ -100,6 +100,4 @@ const PaymentCancelled = () => {
     );
 };
 
-PaymentCancelled.layout = (page) => page;
-
 export default PaymentCancelled;

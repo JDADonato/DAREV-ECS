@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Mail\VerifyEmailOTP;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -34,6 +36,7 @@ class ProfileController extends Controller
             'profile_preferences.planning_notes' => ['nullable', 'string', 'max:1000'],
             'current_password' => ['nullable', 'required_with:new_password', 'string'],
             'new_password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            'password_verification_code' => ['nullable', 'string', 'size:6'],
             'avatar' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
             'remove_avatar' => ['nullable', 'boolean'],
         ]);
@@ -44,8 +47,29 @@ class ProfileController extends Controller
             if (!Hash::check($request->current_password, $user->password)) {
                 return back()->withErrors(['current_password' => 'The provided password does not match your current password.']);
             }
+
+            $sessionCodeHash = $request->session()->get('password_change_code_hash');
+            $sessionCodeEmail = $request->session()->get('password_change_code_email');
+            $sessionCodeExpiresAt = $request->session()->get('password_change_code_expires_at');
+
+            if (
+                !$sessionCodeHash ||
+                !$sessionCodeEmail ||
+                !$sessionCodeExpiresAt ||
+                $sessionCodeEmail !== $user->email ||
+                now()->greaterThan($sessionCodeExpiresAt) ||
+                !Hash::check($request->input('password_verification_code'), $sessionCodeHash)
+            ) {
+                return back()->withErrors(['password_verification_code' => 'Enter the valid verification code sent to your email.']);
+            }
+
             $user->password = $request->new_password;
             $changedFields[] = 'password';
+            $request->session()->forget([
+                'password_change_code_hash',
+                'password_change_code_email',
+                'password_change_code_expires_at',
+            ]);
         }
 
         if ($request->boolean('remove_avatar') && $user->avatar_path) {
@@ -81,12 +105,9 @@ class ProfileController extends Controller
             $user->otp_code = $otp;
             $user->otp_expires_at = now()->addMinutes(15);
             try {
-                \Illuminate\Support\Facades\Mail::to($user->email)->send(new \App\Mail\VerifyEmailOTP($otp));
-                error_log("\n--- NEW EMAIL OTP FOR {$user->email} IS: {$otp} ---\n");
-                \Illuminate\Support\Facades\Log::info("OTP Verification code for new email {$user->email}: {$otp}");
+                Mail::to($user->email)->send(new VerifyEmailOTP($otp));
             } catch (\Exception $e) {
-                error_log("\n--- FAILED TO SEND NEW EMAIL OTP TO {$user->email}. OTP IS: {$otp} ---\n" . $e->getMessage());
-                \Illuminate\Support\Facades\Log::error("Failed to send OTP email: " . $e->getMessage());
+                report($e);
             }
             
             $message = 'Profile updated! Please verify your new email address.';
@@ -106,6 +127,48 @@ class ProfileController extends Controller
         $this->recordProfileAudit($request, array_values(array_unique($changedFields)));
 
         return back()->with('message', $message);
+    }
+
+    public function sendPasswordCode(Request $request)
+    {
+        $user = $request->user();
+        $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $expiresAt = now()->addMinutes(10);
+
+        $request->session()->put([
+            'password_change_code_hash' => Hash::make($otp),
+            'password_change_code_email' => $user->email,
+            'password_change_code_expires_at' => $expiresAt,
+        ]);
+
+        try {
+            Mail::to($user->email)->sendNow(new VerifyEmailOTP($otp, 'password change', 10));
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'We could not send the verification code right now. Please try again.',
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Verification code sent to your email.',
+            'expires_at' => $expiresAt->toIso8601String(),
+            'expires_in_seconds' => now()->diffInSeconds($expiresAt),
+        ]);
+    }
+
+    public function avatar(Request $request)
+    {
+        $path = $request->user()?->avatar_path;
+
+        abort_unless($path && Storage::disk('public')->exists($path), 404);
+
+        $absolutePath = Storage::disk('public')->path($path);
+
+        return response()->file($absolutePath, [
+            'Cache-Control' => 'private, max-age=300',
+        ]);
     }
 
     public function activity(Request $request)

@@ -10,6 +10,7 @@ use App\Mail\BookingContinuationReminder;
 use App\Notifications\NewBookingNotification;
 use App\Services\BookingValidationService;
 use App\Services\CalendarAvailabilityService;
+use App\Services\PaymentEventService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -622,6 +623,7 @@ class BookingController extends Controller
 
         $request->validate([
             'booking_id'     => 'required|integer',
+            'payment_id'     => 'nullable|integer',
             'payment_method' => 'nullable|string',
         ]);
 
@@ -633,8 +635,32 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking not found.'], 404);
         }
 
+        $payment = null;
+        if ($request->filled('payment_id')) {
+            $payment = Payment::where('id', $request->integer('payment_id'))
+                ->where('booking_id', $booking->id)
+                ->first();
+        }
+
+        PaymentEventService::record(
+            'manual_payment_blocked',
+            'customer',
+            $payment,
+            [
+                'booking_id' => $booking->id,
+                'payment_id' => $request->input('payment_id'),
+                'payment_method' => $request->input('payment_method'),
+                'amount' => $request->input('amount'),
+                'reference_number_provided' => $request->filled('reference_number'),
+                'reason' => 'legacy_manual_payment_disabled',
+            ],
+            null,
+            null,
+            $booking->id
+        );
+
         return response()->json([
-            'error' => 'Manual payment confirmation is no longer available. Please use the secure checkout link or contact Accounting if you need help with a payment.',
+            'error' => 'Manual payment confirmation is retired. Please use Secure Checkout from your dashboard or contact Accounting so a staff member can review any manual payment proof.',
         ], 410);
     }
 

@@ -4,7 +4,6 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import { useToast } from '../../context/ToastContext';
 import UserDropdown from '../../Components/common/UserDropdown';
 import NotificationBell from '../../Components/common/NotificationBell';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ConfirmModal from '../../Components/common/ConfirmModal';
@@ -931,8 +930,6 @@ const MenuGallery = () => {
                     <svg className="w-5 h-5 text-red-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
                 </button>
             )}
-            {/* Chat Bubble */}
-            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

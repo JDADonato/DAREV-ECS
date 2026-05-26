@@ -1,7 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { router } from '@inertiajs/react';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ConfirmModal from '../../Components/common/ConfirmModal';
@@ -2313,8 +2312,6 @@ const ClientDashboard = () => {
                     </div>
                 </div>
             )}
-
-            {user && <DeferredChatBubble user={user} />}
 
             {receiptModal.isOpen && (
                 <Suspense fallback={null}>

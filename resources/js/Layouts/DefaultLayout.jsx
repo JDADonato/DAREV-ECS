@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
+import { usePage } from '@inertiajs/react';
 import { ToastProvider } from '../context/ToastContext';
 import FlashToast from '../Components/common/FlashToast';
 import OTPModal from '../Components/auth/OTPModal';
+import DeferredChatBubble from '../Components/common/DeferredChatBubble';
 
 /**
  * DefaultLayout — wraps every page so that FlashToast (which
@@ -10,6 +12,10 @@ import OTPModal from '../Components/auth/OTPModal';
  * Handles scroll position retention across reloads.
  */
 const DefaultLayout = ({ children }) => {
+    const { auth } = usePage().props;
+    const user = auth?.user;
+    const shouldShowChat = user?.role === 'Client';
+
     // Scroll position retention
     useEffect(() => {
         const SCROLL_KEY = 'ecs_scroll_pos';
@@ -49,6 +55,7 @@ const DefaultLayout = ({ children }) => {
             {children}
             <FlashToast />
             <OTPModal />
+            {shouldShowChat && <DeferredChatBubble user={user} />}
         </ToastProvider>
     );
 };

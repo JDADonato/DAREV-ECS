@@ -20,23 +20,24 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Seed default users
+        // Required baseline data: safe for local, staging, and production.
         $this->seedDefaultUsers();
 
-        // Seed event types
         $this->seedEventTypes();
 
-        // Seed menu items (dishes)
         $this->seedMenuItems();
 
-        // Seed packages
         $this->seedPackages();
 
-        // Seed business rules
         $this->seedBusinessRules();
 
-        // Seed realistic operational data for analytics and dashboards
-        $this->call(AnalyticsDemoSeeder::class);
+        if ($this->shouldSeedDemoData()) {
+            // Local-only demo analytics:
+            // php artisan db:seed --class=AnalyticsDemoSeeder
+            $this->call(AnalyticsDemoSeeder::class);
+        } else {
+            $this->command->info('Skipped analytics demo data outside APP_ENV=local.');
+        }
 
         $this->command->info('✅ Database seeded successfully!');
     }
@@ -61,6 +62,11 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->command->info('Seeded 4 default users');
+    }
+
+    private function shouldSeedDemoData(): bool
+    {
+        return app()->environment('local');
     }
 
     private function seedEventTypes(): void
@@ -364,6 +370,11 @@ class DatabaseSeeder extends Seeder
 
     private function seedOperationalDemoData(): void
     {
+        if (!$this->shouldSeedDemoData()) {
+            $this->command->info('Skipped operational demo bookings outside APP_ENV=local.');
+            return;
+        }
+
         if (Booking::where('client_email', 'like', '%@demo.eloquente.test')->exists()) {
             $this->command->info('Operational demo bookings already exist');
             return;
