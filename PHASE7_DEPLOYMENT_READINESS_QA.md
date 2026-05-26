@@ -38,7 +38,7 @@ php artisan optimize:clear
 
 - `.env.example` now uses production-oriented placeholders for secure cookies, public storage, SMTP, HTTPS Reverb, PostgreSQL SSL, and PayMongo.
 - `deploymentchecklist.md` was updated to reflect completed Phases 1-6 work and the current automated test coverage.
-- The Vite large-chunk warning remains a performance warning, not a deployment blocker.
+- The Vite build is split into framework, charting, UI, HTTP, and realtime vendor chunks; the production build now passes without the previous large-chunk warning.
 
 ## Still Requires Staging Or Production-Like Verification
 

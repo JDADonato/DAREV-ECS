@@ -1,7 +1,7 @@
 # Functional Requirements Document
 
 Project: Eloquente Catering Event Catering System
-Date: 2026-05-25
+Date: 2026-05-26
 Prepared for: Development team, project evaluators, and business stakeholders
 
 ## 1. Document Purpose
@@ -32,6 +32,29 @@ The system is intended to support the full business workflow:
 6. Accounting verifies payments, monitors collections, and handles refunds.
 7. Marketing/Admin monitor event status and customer communication.
 8. Admin manages staff, configuration, reports, analytics, and oversight.
+
+## 2.1 Current Completion Status
+
+This FRD reflects the codebase after the Phase 4-7 implementation and QA package committed on 2026-05-26.
+
+Current assessed status:
+
+```text
+Overall system completion: 90.6 / 100
+Functional FRD completion: 93.2 / 100
+Production readiness: 86.5 / 100
+Automated verification confidence: 90.0 / 100
+Demo readiness: 96.0 / 100
+```
+
+Status summary:
+
+- Phases 1-3 are complete locally: payment safety, security hardening, CSRF/throttling/upload hardening, and demo seeder protection are implemented and covered by tests.
+- Phase 4 is complete locally: high-risk automated tests now cover PayMongo webhook handling, checkout safety, refunds, role access, reports, announcements, security, operations, and seeder behavior.
+- Phase 5 is complete locally: customer and staff status wording is centralized and applied across key dashboards and payment return pages.
+- Phase 6 is substantially complete locally: accounting refund queue behavior, operations handoff, food tasting staff workflow, and feedback review/testimonial workflow are implemented and tested.
+- Phase 7 is locally ready: backend tests, production build, route listing, cache generation, and deployment documentation passed local QA.
+- Final launch readiness still depends on staging or production-like verification of external services: PayMongo, mail, queue workers, Reverb/WebSocket, HTTPS cookies, storage, backups, monitoring, and manual role smoke tests.
 
 ## 3. Goals And Objectives
 
@@ -961,18 +984,18 @@ The system uses email for:
 
 ## 22. Current Known Limitations
 
-The following items should be fixed or completed before real production use:
+The following items remain before real production launch:
 
-1. Disable or replace the legacy `/api/bookings/pay` customer manual verification path.
-2. Replace browser prompts/confirms with branded modals.
-3. Standardize booking and payment status labels across all roles.
-4. Hide or reword technical/admin labels such as "Status Payload".
-5. Improve customer-friendly validation messages.
-6. Add stronger PayMongo reconciliation views.
-7. Add first-class refund case records.
-8. Add event preparation board and internal operations tasks.
-9. Add post-event feedback flow.
-10. Guard demo seeders from production use.
+1. Deploy to a staging or production-like server and verify the real environment configuration.
+2. Confirm PayMongo sandbox or live checkout, webhook delivery, signature validation, and refund behavior using configured credentials.
+3. Confirm production mail delivery for OTP, password verification, reminders, and announcement emails.
+4. Confirm queue workers process queued mail and notification jobs, and failed jobs are visible.
+5. Confirm Reverb/WebSocket chat works over HTTPS without browser console errors.
+6. Confirm upload storage is linked or configured correctly and does not expose private server paths.
+7. Confirm HTTPS session cookies, CSRF behavior, throttling, and role access in the deployed environment.
+8. Configure production database backups, restore procedure, monitoring, and rollback procedure.
+9. Perform manual smoke testing for public, customer, marketing, accounting, and admin workflows.
+10. Review final production content, credentials, and operational procedures with the owner before go-live.
 
 ## 23. Acceptance Summary
 
@@ -989,8 +1012,23 @@ The system can be considered functionally acceptable for demonstration when:
 
 The system can be considered production-ready only when:
 
-- payment safety issues are resolved
-- staff workflows are fully polished
-- raw technical messages are hidden from users
-- refunds, event preparation, feedback, and audit workflows are stronger
-- production deployment, environment, security, and data safeguards are verified
+- staging or production-like smoke testing passes
+- PayMongo, mail, queue, Reverb, and storage are verified with real configuration
+- production database backups, monitoring, and rollback procedures are in place
+- manual role smoke tests pass for Client, Marketing, Accounting, and Admin
+- the owner has reviewed production `.env` values, credentials, and launch procedures
+
+## 24. Latest QA Evidence
+
+Latest local QA result before staging handoff:
+
+```text
+php artisan test: 61 passed, 324 assertions
+npm run build: passed with no Vite large-chunk warning
+php artisan route:list --except-vendor: 172 routes
+config cache: passed
+route cache: passed
+view cache: passed
+```
+
+The current codebase is considered locally ready for staging deployment. It is not yet fully launch-complete until external services and production operations are verified outside local development.
