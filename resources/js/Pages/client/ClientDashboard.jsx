@@ -1236,24 +1236,61 @@ const ClientDashboard = () => {
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-3 mb-2">
                                                 {data.bookings.length > 1 && (
-                                                    <label className="group relative inline-flex max-w-full items-center">
-                                                        <span className="sr-only">Select event</span>
-                                                        <select
-                                                            aria-label="Select event"
-                                                            value={activeBooking.id}
-                                                            onChange={(event) => setActiveBookingId(Number(event.target.value))}
-                                                            className="max-w-full appearance-none rounded-2xl border border-[#720101]/15 bg-[#faf7f2] py-2 pl-4 pr-11 font-display text-xl font-bold text-[#1a1a1a] outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10 sm:text-2xl"
+                                                    <div className="relative max-w-full">
+                                                        <button
+                                                            type="button"
+                                                            aria-haspopup="listbox"
+                                                            aria-expanded={eventPickerOpen}
+                                                            onClick={() => setEventPickerOpen(open => !open)}
+                                                            onBlur={() => setTimeout(() => setEventPickerOpen(false), 140)}
+                                                            className="group inline-flex max-w-full items-center gap-3 rounded-2xl border border-transparent bg-transparent px-0 py-2 pr-2 text-left transition hover:border-[#720101]/20 hover:px-3 focus:border-[#720101]/30 focus:px-3 focus:outline-none focus:ring-4 focus:ring-[#720101]/10"
                                                         >
-                                                            {data.bookings.map((booking) => (
-                                                                <option key={booking.id} value={booking.id}>
-                                                                    #{booking.id} - {eventDisplayName(booking)}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        <svg className="pointer-events-none absolute right-4 h-5 w-5 text-[#720101] transition group-focus-within:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                                                        </svg>
-                                                    </label>
+                                                            <span className="min-w-0 truncate font-display text-3xl font-bold leading-tight text-[#1a1a1a]">
+                                                                {eventDisplayName(activeBooking)}
+                                                            </span>
+                                                            <span className="hidden shrink-0 rounded-full border border-[#720101]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-[#720101] sm:inline-flex">
+                                                                #{activeBooking.id}
+                                                            </span>
+                                                            <svg className={`h-5 w-5 shrink-0 text-[#720101] transition ${eventPickerOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                                                            </svg>
+                                                        </button>
+
+                                                        {eventPickerOpen && (
+                                                            <div className="absolute left-0 top-full z-30 mt-3 w-[min(28rem,calc(100vw-3rem))] overflow-hidden rounded-3xl border border-[#720101]/10 bg-white shadow-2xl shadow-[#720101]/10" role="listbox">
+                                                                <div className="border-b border-[#f0aa0b]/20 bg-[#fffaf3] px-4 py-3">
+                                                                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#9f6500]">Select event</p>
+                                                                </div>
+                                                                <div className="max-h-72 overflow-y-auto p-2">
+                                                                    {data.bookings.map((booking) => {
+                                                                        const isSelected = booking.id === activeBooking.id;
+                                                                        return (
+                                                                            <button
+                                                                                key={booking.id}
+                                                                                type="button"
+                                                                                role="option"
+                                                                                aria-selected={isSelected}
+                                                                                onMouseDown={(event) => event.preventDefault()}
+                                                                                onClick={() => {
+                                                                                    setActiveBookingId(booking.id);
+                                                                                    setEventPickerOpen(false);
+                                                                                }}
+                                                                                className={`w-full rounded-2xl px-4 py-3 text-left transition ${isSelected ? 'bg-[#720101] text-white' : 'text-[#1a1a1a] hover:bg-[#faf7f2]'}`}
+                                                                            >
+                                                                                <div className="flex items-center justify-between gap-4">
+                                                                                    <p className="min-w-0 truncate font-display text-lg font-bold">{eventDisplayName(booking)}</p>
+                                                                                    <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-white/75' : 'text-[#720101]'}`}>#{booking.id}</span>
+                                                                                </div>
+                                                                                <p className={`mt-1 text-xs font-semibold ${isSelected ? 'text-white/70' : 'text-gray-500'}`}>
+                                                                                    {formatEventDate(booking.event_date, { month: 'long', day: 'numeric', year: 'numeric' })} - {booking.pax} pax
+                                                                                </p>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 )}
                                                 {data.bookings.length <= 1 && (
                                                     <h2 className="text-2xl font-display font-bold text-[#1a1a1a]">{eventDisplayName(activeBooking)}</h2>
