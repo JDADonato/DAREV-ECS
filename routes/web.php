@@ -197,6 +197,10 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
+    Route::get('/api/marketing/food-tastings', [FoodTastingController::class, 'staffIndex']);
+    Route::patch('/api/marketing/food-tastings/{tasting}', [FoodTastingController::class, 'staffUpdate']);
+    Route::get('/api/marketing/feedback-responses', [FeedbackController::class, 'staffIndex']);
+    Route::patch('/api/marketing/feedback-responses/{response}', [FeedbackController::class, 'staffUpdate']);
     Route::get('/api/operations/preparation-board', [OperationsController::class, 'preparationBoard']);
     Route::patch('/api/operations/preparation-tasks/{task}', [OperationsController::class, 'updatePreparationTask']);
     Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);

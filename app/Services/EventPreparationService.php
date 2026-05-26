@@ -20,6 +20,10 @@ class EventPreparationService
             ['department' => 'Operations', 'label' => 'Confirm venue access'],
             ['department' => 'Accounting', 'label' => 'Confirm payment clearance'],
             ['department' => 'Operations', 'label' => 'Prepare kitchen/service sheet'],
+            ['department' => 'Operations', 'label' => 'Assign service crew'],
+            ['department' => 'Operations', 'label' => 'Confirm equipment checklist'],
+            ['department' => 'Operations', 'label' => 'Confirm transport plan'],
+            ['department' => 'Operations', 'label' => 'Confirm setup layout'],
             ['department' => 'Marketing', 'label' => 'Confirm tasting outcome if applicable'],
         ];
 

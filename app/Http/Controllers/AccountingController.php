@@ -562,20 +562,34 @@ class AccountingController extends Controller
      */
     public function getRefundQueue()
     {
-        $items = DB::table('bookings as b')
-            ->join('payments as p', 'b.id', '=', 'p.booking_id')
-            ->where('b.status', 'Cancelled')
-            ->whereIn('p.status', ['Verified', 'Paid'])
-            ->select(
-                'b.id as booking_id',
-                'b.client_full_name',
-                'b.client_email',
-                'b.event_date',
-                'b.total_cost',
-                DB::raw('SUM(p.amount) as total_paid')
-            )
-            ->groupBy('b.id', 'b.client_full_name', 'b.client_email', 'b.event_date', 'b.total_cost')
-            ->get();
+        $items = Booking::query()
+            ->with([
+                'payments' => fn ($query) => $query->whereIn('status', ['Verified', 'Paid']),
+                'refundCases:id,booking_id,status',
+            ])
+            ->where('status', 'Cancelled')
+            ->whereHas('payments', fn ($query) => $query->whereIn('status', ['Verified', 'Paid']))
+            ->get()
+            ->map(function (Booking $booking) {
+                $refundCases = $booking->refundCases;
+
+                return [
+                    'booking_id' => $booking->id,
+                    'client_full_name' => $booking->client_full_name,
+                    'client_email' => $booking->client_email,
+                    'event_date' => $booking->event_date,
+                    'total_cost' => $booking->total_cost,
+                    'total_paid' => $booking->payments->sum(fn (Payment $payment) => (float) $payment->amount),
+                    'refund_case_count' => $refundCases->count(),
+                    'refund_status' => match (true) {
+                        $refundCases->contains(fn (RefundCase $case) => in_array($case->status, ['Failed', 'Manual Review'], true)) => 'Manual Review',
+                        $refundCases->contains(fn (RefundCase $case) => in_array($case->status, ['Processing', 'Approved', 'Requested'], true)) => 'In Progress',
+                        $refundCases->isNotEmpty() => 'Reviewed',
+                        default => 'Needs Review',
+                    },
+                ];
+            })
+            ->values();
 
         return response()->json($items);
     }

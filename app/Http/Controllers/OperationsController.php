@@ -72,6 +72,7 @@ class OperationsController extends Controller
                     'percent' => $taskTotal > 0 ? (int) round(($completedTasks / $taskTotal) * 100) : 0,
                 ],
                 'attention_flags' => $this->attentionFlags($readiness),
+                'event_sheet' => $this->eventSheet($booking, $readiness),
             ];
         })->values();
 
@@ -148,5 +149,20 @@ class OperationsController extends Controller
             ->map(fn ($key) => ['key' => $key, 'label' => $labels[$key] ?? $key])
             ->values()
             ->all();
+    }
+
+    private function eventSheet(Booking $booking, array $readiness): array
+    {
+        return [
+            'booking_ref' => str_pad((string) $booking->id, 5, '0', STR_PAD_LEFT),
+            'client' => $booking->client_full_name ?: $booking->user?->full_name ?: $booking->user?->username,
+            'event' => $booking->event_name ?: $booking->event_type,
+            'schedule' => trim(($booking->event_date?->toDateString() ?? 'Date TBD') . ' ' . ($booking->event_time ?: 'Time TBD')),
+            'headcount' => (int) $booking->pax,
+            'venue' => trim(collect([$booking->venue_address_line, $booking->venue_city])->filter()->join(', ')) ?: 'Venue TBD',
+            'menu_ready' => $readiness['menu'] ?? false,
+            'payment_ready' => $readiness['payment'] ?? false,
+            'operations_notes' => $booking->special_instructions,
+        ];
     }
 }

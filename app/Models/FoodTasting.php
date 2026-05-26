@@ -18,12 +18,18 @@ class FoodTasting extends Model
         'preferred_time',
         'notes',
         'status',
+        'confirmed_at',
+        'completed_at',
+        'outcome_notes',
+        'handled_by',
     ];
 
     protected function casts(): array
     {
         return [
             'preferred_date' => 'date',
+            'confirmed_at' => 'datetime',
+            'completed_at' => 'datetime',
         ];
     }
 

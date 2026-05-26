@@ -6,7 +6,7 @@ import logoImg from '../../../images/ECS_LOGO.png';
 const PaymentCancelled = () => {
     return (
         <>
-            <Head title="Payment Cancelled" />
+            <Head title="Payment Not Completed" />
             <main className="min-h-screen bg-white text-slate-950">
                 <section className="mx-auto flex min-h-screen max-w-5xl flex-col px-5 py-8 sm:px-8">
                     <header className="flex items-center justify-between">
@@ -30,7 +30,7 @@ const PaymentCancelled = () => {
                                 Payment Not Completed
                             </p>
                             <h1 className="text-3xl font-black tracking-normal text-slate-950 sm:text-5xl">
-                                Payment Cancelled.
+                                Payment Not Completed.
                             </h1>
                             <p className="mx-auto mt-5 max-w-xl text-base font-medium leading-7 text-slate-600">
                                 Your payment was not processed. This can happen if you cancelled the payment,
@@ -52,7 +52,7 @@ const PaymentCancelled = () => {
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                                     <LockKeyhole className="mx-auto mb-3 h-6 w-6 text-amber-500" />
                                     <p className="text-xs font-black uppercase tracking-widest text-slate-500">Status</p>
-                                    <p className="mt-1 text-sm font-bold text-slate-950">Pending</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-950">Payment Due</p>
                                 </div>
                             </div>
 

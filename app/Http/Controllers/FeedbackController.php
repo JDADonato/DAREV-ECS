@@ -78,6 +78,10 @@ class FeedbackController extends Controller
             'comments' => $data['comments'] ?? null,
             'testimonial_permission' => (bool) ($data['testimonial_permission'] ?? false),
             'follow_up_required' => (int) $data['rating'] <= 3,
+            'review_status' => (int) $data['rating'] <= 3 ? 'Needs Follow Up' : 'Open',
+            'testimonial_status' => ((bool) ($data['testimonial_permission'] ?? false) && (int) $data['rating'] >= 4)
+                ? 'Candidate'
+                : 'Not Requested',
         ]);
 
         $feedbackRequest->update([
@@ -89,5 +93,81 @@ class FeedbackController extends Controller
             'message' => 'Thank you for your feedback.',
             'response' => $response,
         ], 201);
+    }
+
+    public function staffIndex(Request $request)
+    {
+        $query = FeedbackResponse::query()
+            ->with([
+                'booking:id,event_date,event_name,event_type,client_full_name,client_email,user_id',
+                'booking.user:id,full_name,username,email',
+            ])
+            ->latest();
+
+        if ($request->boolean('follow_up_only')) {
+            $query->where('follow_up_required', true)
+                ->whereNotIn('review_status', ['Resolved', 'Closed']);
+        }
+
+        if ($request->filled('testimonial_status') && $request->query('testimonial_status') !== 'All') {
+            $query->where('testimonial_status', $request->query('testimonial_status'));
+        }
+
+        return response()->json($query->limit(200)->get()->map(fn (FeedbackResponse $response) => [
+            'id' => $response->id,
+            'booking_id' => $response->booking_id,
+            'client_name' => $response->booking?->client_full_name ?: $response->booking?->user?->full_name ?: $response->booking?->user?->username,
+            'client_email' => $response->booking?->client_email ?: $response->booking?->user?->email,
+            'event_date' => $response->booking?->event_date,
+            'event_name' => $response->booking?->event_name,
+            'event_type' => $response->booking?->event_type,
+            'rating' => $response->rating,
+            'food_rating' => $response->food_rating,
+            'service_rating' => $response->service_rating,
+            'communication_rating' => $response->communication_rating,
+            'value_rating' => $response->value_rating,
+            'comments' => $response->comments,
+            'testimonial_permission' => $response->testimonial_permission,
+            'follow_up_required' => $response->follow_up_required,
+            'review_status' => $response->review_status,
+            'testimonial_status' => $response->testimonial_status,
+            'retention_notes' => $response->retention_notes,
+            'reviewed_by' => $response->reviewed_by,
+            'reviewed_at' => $response->reviewed_at,
+        ]));
+    }
+
+    public function staffUpdate(Request $request, FeedbackResponse $response)
+    {
+        $data = $request->validate([
+            'review_status' => ['nullable', 'in:Open,Needs Follow Up,In Progress,Resolved,Closed'],
+            'testimonial_status' => ['nullable', 'in:Not Requested,Candidate,Approved,Rejected'],
+            'retention_notes' => ['nullable', 'string', 'max:3000'],
+        ]);
+
+        if (($data['testimonial_status'] ?? null) === 'Approved' && (!$response->testimonial_permission || (int) $response->rating < 4)) {
+            return response()->json([
+                'error' => 'Only high-rating feedback with testimonial permission can be approved.',
+            ], 422);
+        }
+
+        $response->fill([
+            'review_status' => $data['review_status'] ?? $response->review_status,
+            'testimonial_status' => $data['testimonial_status'] ?? $response->testimonial_status,
+            'retention_notes' => array_key_exists('retention_notes', $data) ? $data['retention_notes'] : $response->retention_notes,
+            'reviewed_by' => Auth::id(),
+            'reviewed_at' => now(),
+        ]);
+
+        if (in_array($response->review_status, ['Resolved', 'Closed'], true)) {
+            $response->follow_up_required = false;
+        }
+
+        $response->save();
+
+        return response()->json([
+            'message' => 'Feedback review updated.',
+            'response' => $response->fresh(),
+        ]);
     }
 }

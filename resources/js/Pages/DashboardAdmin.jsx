@@ -20,17 +20,13 @@ import {
     normalizeStatus,
     paginate,
 } from '../utils/dashboardUtils';
+import { paymentTypeLabel, staffPaymentStatus } from '../utils/statusLabels';
 
 const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
 const PaymentTermEditorModal = lazy(() => import('../Components/finance/PaymentTermEditorModal'));
 const PreparationBoard = lazy(() => import('../Components/operations/PreparationBoard'));
 
-const paymentLabel = (type) => ({
-    Reservation: 'Reservation Fee',
-    DownPayment: 'Down Payment',
-    Downpayment: 'Down Payment',
-    Final: 'Final Payment',
-}[type] || type || 'Payment');
+const paymentLabel = paymentTypeLabel;
 
 const PACKAGE_CATEGORY_OPTIONS = [
     { value: 'premium', label: 'Weddings & Debuts' },
@@ -4239,7 +4235,7 @@ const DashboardAdmin = () => {
                                                         <td className="px-4 py-3 font-semibold text-gray-900">{paymentLabel(payment.payment_type)}</td>
                                                         <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(payment.amount)}</td>
                                                         <td className="px-4 py-3 text-center text-gray-600">{formatDate(payment.due_date)}</td>
-                                                        <td className="px-4 py-3 text-center text-gray-600">{payment.status}</td>
+                                                        <td className="px-4 py-3 text-center text-gray-600">{staffPaymentStatus(payment.status, payment.due_date).label}</td>
                                                         <td className="px-4 py-3 text-right">
                                                             {payment.status === 'Pending' || payment.status === 'Rejected' ? (
                                                                 <button onClick={() => setEditPaymentModal({ isOpen: true, payment, booking: eventDetailsModal.data })} className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 transition-colors hover:bg-indigo-100">Edit Term</button>

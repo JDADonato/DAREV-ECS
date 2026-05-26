@@ -2,9 +2,11 @@ import React from 'react';
 import { Head, router } from '@inertiajs/react';
 import { ArrowRight, Check, FileCheck2, LockKeyhole, ReceiptText } from 'lucide-react';
 import logoImg from '../../../images/ECS_LOGO.png';
+import { customerPaymentStatus, isSettledPaymentStatus } from '../../utils/statusLabels';
 
 const PaymentSuccess = ({ paymentStatus = 'Pending', syncMessage = 'Payment is still pending PayMongo confirmation.' }) => {
-    const isConfirmed = ['Paid', 'Verified'].includes(paymentStatus);
+    const isConfirmed = isSettledPaymentStatus(paymentStatus);
+    const displayStatus = customerPaymentStatus(paymentStatus);
 
     return (
         <>
@@ -51,7 +53,7 @@ const PaymentSuccess = ({ paymentStatus = 'Pending', syncMessage = 'Payment is s
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                                     <LockKeyhole className="mx-auto mb-3 h-6 w-6 text-[#720101]" />
                                     <p className="text-xs font-black uppercase tracking-widest text-slate-500">Status</p>
-                                    <p className="mt-1 text-sm font-bold text-slate-950">{isConfirmed ? 'Updated' : 'Pending'}</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-950">{displayStatus.label}</p>
                                 </div>
                             </div>
 

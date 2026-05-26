@@ -11,6 +11,7 @@ import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
+import { staffPaymentStatus } from '../utils/statusLabels';
 
 const PAYMENT_TYPE_LABELS = {
     Reservation: { label: 'Reservation Fee', pct: '10%', icon: 'R' },
@@ -201,13 +202,15 @@ const DashboardAccounting = () => {
     };
 
     const getStatusBadge = (status, dueDate) => {
-        var isOverdue = dueDate && new Date(dueDate) < new Date() && status === 'Pending';
-        if (isOverdue) return { cls: 'bg-red-100 text-red-800', text: 'Overdue' };
-        if (status === 'Verified') return { cls: 'bg-green-100 text-green-800', text: 'Paid' };
-        if (status === 'Paid') return { cls: 'bg-emerald-100 text-emerald-800', text: 'Paid (Online)' };
-        if (status === 'Pending') return { cls: 'bg-yellow-100 text-yellow-800', text: 'Pending' };
-        if (status === 'Rejected') return { cls: 'bg-slate-100 text-slate-600', text: 'Rejected' };
-        return { cls: 'bg-slate-100 text-slate-600', text: status };
+        const displayStatus = staffPaymentStatus(status, dueDate);
+        const classes = {
+            success: 'bg-green-100 text-green-800',
+            warning: 'bg-yellow-100 text-yellow-800',
+            danger: 'bg-red-100 text-red-800',
+            neutral: 'bg-slate-100 text-slate-600',
+        };
+
+        return { cls: classes[displayStatus.tone] || classes.neutral, text: displayStatus.label };
     };
 
     // Count both manually-verified and PayMongo-auto-paid payments as "paid"
@@ -768,7 +771,7 @@ const DashboardAccounting = () => {
                                                                                         </div>
                                                                                     ) : isPaidStatus(payment.status) ? (
                                                                                         <div className="flex justify-end items-center gap-3">
-                                                                                            <span className="text-emerald-700 text-xs font-bold">{payment.status === 'Paid' ? 'Paid' : 'Verified'}</span>
+                                                                                            <span className="text-emerald-700 text-xs font-bold">{staffPaymentStatus(payment.status, payment.due_date).label}</span>
                                                                                             <button
                                                                                                 onClick={function (e) { e.stopPropagation(); setReceiptModal({ isOpen: true, payment: payment, booking: booking }); }}
                                                                                                 className="text-[#720101] hover:text-[#4d0101] text-xs font-bold underline flex items-center gap-1"

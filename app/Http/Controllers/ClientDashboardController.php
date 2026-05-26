@@ -97,7 +97,7 @@ class ClientDashboardController extends Controller
         $daysUntilEvent = now()->startOfDay()->diffInDays($eventDate, false);
 
         $totalPaid = (float) $booking->payments
-            ->where('status', 'Verified')
+            ->whereIn('status', ['Verified', 'Paid'])
             ->sum(fn (Payment $payment) => (float) $payment->amount);
         $totalCost = (float) $booking->total_cost;
         $reservationFee = $totalCost * 0.10;

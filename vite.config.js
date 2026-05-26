@@ -19,13 +19,46 @@ export default defineConfig({
         },
     },
     build: {
-        // Phase 3: Vite Chunk Splitting
         rollupOptions: {
             output: {
-                manualChunks: {
-                    inertia: ['@inertiajs/react'],
-                    ui: ['@headlessui/react', 'lucide-react'],
-                }
+                manualChunks(id) {
+                    const normalizedId = id.replace(/\\/g, '/');
+
+                    if (!normalizedId.includes('node_modules')) {
+                        return undefined;
+                    }
+
+                    if (
+                        normalizedId.includes('/react/') ||
+                        normalizedId.includes('/react-dom/') ||
+                        normalizedId.includes('/scheduler/') ||
+                        normalizedId.includes('/@inertiajs/')
+                    ) {
+                        return 'vendor-framework';
+                    }
+
+                    if (normalizedId.includes('/recharts/')) {
+                        return 'vendor-charts';
+                    }
+
+                    if (normalizedId.includes('/d3-') || normalizedId.includes('/victory-vendor/')) {
+                        return 'vendor-dataviz';
+                    }
+
+                    if (normalizedId.includes('/@headlessui/') || normalizedId.includes('/lucide-react/')) {
+                        return 'vendor-ui';
+                    }
+
+                    if (normalizedId.includes('/axios/')) {
+                        return 'vendor-http';
+                    }
+
+                    if (normalizedId.includes('/laravel-echo/') || normalizedId.includes('/pusher-js/')) {
+                        return 'vendor-realtime';
+                    }
+
+                    return undefined;
+                },
             }
         }
     }

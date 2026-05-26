@@ -19,11 +19,17 @@ class FeedbackResponse extends Model
         'comments',
         'testimonial_permission',
         'follow_up_required',
+        'review_status',
+        'testimonial_status',
+        'retention_notes',
+        'reviewed_by',
+        'reviewed_at',
     ];
 
     protected $casts = [
         'testimonial_permission' => 'boolean',
         'follow_up_required' => 'boolean',
+        'reviewed_at' => 'datetime',
     ];
 
     public function request(): BelongsTo

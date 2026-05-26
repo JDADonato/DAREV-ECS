@@ -5,18 +5,12 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ConfirmModal from '../../Components/common/ConfirmModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
+import { customerBookingStatus, customerPaymentStatus, isSettledPaymentStatus, paymentTypeLabel, statusToneClasses } from '../../utils/statusLabels';
 
 const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
 
 const peso = (value) => `PHP ${Number(value || 0).toLocaleString()}`;
-const settledStatuses = ['Paid', 'Verified'];
-const isSettledPaymentStatus = (status) => settledStatuses.includes(status);
-const paymentLabel = (type) => ({
-    Reservation: 'Reservation Fee',
-    DownPayment: 'Down Payment',
-    Downpayment: 'Down Payment',
-    Final: 'Final Payment',
-}[type] || type || 'Payment');
+const paymentLabel = paymentTypeLabel;
 const menuCategories = [
     { id: 'starter', label: 'Starters' },
     { id: 'main', label: 'Main Courses' },
@@ -263,8 +257,8 @@ const HistoryPanel = ({ bookings, onRemove }) => (
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
                                     <h4 className="font-display text-lg font-bold text-[#1a1a1a]">{eventDisplayName(booking)}</h4>
-                                    <span className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest ${String(booking.status).toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-700'}`}>
-                                        {booking.status}
+                                    <span className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest ${statusToneClasses[customerBookingStatus(booking.status).tone]?.light || statusToneClasses.neutral.light}`}>
+                                        {customerBookingStatus(booking.status).label}
                                     </span>
                                 </div>
                                 <p className="text-sm font-semibold text-gray-600">
@@ -1327,8 +1321,8 @@ const ClientDashboard = () => {
                                                 {data.bookings.length <= 1 && (
                                                     <h2 className="text-2xl font-display font-bold text-[#1a1a1a]">{eventDisplayName(activeBooking)}</h2>
                                                 )}
-                                                <span className={`px-3 py-1 text-[11px] font-bold rounded-full uppercase tracking-wider ${activeBooking.status === 'Confirmed' ? 'bg-green-100 text-green-700' : activeBooking.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                                    {activeBooking.status}
+                                                <span className={`px-3 py-1 text-[11px] font-bold rounded-full uppercase tracking-wider ${statusToneClasses[customerBookingStatus(activeBooking.status).tone]?.light || statusToneClasses.warning.light}`}>
+                                                    {customerBookingStatus(activeBooking.status).label}
                                                 </span>
                                                 {data.bookings.length <= 1 && (
                                                     <span className="text-xs font-black uppercase tracking-widest text-[#720101]">
@@ -1441,7 +1435,7 @@ const ClientDashboard = () => {
                                                 </div>
                                                 <span className="inline-flex items-center gap-2 rounded-full bg-[#f0aa0b]/15 px-4 py-2 text-xs font-black uppercase tracking-widest text-[#b27a00] border border-[#f0aa0b]/25">
                                                     <span className="h-2 w-2 rounded-full bg-[#f0aa0b] animate-pulse" />
-                                                    Pending Review
+                                                    Being Reviewed
                                                 </span>
                                             </div>
                                         </div>
@@ -2058,7 +2052,8 @@ const ClientDashboard = () => {
                                                             </div>
                                                             <div className="mt-6 grid gap-3">
                                                                 {payments.map((payment) => {
-                                                                    const overdue = !isSettledPayment(payment) && payment.due_date && new Date(payment.due_date) < new Date();
+                                                                    const displayStatus = customerPaymentStatus(payment.status, payment.due_date);
+                                                                    const overdue = displayStatus.label === 'Overdue';
                                                                     return (
                                                                         <div key={payment.id} className={`rounded-2xl border p-4 ${isSettledPayment(payment) ? 'border-green-400/20 bg-green-500/10' : overdue ? 'border-red-400/30 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
                                                                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2069,8 +2064,8 @@ const ClientDashboard = () => {
                                                                                 <div className="text-left sm:text-right">
                                                                                     <p className="text-sm font-bold text-white">{peso(payment.amount)}</p>
                                                                                     <div className="flex flex-col sm:items-end mt-1 gap-1.5">
-                                                                                        <p className={`text-xs font-bold uppercase tracking-widest ${isSettledPayment(payment) ? 'text-green-300' : overdue ? 'text-red-300' : 'text-[#f0aa0b]'}`}>
-                                                                                            {isSettledPayment(payment) ? 'Paid' : overdue ? 'Past due - please contact support' : 'Pending'}
+                                                                                        <p className={`text-xs font-bold uppercase tracking-widest ${statusToneClasses[displayStatus.tone]?.dark || statusToneClasses.warning.dark}`}>
+                                                                                            {displayStatus.label}
                                                                                         </p>
                                                                                         {isSettledPayment(payment) && (
                                                                                             <button
@@ -2167,7 +2162,7 @@ const ClientDashboard = () => {
                                                                     <div className="text-right">
                                                                         <p className="font-bold text-gray-900">PHP {parseFloat(tranche.amount).toLocaleString()}</p>
                                                                         <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${isSettledPayment(tranche) ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
-                                                                            {isSettledPayment(tranche) ? 'Paid' : tranche.status}
+                                                                            {customerPaymentStatus(tranche.status, tranche.due_date).label}
                                                                         </span>
                                                                     </div>
                                                                 </div>

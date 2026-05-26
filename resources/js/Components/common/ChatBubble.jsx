@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
+import { customerBookingStatus } from '../../utils/statusLabels';
 
 /**
  * Phase 2: Client Chat Bubble — WebSocket-powered.
@@ -291,7 +292,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
     const shareBooking = async (booking) => {
         if (sending) return;
         setSending(true);
-        const text = `📋 BOOKING DETAILS\n━━━━━━━━━━━━━━━\n📅 Date: ${booking.event_date}\n⏰ Time: ${booking.event_time || 'TBD'}\n🎉 Event: ${booking.event_type}\n👥 Guests: ${booking.pax} pax\n📍 Venue: ${booking.venue_city || 'TBD'}\n💰 Total: ₱${Number(booking.total_cost || 0).toLocaleString()}\n📌 Status: ${booking.status}\n━━━━━━━━━━━━━━━`;
+        const text = `📋 BOOKING DETAILS\n━━━━━━━━━━━━━━━\n📅 Date: ${booking.event_date}\n⏰ Time: ${booking.event_time || 'TBD'}\n🎉 Event: ${booking.event_type}\n👥 Guests: ${booking.pax} pax\n📍 Venue: ${booking.venue_city || 'TBD'}\n💰 Total: ₱${Number(booking.total_cost || 0).toLocaleString()}\n📌 Status: ${customerBookingStatus(booking.status).label}\n━━━━━━━━━━━━━━━`;
 
         try {
             if (conversation) {

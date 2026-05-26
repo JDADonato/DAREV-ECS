@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Booking;
 use App\Models\EventPreparationTask;
 use App\Models\FeedbackRequest;
+use App\Models\FeedbackResponse;
+use App\Models\FoodTasting;
 use App\Models\User;
 use App\Services\EventPreparationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -23,11 +25,11 @@ class OperationsHandoffTest extends TestCase
             ->putJson("/api/admin/bookings/{$booking->id}/status", ['status' => 'Confirmed'])
             ->assertOk();
 
-        $this->assertSame(6, EventPreparationTask::where('booking_id', $booking->id)->count());
+        $this->assertSame(10, EventPreparationTask::where('booking_id', $booking->id)->count());
 
         EventPreparationService::ensureDefaultTasks($booking->fresh());
 
-        $this->assertSame(6, EventPreparationTask::where('booking_id', $booking->id)->count());
+        $this->assertSame(10, EventPreparationTask::where('booking_id', $booking->id)->count());
     }
 
     public function test_preparation_board_returns_upcoming_approved_bookings(): void
@@ -52,7 +54,8 @@ class OperationsHandoffTest extends TestCase
 
         $response->assertJsonCount(1)
             ->assertJsonPath('0.booking.id', $included->id)
-            ->assertJsonPath('0.task_progress.total', 6);
+            ->assertJsonPath('0.task_progress.total', 10)
+            ->assertJsonPath('0.event_sheet.booking_ref', str_pad((string) $included->id, 5, '0', STR_PAD_LEFT));
     }
 
     public function test_staff_can_complete_and_reopen_preparation_task(): void
@@ -139,6 +142,110 @@ class OperationsHandoffTest extends TestCase
         $this->actingAs($client)
             ->postJson("/api/customer/feedback-requests/{$request->token}/responses", ['rating' => 5])
             ->assertUnprocessable();
+    }
+
+    public function test_marketing_can_manage_food_tasting_queue_and_outcome(): void
+    {
+        $marketing = $this->user('Marketing');
+        $client = $this->user('Client');
+        $tasting = FoodTasting::create([
+            'user_id' => $client->id,
+            'guest_name' => 'Tasting Client',
+            'guest_email' => 'tasting@example.test',
+            'guest_phone' => '09170000000',
+            'preferred_date' => now()->addDays(8)->toDateString(),
+            'preferred_time' => '2:00 PM',
+            'notes' => 'Interested in wedding menu.',
+            'status' => 'Pending',
+        ]);
+
+        $this->actingAs($marketing)
+            ->getJson('/api/marketing/food-tastings')
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $tasting->id,
+                'client_email' => 'tasting@example.test',
+                'status' => 'Pending',
+            ]);
+
+        $this->actingAs($marketing)
+            ->patchJson("/api/marketing/food-tastings/{$tasting->id}", [
+                'status' => 'Completed',
+                'outcome_notes' => 'Client approved the beef and pasta tasting menu.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('tasting.status', 'Completed');
+
+        $tasting->refresh();
+
+        $this->assertSame('Completed', $tasting->status);
+        $this->assertSame('Client approved the beef and pasta tasting menu.', $tasting->outcome_notes);
+        $this->assertSame($marketing->id, $tasting->handled_by);
+        $this->assertNotNull($tasting->completed_at);
+    }
+
+    public function test_marketing_can_review_feedback_follow_up_and_approve_testimonial(): void
+    {
+        $marketing = $this->user('Marketing');
+        $client = $this->user('Client');
+        $booking = $this->booking(['user_id' => $client->id, 'status' => 'Completed']);
+        $request = EventPreparationService::ensureFeedbackRequest($booking);
+
+        $lowRating = FeedbackResponse::create([
+            'feedback_request_id' => $request->id,
+            'booking_id' => $booking->id,
+            'user_id' => $client->id,
+            'rating' => 2,
+            'comments' => 'Please call us.',
+            'testimonial_permission' => false,
+            'follow_up_required' => true,
+            'review_status' => 'Needs Follow Up',
+            'testimonial_status' => 'Not Requested',
+        ]);
+
+        $this->actingAs($marketing)
+            ->getJson('/api/marketing/feedback-responses?follow_up_only=1')
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $lowRating->id,
+                'follow_up_required' => true,
+                'review_status' => 'Needs Follow Up',
+            ]);
+
+        $this->actingAs($marketing)
+            ->patchJson("/api/marketing/feedback-responses/{$lowRating->id}", [
+                'review_status' => 'Resolved',
+                'retention_notes' => 'Called client and offered a recovery tasting.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('response.review_status', 'Resolved')
+            ->assertJsonPath('response.follow_up_required', false);
+
+        $highRating = FeedbackResponse::create([
+            'feedback_request_id' => $request->id,
+            'booking_id' => $booking->id,
+            'user_id' => $client->id,
+            'rating' => 5,
+            'comments' => 'Wonderful service.',
+            'testimonial_permission' => true,
+            'follow_up_required' => false,
+            'review_status' => 'Open',
+            'testimonial_status' => 'Candidate',
+        ]);
+
+        $this->actingAs($marketing)
+            ->patchJson("/api/marketing/feedback-responses/{$highRating->id}", [
+                'testimonial_status' => 'Approved',
+                'review_status' => 'Closed',
+            ])
+            ->assertOk()
+            ->assertJsonPath('response.testimonial_status', 'Approved');
+
+        $this->assertDatabaseHas('feedback_responses', [
+            'id' => $highRating->id,
+            'testimonial_status' => 'Approved',
+            'reviewed_by' => $marketing->id,
+        ]);
     }
 
     private function user(string $role): User
