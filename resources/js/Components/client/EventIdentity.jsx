@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
     const [selected, setSelected] = useState(bookingData.eventType || '');
     const [eventName, setEventName] = useState(bookingData.eventName || '');
     const [eventTypes, setEventTypes] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [attemptedNext, setAttemptedNext] = useState(false);
+    const eventNameRef = useRef(null);
 
     useEffect(() => {
         fetch('/api/event-types?per_page=50')
@@ -33,13 +35,23 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
     };
 
     const handleNext = () => {
-        if (!selected || !eventName.trim()) return;
+        setAttemptedNext(true);
+
+        if (!eventName.trim()) {
+            eventNameRef.current?.focus();
+            return;
+        }
+
+        if (!selected) return;
+
         updateBooking({ eventType: selected, eventName: eventName.trim() });
         onNext(true);
     };
 
     const selectedEventType = eventTypes.find((eventType) => eventType.label === selected);
     const selectedSetups = selectedEventType?.applicable_setups || bookingData.event_applicable_setups || [];
+    const showNameError = attemptedNext && !eventName.trim();
+    const showTypeError = attemptedNext && !selected;
 
     return (
         <div className="booking-step">
@@ -53,6 +65,7 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
 
                     <label htmlFor="eventName" className="booking-field-label">Event name</label>
                     <input
+                        ref={eventNameRef}
                         id="eventName"
                         type="text"
                         required
@@ -62,11 +75,23 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                             updateBooking({ eventName: event.target.value });
                         }}
                         placeholder="e.g. Ana and Miguel's wedding"
-                        className="booking-input"
+                        className={`booking-input ${showNameError ? 'border-red-300 ring-4 ring-red-100' : ''}`}
+                        aria-invalid={showNameError}
+                        aria-describedby={showNameError ? 'eventNameHelp' : undefined}
                     />
+                    {showNameError && (
+                        <p id="eventNameHelp" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                            Please enter an event name before continuing. This is how the booking will appear in your dashboard.
+                        </p>
+                    )}
                 </section>
 
                 <section className="booking-choice-area">
+                    {showTypeError && (
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                            Please choose the event type closest to your celebration.
+                        </div>
+                    )}
                     {loading ? (
                         <div className="booking-empty-state">Loading event types...</div>
                     ) : (
@@ -111,7 +136,7 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                 {onBack ? (
                     <button onClick={onBack} className="booking-secondary-btn">Back</button>
                 ) : <span />}
-                <button onClick={handleNext} disabled={!selected || !eventName.trim()} className="booking-primary-btn">
+                <button onClick={handleNext} className="booking-primary-btn">
                     Continue
                 </button>
             </div>

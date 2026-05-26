@@ -136,17 +136,29 @@ const ProfileEdit = () => {
                 ? '/dashboard/accounting'
                 : '/dashboard/admin';
 
-    const completion = useMemo(() => {
-        const required = [
-            data.full_name,
-            data.username,
-            data.email,
-            data.phone,
-            data.preferred_contact_method,
-            isClient ? data.profile_preferences.default_event_city : true,
+    const readinessItems = useMemo(() => {
+        const items = [
+            { key: 'full_name', label: 'Full name', detail: 'Used on contracts, receipts, and staff follow-ups.', complete: Boolean(data.full_name) },
+            { key: 'username', label: 'Username', detail: 'Keeps your account easy to identify.', complete: Boolean(data.username) },
+            { key: 'email', label: 'Email address', detail: 'Required for booking and payment notices.', complete: Boolean(data.email) },
+            { key: 'phone', label: 'Phone number', detail: 'Helps staff reach you for urgent event updates.', complete: Boolean(data.phone) },
+            { key: 'contact', label: 'Preferred contact', detail: 'Tells the team where you want updates first.', complete: Boolean(data.preferred_contact_method) },
         ];
-        return Math.round((required.filter(Boolean).length / required.length) * 100);
+
+        if (isClient) {
+            items.push({
+                key: 'default_city',
+                label: 'Default event city',
+                detail: 'Helps future inquiries start with better location context.',
+                complete: Boolean(data.profile_preferences.default_event_city),
+            });
+        }
+
+        return items;
     }, [data, isClient]);
+
+    const completion = useMemo(() => Math.round((readinessItems.filter((item) => item.complete).length / readinessItems.length) * 100), [readinessItems]);
+    const missingReadiness = readinessItems.filter((item) => !item.complete);
 
     const avatarPreview = data.avatar ? URL.createObjectURL(data.avatar) : (data.remove_avatar ? null : user.avatar_url);
     const selectedAvatarLabel = data.avatar
@@ -200,24 +212,54 @@ const ProfileEdit = () => {
             <PanelHeader
                 eyebrow="Account overview"
                 title="Profile status"
-                text="A short view of what is ready and what still needs attention."
+                text="A short view of what is ready, what staff can rely on, and what still needs attention."
                 action={<Link href={dashboardHref} className="rounded-xl border border-[#720101]/15 bg-white px-5 py-3 text-sm font-black text-[#720101] hover:bg-[#fff7e8]">Open dashboard</Link>}
             />
-            <div className="grid gap-4 py-6 lg:grid-cols-3">
+            <div className="grid gap-5 py-6 xl:grid-cols-[1.15fr_0.85fr]">
                 <div className="rounded-2xl border border-[#ead8cc] bg-[#fffaf3] p-5">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Readiness</p>
-                    <p className="mt-2 text-3xl font-black text-[#720101]">{completion}%</p>
-                    <p className="mt-1 text-sm font-bold text-slate-500">{completion === 100 ? 'Profile complete' : 'Complete missing details'}</p>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Readiness checklist</p>
+                            <p className="mt-2 text-3xl font-black text-[#720101]">{completion}%</p>
+                        </div>
+                        <p className="text-sm font-bold text-slate-500">{missingReadiness.length === 0 ? 'Every required profile detail is ready.' : `${missingReadiness.length} item${missingReadiness.length === 1 ? '' : 's'} left for 100%.`}</p>
+                    </div>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        {readinessItems.map((item) => (
+                            <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => {
+                                    setActiveTab(item.key === 'default_city' ? 'preferences' : 'personal');
+                                    setEditing(item.key === 'default_city' ? 'preferences' : 'personal');
+                                }}
+                                className={`rounded-2xl border px-4 py-3 text-left transition ${item.complete ? 'border-emerald-200 bg-white text-slate-700' : 'border-[#f5dfad] bg-white text-slate-950 hover:border-[#f0aa0b]'}`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${item.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-[#fff1c2] text-[#9f6500]'}`}>
+                                        {item.complete ? 'OK' : '!'}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="font-black">{item.label}</p>
+                                        <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{item.complete ? 'Complete' : item.detail}</p>
+                                    </div>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                <div className="rounded-2xl border border-[#ead8cc] bg-white p-5">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Email status</p>
-                    <p className="mt-2 text-lg font-black text-slate-950">{verified ? 'Verified' : 'Needs verification'}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-500">{verified ? 'Account notices can reach you.' : 'Verify to keep account recovery reliable.'}</p>
-                </div>
-                <div className="rounded-2xl border border-[#ead8cc] bg-white p-5">
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Preferred contact</p>
-                    <p className="mt-2 text-lg font-black text-slate-950">{contactLabels[user.preferred_contact_method || 'email']}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-500">{user.role || 'Account'} workspace</p>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                    <DetailTile
+                        eyebrow="Email status"
+                        title={verified ? 'Verified' : 'Needs verification'}
+                        text={verified ? 'Account notices can reach you.' : 'Verify to keep account recovery reliable.'}
+                        tone={verified ? 'success' : 'warm'}
+                    />
+                    <DetailTile
+                        eyebrow="Preferred contact"
+                        title={contactLabels[user.preferred_contact_method || 'email']}
+                        text={`${user.role || 'Account'} workspace updates use this preference.`}
+                    />
                 </div>
             </div>
         </>
@@ -490,34 +532,51 @@ const ProfileEdit = () => {
 
                     {flash?.message && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-bold text-emerald-800">{flash.message}</div>}
 
-                    <section className="overflow-hidden rounded-[1.5rem] border border-[#ead8cc] bg-white shadow-sm">
-                        <div className="grid gap-5 bg-[#171412] p-5 text-white lg:grid-cols-[1.4fr_1fr_1fr] lg:items-center">
-                            <div className="flex min-w-0 items-center gap-4">
-                                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-[#720101] ring-4 ring-white/10">
-                                    {user.avatar_url ? <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-2xl font-black">{initial}</div>}
+                    <section className="relative overflow-hidden rounded-[1.75rem] border border-[#ead8cc] bg-[#171412] shadow-xl shadow-black/10">
+                        <div className="pointer-events-none absolute -right-24 -top-28 h-72 w-72 rounded-full bg-[#f0aa0b]/20 blur-3xl" />
+                        <div className="pointer-events-none absolute bottom-0 left-1/3 h-24 w-96 rounded-full bg-[#720101]/35 blur-3xl" />
+                        <div className="relative grid gap-5 p-5 text-white lg:grid-cols-[1.05fr_1.25fr_0.85fr] lg:items-stretch">
+                            <div className="flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-[1.4rem] bg-[#720101] shadow-lg ring-4 ring-white/10">
+                                    {user.avatar_url ? <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-3xl font-black">{initial}</div>}
                                 </div>
                                 <div className="min-w-0">
-                                    <h2 className="truncate text-2xl font-black">{displayName}</h2>
+                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#f0aa0b]">Account profile</p>
+                                    <h2 className="mt-1 truncate text-3xl font-black leading-tight">{displayName}</h2>
                                     <p className="mt-1 truncate text-sm font-bold text-white/60">@{user.username} / {user.role || 'Account'}</p>
                                 </div>
                             </div>
-                            <div>
-                                <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-widest text-white/55">
-                                    <span>Readiness</span>
-                                    <span>{completion}%</span>
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/50">Profile readiness</p>
+                                        <p className="mt-2 text-2xl font-black">{completion}%</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveTab('overview')}
+                                        className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-black text-white/80 transition hover:bg-white/15"
+                                    >
+                                        View checklist
+                                    </button>
                                 </div>
-                                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                                    <div className="h-full rounded-full bg-[#f0aa0b]" style={{ width: `${completion}%` }} />
+                                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                                    <div className="h-full rounded-full bg-gradient-to-r from-[#f0aa0b] to-[#ffd86b]" style={{ width: `${completion}%` }} />
                                 </div>
+                                <p className="mt-3 text-sm font-semibold leading-6 text-white/60">
+                                    {missingReadiness.length === 0
+                                        ? 'Everything required is ready for staff communications and booking updates.'
+                                        : `Add ${missingReadiness.slice(0, 2).map((item) => item.label.toLowerCase()).join(' and ')}${missingReadiness.length > 2 ? `, plus ${missingReadiness.length - 2} more` : ''} to reach 100%.`}
+                                </p>
                             </div>
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                <div className="rounded-xl bg-white/10 px-4 py-3">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                                <div className="rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3">
                                     <p className="text-[10px] font-black uppercase tracking-widest text-white/45">Email</p>
-                                    <p className="mt-1 font-black">{verified ? 'Verified' : 'Needs review'}</p>
+                                    <p className="mt-1 text-lg font-black">{verified ? 'Verified' : 'Needs review'}</p>
                                 </div>
-                                <div className="rounded-xl bg-white/10 px-4 py-3">
+                                <div className="rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3">
                                     <p className="text-[10px] font-black uppercase tracking-widest text-white/45">Contact</p>
-                                    <p className="mt-1 font-black">{contactLabels[user.preferred_contact_method || 'email']}</p>
+                                    <p className="mt-1 text-lg font-black">{contactLabels[user.preferred_contact_method || 'email']}</p>
                                 </div>
                             </div>
                         </div>
