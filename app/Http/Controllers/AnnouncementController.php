@@ -81,6 +81,8 @@ class AnnouncementController extends Controller
 
     public function publish(Request $request, Announcement $announcement)
     {
+        $this->validatePublishability($announcement);
+
         return response()->json($this->service->publish($announcement, $request->user()));
     }
 
@@ -206,6 +208,25 @@ class AnnouncementController extends Controller
             'starts_at' => optional($announcement->starts_at)->toDateTimeString(),
             'ends_at' => optional($announcement->ends_at)->toDateTimeString(),
         ];
+    }
+
+    private function validatePublishability(Announcement $announcement): void
+    {
+        if (blank($announcement->title)) {
+            abort(422, 'Add an announcement title before publishing.');
+        }
+
+        if (blank($announcement->summary) && blank($announcement->body)) {
+            abort(422, 'Add a customer-friendly summary or message before publishing.');
+        }
+
+        if ($announcement->visibility === 'all_customers' && blank($announcement->summary)) {
+            abort(422, 'Homepage announcements need a short summary customers can scan.');
+        }
+
+        if ($announcement->starts_at && $announcement->ends_at && $announcement->ends_at->lt($announcement->starts_at)) {
+            abort(422, 'The announcement end date must be after the start date.');
+        }
     }
 
     private function imageUrl(?string $path): ?string

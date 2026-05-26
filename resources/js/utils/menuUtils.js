@@ -15,7 +15,7 @@ export async function fetchMenuItemsFromAPI() {
 
 async function fetchMenuItemsFromAPINetwork() {
     try {
-        const res = await fetch('/api/menu?per_page=100');
+        const res = await fetch('/api/menu?per_page=100&active=1');
         if (res.ok) {
             const data = await res.json();
             const items = Array.isArray(data.data) ? data.data : [];

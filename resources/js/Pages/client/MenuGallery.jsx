@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, usePage, router } from '@inertiajs/react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import { useToast } from '../../context/ToastContext';
 import UserDropdown from '../../Components/common/UserDropdown';
@@ -11,6 +11,12 @@ import ConfirmModal from '../../Components/common/ConfirmModal';
 
 const CATEGORY_LIMITS = { starter: 3, main: 4, side: 4, dessert: 4, drink: 3 };
 const STORAGE_KEY = 'ecs_booking_draft';
+
+const trackPublicFunnel = (event, payload = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('ecs:funnel', { detail: { event, ...payload } }));
+    window.dataLayer?.push({ event: `ecs_${event}`, ...payload });
+};
 
 const MenuGallery = () => {
     const { auth } = usePage().props;
@@ -191,6 +197,7 @@ const MenuGallery = () => {
     };
 
     const handleProceedToBooking = () => {
+        trackPublicFunnel('menu_to_booking', { selected_dishes: totalPackageDishes });
         // Check for existing booking draft
         try {
             const existing = localStorage.getItem(STORAGE_KEY);
@@ -284,6 +291,9 @@ const MenuGallery = () => {
 
     return (
         <div className="min-h-screen bg-white pt-[68px]">
+            <Head title="Menu Gallery | Eloquente Catering">
+                <meta name="description" content="Browse Eloquente Catering dishes, best sellers, price indicators, and build a custom menu package before booking." />
+            </Head>
             <ClientNavbar user={user} />
             {/* Navbar */}
             <nav className="hidden bg-brand-red shadow-lg py-4 relative z-50">
@@ -419,7 +429,10 @@ const MenuGallery = () => {
                                 </p>
                             </div>
                             <button
-                                onClick={() => setIsSelectionMode(true)}
+                                onClick={() => {
+                                    trackPublicFunnel('menu_plan_started');
+                                    setIsSelectionMode(true);
+                                }}
                                 className="flex items-center gap-2 bg-red-900 text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-red-800 transition-all shadow-md hover:shadow-lg transform hover:scale-[1.02] active:scale-95 whitespace-nowrap"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>

@@ -7,6 +7,7 @@ use App\Models\FoodTasting;
 use App\Models\Payment;
 use App\Services\BookingManagementService;
 use App\Services\PaymentCalculationService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -24,18 +25,33 @@ class ClientDashboardController extends Controller
         $userId = Auth::id();
 
         $allBookings = Booking::where('user_id', $userId)
+            ->with('payments')
             ->orderBy('event_date', 'desc')
             ->get();
 
         $allBookings->each(fn ($booking) => $paymentService->syncPendingTranches($booking));
+        $allBookings->load('payments');
 
         $allBookings = $allBookings
             ->map(function ($booking) use ($paymentService, $bookingService) {
-                $bookingArray = $booking->toArray();
-                $bookingArray['nextPaymentDue'] = $paymentService->getNextPaymentDue($booking);
+                $nextPayment = $booking->payments
+                    ->whereIn('status', ['Pending', 'Failed', 'Rejected'])
+                    ->sortBy('due_date')
+                    ->first();
+                $tranches = collect($paymentService->calculateTranches($booking))->keyBy('name');
+
+                $bookingArray = $booking->attributesToArray();
+                $bookingArray['nextPaymentDue'] = $nextPayment ? [
+                    'id' => $nextPayment->id,
+                    'payment_type' => $nextPayment->payment_type,
+                    'amount' => $nextPayment->amount,
+                    'due_date' => $nextPayment->due_date,
+                    'status' => $nextPayment->status,
+                    'description' => $tranches->get($nextPayment->payment_type)['description'] ?? 'Payment due.',
+                ] : null;
                 $bookingArray['canEditSupplementary'] = $bookingService->canEditSupplementary($booking);
                 $bookingArray['canEditMenu'] = $bookingService->canEditMenu($booking);
-                $bookingArray['cancellationImpact'] = $bookingService->calculateCancellationImpact($booking);
+                $bookingArray['cancellationImpact'] = $this->calculateCancellationImpactFromLoadedPayments($booking);
                 return $bookingArray;
             });
 
@@ -51,9 +67,8 @@ class ClientDashboardController extends Controller
             ->orderBy('preferred_date', 'desc')
             ->get();
 
-        $payments = Payment::whereHas('booking', function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            })
+        $bookingIds = $allBookings->pluck('id');
+        $payments = Payment::whereIn('booking_id', $bookingIds)
             ->with('booking:id,event_date,event_name,event_type,client_full_name,total_cost')
             ->orderBy('booking_id')
             ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 END")
@@ -73,6 +88,109 @@ class ClientDashboardController extends Controller
             'historyBookings' => $historyBookings,
             'tastings' => $tastings,
             'payments' => $payments,
+        ]);
+    }
+
+    private function calculateCancellationImpactFromLoadedPayments(Booking $booking): array
+    {
+        $eventDate = Carbon::parse($booking->event_date)->startOfDay();
+        $daysUntilEvent = now()->startOfDay()->diffInDays($eventDate, false);
+
+        $totalPaid = (float) $booking->payments
+            ->where('status', 'Verified')
+            ->sum(fn (Payment $payment) => (float) $payment->amount);
+        $totalCost = (float) $booking->total_cost;
+        $reservationFee = $totalCost * 0.10;
+
+        if ($daysUntilEvent <= 7) {
+            $nonRefundableAmount = $totalPaid;
+            $refundableAmount = 0;
+        } elseif ($totalPaid > $reservationFee) {
+            $nonRefundableAmount = $reservationFee;
+            $refundableAmount = $totalPaid - $reservationFee;
+        } else {
+            $nonRefundableAmount = $totalPaid;
+            $refundableAmount = 0;
+        }
+
+        return [
+            'total_paid' => $totalPaid,
+            'non_refundable_amount' => $nonRefundableAmount,
+            'refundable_amount' => $refundableAmount,
+            'message' => $refundableAmount > 0
+                ? "Warning: Because your event is > 7 days away, the 10% Reservation Fee (â‚±" . number_format($reservationFee, 2) . ") is forfeited. The remaining â‚±" . number_format($refundableAmount, 2) . " will be flagged for refund."
+                : ($daysUntilEvent <= 7
+                    ? "Warning: Because your event is within 7 days, ALL payments (â‚±" . number_format($nonRefundableAmount, 2) . ") are strictly non-refundable."
+                    : "Warning: Your 10% Reservation Fee is non-refundable. Your paid amount does not exceed this fee."),
+        ];
+    }
+
+    public function journeyTracker()
+    {
+        $userId = Auth::id();
+        $historyStatuses = ['Cancelled', 'cancelled', 'Completed', 'completed'];
+
+        $bookings = Booking::where('user_id', $userId)
+            ->whereNotIn('status', $historyStatuses)
+            ->orderBy('event_date')
+            ->get([
+                'id',
+                'user_id',
+                'event_date',
+                'event_time',
+                'event_name',
+                'event_type',
+                'client_full_name',
+                'pax',
+                'total_cost',
+                'status',
+                'selected_menu',
+                'venue_address_line',
+                'event_timeline',
+                'special_instructions',
+                'color_motif',
+                'clarification_request',
+                'clarification_response',
+                'created_at',
+                'updated_at',
+            ]);
+
+        $bookingIds = $bookings->pluck('id');
+        $payments = Payment::whereIn('booking_id', $bookingIds)
+            ->orderBy('booking_id')
+            ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 END")
+            ->orderBy('due_date')
+            ->get([
+                'id',
+                'booking_id',
+                'amount',
+                'status',
+                'payment_type',
+                'due_date',
+            ]);
+
+        $paymentsByBooking = $payments->groupBy('booking_id');
+        $bookings = $bookings->map(function ($booking) use ($paymentsByBooking) {
+            $nextPaymentDue = $paymentsByBooking
+                ->get($booking->id, collect())
+                ->first(fn ($payment) => in_array($payment->status, ['Pending', 'Failed', 'Rejected'], true));
+
+            $bookingArray = $booking->toArray();
+            $bookingArray['nextPaymentDue'] = $nextPaymentDue ? [
+                'id' => $nextPaymentDue->id,
+                'payment_type' => $nextPaymentDue->payment_type,
+                'amount' => $nextPaymentDue->amount,
+                'due_date' => $nextPaymentDue->due_date,
+                'status' => $nextPaymentDue->status,
+            ] : null;
+
+            return $bookingArray;
+        })->values();
+
+        return response()->json([
+            'bookings' => $bookings,
+            'payments' => $payments,
+            'cached_at' => now()->toIso8601String(),
         ]);
     }
 }

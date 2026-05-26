@@ -25,10 +25,9 @@ class MenuController extends Controller
             $query->whereRaw('is_best_seller is true');
         }
 
-        // Filter by active status
-        if ($request->has('active')) {
-            $query->whereRaw('is_active is ' . ($request->boolean('active') ? 'true' : 'false'));
-        }
+        // Public menu endpoints default to customer-visible items only.
+        $active = $request->has('active') ? $request->boolean('active') : true;
+        $query->whereRaw('is_active is ' . ($active ? 'true' : 'false'));
 
         // Order by category and then name
         $items = $query->orderBy('category')
@@ -54,6 +53,7 @@ class MenuController extends Controller
     {
         $categories = Cache::remember('menu_categories', now()->addHours(24), function () {
             return MenuItem::distinct()
+                ->whereRaw('is_active is true')
                 ->pluck('category')
                 ->sort()
                 ->values();

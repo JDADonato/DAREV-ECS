@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
 use App\Http\Controllers\CalendarAvailabilityController;
 use App\Http\Controllers\ClientDashboardController;
+use App\Http\Controllers\ContactInquiryController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\AccountingController;
@@ -43,6 +44,7 @@ Route::get('/about', fn () => Inertia::render('About'))->name('about');
 Route::get('/amenities', fn () => Inertia::render('Amenities'))->name('amenities');
 Route::get('/contact', fn () => Inertia::render('Contact'))->name('contact');
 Route::get('/api/announcements', [AnnouncementController::class, 'publicIndex'])->middleware('cache.headers:public;max_age=60;etag');
+Route::post('/api/contact-inquiries', [ContactInquiryController::class, 'store'])->middleware('throttle:10,1');
 Route::post('/webhook/paymongo', PayMongoWebhookController::class)->name('webhook.paymongo');
 
 Route::middleware('guest')->group(function () {
@@ -60,6 +62,7 @@ Route::middleware('auth')->group(function () {
     // Profile Routes
     Route::get('/profile', fn () => Inertia::render('Profile/Edit'))->name('profile.edit');
     Route::put('/profile', [App\Http\Controllers\ProfileController::class, 'update'])->name('profile.update');
+    Route::get('/api/profile/activity', [App\Http\Controllers\ProfileController::class, 'activity'])->name('profile.activity');
 
     // ─── Notification Routes ───
     Route::get('/api/notifications', [NotificationController::class, 'index']);
@@ -146,6 +149,7 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 
     // Dashboard data API (used by original ClientDashboard.jsx fetch calls)
     Route::get('/api/dashboard/client', [ClientDashboardController::class, 'apiData']);
+    Route::get('/api/customer/journey-tracker', [ClientDashboardController::class, 'journeyTracker']);
 
     // Booking API endpoints (JSON responses for React AJAX calls)
     Route::post('/api/bookings', [BookingController::class, 'store']);
@@ -177,6 +181,8 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
+    Route::get('/api/marketing/contact-inquiries', [ContactInquiryController::class, 'index']);
+    Route::patch('/api/marketing/contact-inquiries/{inquiry}', [ContactInquiryController::class, 'update']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);
     Route::put('/api/marketing/bookings/{id}/assign', [MarketingController::class, 'assign']);
     Route::put('/api/marketing/bookings/{id}/review-status', [MarketingController::class, 'updateReviewStatus']);

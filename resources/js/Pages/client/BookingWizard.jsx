@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { router, Link } from '@inertiajs/react';
+import { Head, router, Link } from '@inertiajs/react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -39,6 +39,12 @@ const stepMessages = {
 };
 
 const money = (value) => `₱${Number(value || 0).toLocaleString()}`;
+
+const trackPublicFunnel = (event, payload = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('ecs:funnel', { detail: { event, ...payload } }));
+    window.dataLayer?.push({ event: `ecs_${event}`, ...payload });
+};
 
 const summarizeBookingCosts = (data = {}) => {
     const baseEventCost = data.totalCost || 0;
@@ -170,6 +176,7 @@ const BookingWizard = () => {
 
     const nextStep = (skipValidation = false) => {
         if (skipValidation || validateStep(currentStep)) {
+            trackPublicFunnel('booking_step_completed', { step: currentStep, next_step: Math.min(currentStep + 1, totalSteps) });
             setCurrentStep(prev => prev + 1);
         }
     };
@@ -326,6 +333,9 @@ const BookingWizard = () => {
 
     return (
         <div className="booking-page min-h-screen bg-[#fffaf3] font-sans text-slate-900">
+            <Head title="Book Your Event | Eloquente Catering">
+                <meta name="description" content="Plan your Eloquente Catering event with guided steps for event type, date availability, guests, packages, menu, logistics, and tasting." />
+            </Head>
             <ClientNavbar user={user} />
 
             {showResumeModal && (

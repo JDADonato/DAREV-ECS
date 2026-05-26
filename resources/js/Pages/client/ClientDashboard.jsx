@@ -58,6 +58,27 @@ const writeStoredDashboardValue = (key, value) => {
     }
 };
 
+const readStoredDashboardJson = (key, fallback = null) => {
+    if (typeof window === 'undefined') return fallback;
+
+    try {
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : fallback;
+    } catch (e) {
+        return fallback;
+    }
+};
+
+const writeStoredDashboardJson = (key, value) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+        // Cache is a speed boost only.
+    }
+};
+
 const quickTimes = [
     { label: '8:00 AM', value: '08:00' },
     { label: '10:00 AM', value: '10:00' },
@@ -529,8 +550,10 @@ const ClientDashboard = () => {
     const dashboardStoragePrefix = `ecs_client_dashboard_${user?.id || 'guest'}`;
     const activeBookingStorageKey = `${dashboardStoragePrefix}_active_booking_id`;
     const activeSectionStorageKey = `${dashboardStoragePrefix}_active_section`;
-    const [data, setData] = useState({ bookings: [], historyBookings: [], tastings: [], payments: [] });
-    const [loading, setLoading] = useState(true);
+    const dashboardDataStorageKey = `${dashboardStoragePrefix}_data`;
+    const cachedDashboardData = readStoredDashboardJson(dashboardDataStorageKey);
+    const [data, setData] = useState(cachedDashboardData || { bookings: [], historyBookings: [], tastings: [], payments: [] });
+    const [loading, setLoading] = useState(!cachedDashboardData);
     const [activeBookingId, setActiveBookingId] = useState(() => {
         const stored = readStoredDashboardValue(sharedSelectedBookingKey) || readStoredDashboardValue(activeBookingStorageKey);
         return stored ? Number(stored) : null;
@@ -701,15 +724,16 @@ const ClientDashboard = () => {
             const response = await fetch('/api/dashboard/client');
             if (response.ok) {
                 const result = await response.json();
-                const feedbackResponse = await fetch('/api/customer/feedback-requests', { headers: { Accept: 'application/json' } });
-                const pendingFeedback = feedbackResponse.ok ? await feedbackResponse.json() : [];
-                setData({
+                const nextData = {
                     bookings: result.bookings || [],
                     historyBookings: result.historyBookings || [],
                     tastings: result.tastings || [],
                     payments: result.payments || [],
-                });
-                setFeedbackRequests(Array.isArray(pendingFeedback) ? pendingFeedback : []);
+                };
+                setData(nextData);
+                writeStoredDashboardJson(dashboardDataStorageKey, nextData);
+                setLoading(false);
+
                 const activeBookings = result.bookings || [];
                 const storedBookingId = Number(readStoredDashboardValue(sharedSelectedBookingKey) || readStoredDashboardValue(activeBookingStorageKey));
                 const preferredBookingId = activeBookingId || storedBookingId || null;
@@ -728,6 +752,15 @@ const ClientDashboard = () => {
                 } else if (activeBookings.length === 0) {
                     setActiveBookingId(null);
                 }
+
+                fetch('/api/customer/feedback-requests', { headers: { Accept: 'application/json' } })
+                    .then(response => response.ok ? response.json() : [])
+                    .then(pendingFeedback => {
+                        setFeedbackRequests(Array.isArray(pendingFeedback) ? pendingFeedback : []);
+                    })
+                    .catch((error) => {
+                        console.error('Error fetching feedback requests:', error);
+                    });
             }
         } catch (error) {
             console.error("Error fetching dashboard data:", error);
