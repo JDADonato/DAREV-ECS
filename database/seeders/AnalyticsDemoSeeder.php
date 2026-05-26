@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class AnalyticsDemoSeeder extends Seeder
 {
@@ -20,6 +21,17 @@ class AnalyticsDemoSeeder extends Seeder
 
     public function run(): void
     {
+        if (!app()->environment('local')) {
+            $message = 'Analytics demo seeding is disabled outside APP_ENV=local. Use php artisan db:seed --class=AnalyticsDemoSeeder only in a local demo database.';
+
+            if (app()->environment('production')) {
+                throw new RuntimeException($message);
+            }
+
+            $this->command?->warn($message);
+            return;
+        }
+
         mt_srand(20260520);
 
         DB::transaction(function () {

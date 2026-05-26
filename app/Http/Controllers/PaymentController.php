@@ -6,6 +6,7 @@ use App\Events\PaymentProcessed;
 use App\Models\Booking;
 use App\Models\Payment;
 use App\Services\PaymentCalculationService;
+use App\Services\PaymentEventService;
 use App\Services\PayMongoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -96,6 +97,17 @@ class PaymentController extends Controller
             'paymongo_reference_number' => $this->referenceNumber($booking, $payment),
         ])->save();
 
+        PaymentEventService::record(
+            'checkout_created',
+            'customer',
+            $payment,
+            [
+                'amount' => $amount,
+                'payment_type' => $payment->payment_type,
+            ],
+            $checkout['id'] ?? null
+        );
+
         Log::info('PayMongo checkout session created', [
             'booking_id' => $booking->id,
             'payment_id' => $payment->id,
@@ -153,6 +165,17 @@ class PaymentController extends Controller
                             'paymongo_payment_id' => $this->checkoutPaymentId($checkout) ?: $payment->paymongo_payment_id,
                             'paymongo_payment_intent_id' => $this->checkoutPaymentIntentId($checkout) ?: $payment->paymongo_payment_intent_id,
                         ])->save();
+
+                        PaymentEventService::record(
+                            'checkout_confirmed',
+                            'paymongo',
+                            $payment,
+                            [
+                                'checkout_session_id' => $payment->paymongo_checkout_session_id,
+                                'payment_type' => $payment->payment_type,
+                            ],
+                            $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                        );
 
                         if ($payment->booking) {
                             $paymentCalculation->updateBookingMilestone($payment->booking);

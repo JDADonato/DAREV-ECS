@@ -1,33 +1,109 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { Head, Link } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
 
+const initialForm = (user) => ({
+    full_name: user?.full_name || user?.username || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    event_date: '',
+    pax: '',
+    event_type: '',
+    concern_type: user ? 'active_booking' : 'planning',
+    subject: '',
+    message: '',
+});
+
+const safeErrorMessage = (errors = {}) => {
+    if (errors.email) return 'Please enter a valid email address.';
+    if (errors.full_name) return 'Please enter your name.';
+    if (errors.message) return 'Please tell us what you need help with.';
+    return 'Please review the highlighted details and try again.';
+};
+
 const Contact = () => {
     const { user, logout } = useAuth();
     const toast = useToast();
+    const [form, setForm] = useState(() => initialForm(user));
+    const [errors, setErrors] = useState({});
+    const [submitting, setSubmitting] = useState(false);
+    const [sentInquiryId, setSentInquiryId] = useState(null);
+
+    const canSubmit = useMemo(() => (
+        form.full_name.trim() && form.email.trim() && form.subject.trim() && form.message.trim()
+    ), [form]);
+
+    const updateField = (field, value) => {
+        setForm((current) => ({ ...current, [field]: value }));
+        if (errors[field]) {
+            setErrors((current) => ({ ...current, [field]: undefined }));
+        }
+    };
+
+    const handleSubmit = async (event) => {
+        event.preventDefault();
+        setSubmitting(true);
+        setErrors({});
+
+        try {
+            const response = await fetch('/api/contact-inquiries', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                },
+                body: JSON.stringify({
+                    ...form,
+                    pax: form.pax ? Number(form.pax) : null,
+                    event_date: form.event_date || null,
+                }),
+            });
+
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const validationErrors = payload.errors || {};
+                setErrors(validationErrors);
+                toast.error(safeErrorMessage(validationErrors));
+                return;
+            }
+
+            setSentInquiryId(payload.inquiry_id || true);
+            toast.success('Your inquiry was sent to our planning team.');
+        } catch (error) {
+            toast.error('We could not send your inquiry. Please try again in a moment.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-[#f7f4ee] font-sans">
+            <Head title="Contact Eloquente Catering">
+                <meta name="description" content="Contact Eloquente Catering for event planning questions, tasting requests, availability help, and catering inquiries." />
+            </Head>
+
             <ClientNavbar user={user} logout={logout} activePath="/contact" />
             <main className="pt-[68px]">
                 <section className="bg-[#1a1a1a] text-white">
-                    <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 sm:px-8 lg:grid-cols-[0.85fr_1.15fr]">
-                        <div className="self-end">
+                    <div className="mx-auto max-w-7xl px-5 py-12 sm:px-8">
+                        <div className="max-w-4xl">
                             <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">Contact</p>
                             <h1 className="mt-4 font-display text-4xl font-bold sm:text-5xl">Start with the details. We will help shape the event.</h1>
                             <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-white/60">Questions, tasting requests, event planning details, and support all start here.</p>
                         </div>
-                        <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="mt-8 grid gap-3 sm:grid-cols-3">
                             {[
                                 ['Office', 'Metro Manila, Philippines'],
-                                ['Phone', '+63 912 345 6789'],
-                                ['Email', 'bookings@eloquente.com'],
+                                ['Planning desk', 'Public inquiries are sent to Marketing'],
+                                ['Active bookings', 'Use dashboard chat for faster context'],
                             ].map(([label, value]) => (
-                                <div key={label} className="rounded-2xl border border-white/10 bg-white/10 p-5">
+                                <div key={label} className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3.5 backdrop-blur-sm">
                                     <p className="text-xs font-black uppercase tracking-widest text-[#f0aa0b]">{label}</p>
-                                    <p className="mt-3 text-sm font-bold text-white">{value}</p>
+                                    <p className="mt-1.5 text-sm font-bold leading-6 text-white">{value}</p>
                                 </div>
                             ))}
                         </div>
@@ -44,23 +120,76 @@ const Contact = () => {
                         </div>
                         <div className="mt-8 rounded-2xl bg-[#720101]/5 p-5">
                             <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Fastest path</p>
-                            <p className="mt-2 text-sm font-medium leading-6 text-gray-600">For active bookings, use the dashboard chat so your event context stays attached.</p>
+                            <p className="mt-2 text-sm font-medium leading-6 text-gray-600">For active bookings, use dashboard chat so your event context stays attached. General planning questions can still start here.</p>
+                            {user && (
+                                <Link href="/dashboard/client?tab=messages" className="mt-4 inline-flex rounded-xl bg-[#720101] px-4 py-2 text-xs font-black uppercase tracking-widest text-white">
+                                    Open Dashboard Chat
+                                </Link>
+                            )}
                         </div>
                     </aside>
 
                     <div className="rounded-3xl bg-white p-6 shadow-sm sm:p-8">
-                        <h2 className="font-display text-2xl font-bold text-[#1a1a1a]">Send a Message</h2>
-                        <form className="mt-6 space-y-5" onSubmit={(e) => { e.preventDefault(); toast.success("Message sent successfully. We'll get back to you soon."); }}>
-                            <div className="grid gap-5 sm:grid-cols-2">
-                                <input required className="rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Full name" />
-                                <input required type="email" className="rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Email address" />
+                        {sentInquiryId ? (
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-6">
+                                <p className="text-xs font-black uppercase tracking-widest text-emerald-700">Inquiry received</p>
+                                <h2 className="mt-3 font-display text-2xl font-bold text-[#1a1a1a]">Our planning team has your message.</h2>
+                                <p className="mt-3 max-w-2xl text-sm font-medium leading-7 text-gray-600">
+                                    Marketing can now review your inquiry with the event date, guest count, and contact details you provided. If this is urgent, active clients should also send a dashboard message.
+                                </p>
+                                <div className="mt-6 flex flex-wrap gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setForm(initialForm(user));
+                                            setSentInquiryId(null);
+                                        }}
+                                        className="rounded-xl border border-emerald-200 bg-white px-5 py-3 text-sm font-black text-emerald-800"
+                                    >
+                                        Send Another Inquiry
+                                    </button>
+                                    <Link href="/book" className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white">
+                                        Start Booking
+                                    </Link>
+                                </div>
                             </div>
-                            <input required className="w-full rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Subject" />
-                            <textarea required rows="6" className="w-full resize-none rounded-xl border border-transparent px-4 py-3 text-sm font-semibold focus:border-[#720101] focus:ring-[#720101] bg-gray-50 transition-all shadow-sm" placeholder="Tell us about your event, timeline, guest count, or question." />
-                            <button type="submit" className="rounded-xl bg-[#720101] px-7 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101]">
-                                Send Message
-                            </button>
-                        </form>
+                        ) : (
+                            <>
+                                <h2 className="font-display text-2xl font-bold text-[#1a1a1a]">Send a Planning Inquiry</h2>
+                                <p className="mt-2 text-sm font-medium leading-6 text-gray-500">These details become a staff-visible inquiry so the team can follow up with the right context.</p>
+                                <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+                                    <div className="grid gap-5 sm:grid-cols-2">
+                                        <input required value={form.full_name} onChange={(e) => updateField('full_name', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Full name" />
+                                        <input required type="email" value={form.email} onChange={(e) => updateField('email', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Email address" />
+                                    </div>
+                                    <div className="grid gap-5 sm:grid-cols-3">
+                                        <input value={form.phone} onChange={(e) => updateField('phone', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Phone number" />
+                                        <input type="date" value={form.event_date} onChange={(e) => updateField('event_date', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" aria-label="Event date" />
+                                        <input type="number" min="1" value={form.pax} onChange={(e) => updateField('pax', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Guest count" />
+                                    </div>
+                                    <div className="grid gap-5 sm:grid-cols-2">
+                                        <input value={form.event_type} onChange={(e) => updateField('event_type', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Event type" />
+                                        <select value={form.concern_type} onChange={(e) => updateField('concern_type', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]">
+                                            <option value="planning">Planning inquiry</option>
+                                            <option value="availability">Availability</option>
+                                            <option value="menu">Menu and packages</option>
+                                            <option value="pricing">Pricing</option>
+                                            <option value="tasting">Food tasting</option>
+                                            <option value="active_booking">Active booking support</option>
+                                            <option value="general">General question</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <input required value={form.subject} onChange={(e) => updateField('subject', e.target.value)} className="w-full rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Subject" />
+                                    </div>
+                                    <textarea required rows="6" value={form.message} onChange={(e) => updateField('message', e.target.value)} className="w-full resize-none rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Tell us about your event, timeline, guest count, or question." />
+                                    {Object.keys(errors).length > 0 && <p className="text-sm font-bold text-[#720101]">{safeErrorMessage(errors)}</p>}
+                                    <button type="submit" disabled={!canSubmit || submitting} className="rounded-xl bg-[#720101] px-7 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101] disabled:cursor-not-allowed disabled:opacity-50">
+                                        {submitting ? 'Sending...' : 'Send Inquiry'}
+                                    </button>
+                                </form>
+                            </>
+                        )}
                     </div>
                 </section>
             </main>

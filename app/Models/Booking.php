@@ -119,6 +119,26 @@ class Booking extends Model
         return $this->hasMany(BookingReviewTask::class);
     }
 
+    public function paymentEvents()
+    {
+        return $this->hasMany(PaymentEvent::class);
+    }
+
+    public function refundCases()
+    {
+        return $this->hasMany(RefundCase::class);
+    }
+
+    public function preparationTasks()
+    {
+        return $this->hasMany(EventPreparationTask::class);
+    }
+
+    public function feedbackRequest()
+    {
+        return $this->hasOne(FeedbackRequest::class);
+    }
+
     // ─── Helpers ───
 
     /**

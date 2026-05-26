@@ -2,9 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { router } from '@inertiajs/react';
 import ReceiptModal from '../Components/common/ReceiptModal';
+import ConfirmModal from '../Components/common/ConfirmModal';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import { getListData, getPaginationMeta } from '../utils/apiResponses';
+import StaffPagination from '../Components/staff/StaffPagination';
+import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
+import StaffPageHeader from '../Components/staff/StaffPageHeader';
+import StaffEmptyState from '../Components/staff/StaffEmptyState';
+import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
 
 const PAYMENT_TYPE_LABELS = {
     Reservation: { label: 'Reservation Fee', pct: '10%', icon: 'R' },
@@ -14,21 +20,32 @@ const PAYMENT_TYPE_LABELS = {
 
 const DashboardAccounting = () => {
     const { user, logout } = useAuth();
-    const [activeTab, setActiveTab] = useState('bookings');
-    const [paymentViewMode, setPaymentViewMode] = useState('list');
+    const [activeTab, setActiveTab] = useState('today');
     const [bookings, setBookings] = useState([]);
     const [ledgerPayments, setLedgerPayments] = useState([]);
+    const [reconciliationItems, setReconciliationItems] = useState([]);
     const [loading, setLoading] = useState(false);
     const [toast, setToast] = useState(null);
     const [expandedBooking, setExpandedBooking] = useState(null);
     const [receiptModal, setReceiptModal] = useState({ isOpen: false, payment: null, booking: null });
     const [editPaymentModal, setEditPaymentModal] = useState({ isOpen: false, payment: null, booking: null });
+    const [refundConfirm, setRefundConfirm] = useState({ isOpen: false, bookingId: null, refundAmount: 0 });
+    const [refundProcessing, setRefundProcessing] = useState(false);
     const [remindingPaymentId, setRemindingPaymentId] = useState(null);
 
     // Refund Management State
     const [refundQueue, setRefundQueue] = useState([]);
 
     const [ledgerFilter, setLedgerFilter] = useState({ status: 'All', startDate: '', endDate: '', clientSearch: '', packageFilter: 'All' });
+    const [ledgerPage, setLedgerPage] = useState(1);
+    const [ledgerPerPage, setLedgerPerPage] = useState(25);
+    const [reconciliationSearch, setReconciliationSearch] = useState('');
+    const [reconciliationTypeFilter, setReconciliationTypeFilter] = useState('all');
+    const [reconciliationPage, setReconciliationPage] = useState(1);
+    const [reconciliationPerPage, setReconciliationPerPage] = useState(25);
+    const [refundSearch, setRefundSearch] = useState('');
+    const [refundPage, setRefundPage] = useState(1);
+    const [refundPerPage, setRefundPerPage] = useState(25);
     const [bookingSearchQuery, setBookingSearchQuery] = useState('');
     const [bookingSortOrder, setBookingSortOrder] = useState('eventDateSoonest');
     const [bookingPaymentFilter, setBookingPaymentFilter] = useState('all');
@@ -36,10 +53,17 @@ const DashboardAccounting = () => {
     const [bookingPagination, setBookingPagination] = useState(null);
 
     useEffect(() => {
-        if (activeTab === 'bookings') {
+        if (activeTab === 'today') {
+            fetchBookings();
+            fetchLedger({ silent: true });
+            fetchReconciliation({ silent: true });
+            fetchRefundQueue({ silent: true });
+        } else if (activeTab === 'bookings') {
             fetchBookings();
         } else if (activeTab === 'ledger') {
             fetchLedger();
+        } else if (activeTab === 'reconciliation') {
+            fetchReconciliation();
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
         }
@@ -48,6 +72,18 @@ const DashboardAccounting = () => {
     useEffect(() => {
         setBookingPage(1);
     }, [bookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
+
+    useEffect(() => {
+        setLedgerPage(1);
+    }, [ledgerFilter, ledgerPerPage]);
+
+    useEffect(() => {
+        setReconciliationPage(1);
+    }, [reconciliationSearch, reconciliationTypeFilter, reconciliationPerPage]);
+
+    useEffect(() => {
+        setRefundPage(1);
+    }, [refundSearch, refundPerPage]);
 
     useEffect(() => {
         if (toast) {
@@ -63,8 +99,15 @@ const DashboardAccounting = () => {
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'bookings') {
                 fetchBookings({ silent });
+            } else if (activeTab === 'today') {
+                fetchBookings({ silent });
+                fetchLedger({ silent: true });
+                fetchReconciliation({ silent: true });
+                fetchRefundQueue({ silent: true });
             } else if (activeTab === 'ledger') {
                 fetchLedger({ silent });
+            } else if (activeTab === 'reconciliation') {
+                fetchReconciliation({ silent });
             } else if (activeTab === 'refunds') {
                 fetchRefundQueue({ silent });
             }
@@ -112,6 +155,21 @@ const DashboardAccounting = () => {
         }
     };
 
+    const fetchReconciliation = async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
+        try {
+            const res = await fetch('/api/accounting/reconciliation?exceptions_only=1', {
+                headers: { }
+            });
+            const data = await res.json();
+            setReconciliationItems(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error("Error fetching reconciliation:", error);
+        } finally {
+            if (!silent) setLoading(false);
+        }
+    };
+
     const handleVerify = async (id, action) => {
         try {
             // Session auth - no token needed
@@ -125,6 +183,7 @@ const DashboardAccounting = () => {
             if (res.ok) {
                 fetchBookings();
                 fetchLedger({ silent: true });
+                fetchReconciliation({ silent: true });
                 fetchRefundQueue({ silent: true });
                 setToast({
                     message: 'Payment ' + (action === 'Verify' ? 'Verified' : 'Rejected') + ' successfully!',
@@ -155,6 +214,18 @@ const DashboardAccounting = () => {
     const isPaidStatus = (status) => status === 'Verified' || status === 'Paid';
 
     const toMoneyNumber = (value) => Number(String(value ?? 0).replace(/,/g, '')) || 0;
+
+    const formatAccountingDate = (value, fallback = 'No event date') => {
+        if (!value) return fallback;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
+    };
 
     const getBookingProgress = (payments) => {
         const paymentList = payments || [];
@@ -200,11 +271,14 @@ const DashboardAccounting = () => {
         }
     };
 
-    const handleProcessRefund = async (bookingId) => {
-        if (!window.confirm(`Are you sure you want to process the refund for booking #${bookingId}? This will deduct the 10% reservation fee automatically.`)) {
-            return;
-        }
+    const openRefundConfirm = (bookingId, refundAmount) => {
+        setRefundConfirm({ isOpen: true, bookingId, refundAmount });
+    };
 
+    const handleProcessRefund = async () => {
+        const bookingId = refundConfirm.bookingId;
+        if (!bookingId || refundProcessing) return;
+        setRefundProcessing(true);
         try {
             // Session auth - no token needed
             const res = await fetch(`/api/accounting/refund/${bookingId}`, {
@@ -216,6 +290,7 @@ const DashboardAccounting = () => {
 
             if (res.ok) {
                 setToast({ message: data?.message || 'Refund processed successfully!', type: 'success' });
+                setRefundConfirm({ isOpen: false, bookingId: null, refundAmount: 0 });
                 fetchRefundQueue();
                 fetchBookings({ silent: true });
                 fetchLedger({ silent: true });
@@ -231,6 +306,8 @@ const DashboardAccounting = () => {
         } catch (error) {
             console.error("Error processing refund:", error);
             setToast({ message: 'Error processing refund.', type: 'error' });
+        } finally {
+            setRefundProcessing(false);
         }
     };
 
@@ -247,63 +324,241 @@ const DashboardAccounting = () => {
             pending: pendingPayments.length,
             overdue: overdue.length,
             refunds: refundQueue.length,
+            exceptions: reconciliationItems.length,
             collected,
         };
-    }, [bookings, ledgerPayments, refundQueue]);
+    }, [bookings, ledgerPayments, refundQueue, reconciliationItems]);
 
     const tabMeta = {
+        today: 'Today',
         bookings: 'Payment Verification',
         ledger: 'Ledger',
+        reconciliation: 'Reconciliation',
         refunds: 'Refunds',
     };
 
+    const exceptionLabels = {
+        checkout_started_unpaid: 'Checkout Started, Unpaid',
+        provider_paid_not_local: 'Provider Paid, Not Local',
+        pending_past_due: 'Pending Past Due',
+        missing_paymongo_payment_id_for_refund: 'Missing Refund Reference',
+        webhook_mismatch: 'Webhook Mismatch',
+    };
+
+    const getReconciliationAction = (item) => {
+        const exceptions = item.exceptions || [];
+
+        if (exceptions.includes('provider_paid_not_local')) {
+            return {
+                label: 'Verify payment',
+                detail: 'Provider payment exists. Confirm it, then mark the local record paid.',
+                tone: 'primary',
+                onClick: () => handleVerify(item.id, 'Verify'),
+            };
+        }
+
+        if (exceptions.includes('checkout_started_unpaid') || exceptions.includes('pending_past_due')) {
+            return {
+                label: remindingPaymentId === item.id ? 'Sending...' : 'Send reminder',
+                detail: 'Customer has not completed this payment.',
+                tone: 'warn',
+                disabled: remindingPaymentId === item.id,
+                onClick: () => handleSendReminder(item.id),
+            };
+        }
+
+        if (exceptions.includes('missing_paymongo_payment_id_for_refund')) {
+            return {
+                label: 'Open refunds',
+                detail: 'Automatic refund needs the original provider payment ID.',
+                tone: 'danger',
+                onClick: () => setActiveTab('refunds'),
+            };
+        }
+
+        return {
+            label: 'Review ledger',
+            detail: 'Compare local state against provider references and events.',
+            tone: 'muted',
+            onClick: () => setActiveTab('ledger'),
+        };
+    };
+
+    const paginate = (items, pageNumber, pageSize) => {
+        const start = (pageNumber - 1) * pageSize;
+        return items.slice(start, start + pageSize);
+    };
+
+    const filteredReconciliationItems = useMemo(() => {
+        const needle = reconciliationSearch.trim().toLowerCase();
+
+        return reconciliationItems.filter((item) => {
+            const exceptions = item.exceptions || [];
+            const haystack = [
+                item.id,
+                item.booking_id,
+                item.client_full_name,
+                item.payment_type,
+                item.status,
+                item.paymongo_checkout_session_id,
+                item.paymongo_payment_id,
+                item.paymongo_reference_number,
+            ].join(' ').toLowerCase();
+
+            if (needle && !haystack.includes(needle)) return false;
+            if (reconciliationTypeFilter !== 'all' && !exceptions.includes(reconciliationTypeFilter)) return false;
+
+            return true;
+        });
+    }, [reconciliationItems, reconciliationSearch, reconciliationTypeFilter]);
+
+    const pagedReconciliationItems = useMemo(() => {
+        return paginate(filteredReconciliationItems, reconciliationPage, reconciliationPerPage);
+    }, [filteredReconciliationItems, reconciliationPage, reconciliationPerPage]);
+
+    const filteredRefundQueue = useMemo(() => {
+        const needle = refundSearch.trim().toLowerCase();
+        if (!needle) return refundQueue;
+
+        return refundQueue.filter((item) => [
+            item.booking_id,
+            item.client_full_name,
+            item.client_email,
+            item.event_date,
+        ].join(' ').toLowerCase().includes(needle));
+    }, [refundQueue, refundSearch]);
+
+    const pagedRefundQueue = useMemo(() => {
+        return paginate(filteredRefundQueue, refundPage, refundPerPage);
+    }, [filteredRefundQueue, refundPage, refundPerPage]);
+
     return (
-        <div className="marketing-page min-h-screen flex flex-col">
-            <nav className="marketing-topbar sticky top-0 z-30">
-                <div className="mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
-                    <div className="flex min-h-16 flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                            <p className="marketing-kicker">Eloquente</p>
-                            <h1 className="text-xl font-bold font-display text-slate-950">Accounting Workspace</h1>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="staff-role-chip">Finance team</div>
-                            <span className="text-sm font-bold text-slate-700">{user && user.username}</span>
-                            <button onClick={handleLogout} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-500 hover:text-slate-900">Logout</button>
-                        </div>
-                    </div>
-                </div>
-            </nav>
+        <StaffWorkspaceLayout
+            title="Accounting Workspace"
+            roleLabel="Finance team"
+            username={user && user.username}
+            active={activeTab}
+            onNavigate={setActiveTab}
+            onLogout={handleLogout}
+            navGroups={[
+                {
+                    label: 'Daily work',
+                    items: [
+                        { id: 'today', label: 'Today', count: dashboardSummary.pending + dashboardSummary.overdue + dashboardSummary.exceptions + dashboardSummary.refunds },
+                        { id: 'bookings', label: 'Verification', count: dashboardSummary.pending },
+                        { id: 'ledger', label: 'Ledger' },
+                        { id: 'reconciliation', label: 'Exceptions', count: dashboardSummary.exceptions },
+                        { id: 'refunds', label: 'Refunds', count: dashboardSummary.refunds },
+                    ],
+                },
+            ]}
+        >
+                <StaffPageHeader
+                    eyebrow={activeTab === 'today' ? 'Today' : 'Finance workflow'}
+                    title={activeTab === 'today' ? 'Payment control desk' : tabMeta[activeTab]}
+                    metrics={[
+                        { label: 'Bookings', value: dashboardSummary.bookings },
+                        { label: 'Pending', value: dashboardSummary.pending },
+                        { label: 'Overdue', value: dashboardSummary.overdue },
+                        { label: 'Exceptions', value: dashboardSummary.exceptions },
+                        { label: 'Refunds', value: dashboardSummary.refunds },
+                    ]}
+                />
 
-            <main className="flex-grow mx-auto max-w-[1500px] w-full py-6 px-4 sm:px-6 lg:px-8">
-                <section className="marketing-command mb-5">
-                    <div>
-                        <p className="marketing-kicker">Today</p>
-                        <h2 className="mt-1 text-2xl font-bold text-slate-950">Payment control desk</h2>
+                {activeTab === 'today' && (
+                    <div className="staff-today-grid">
+                        <section className="staff-work-surface">
+                            <div className="staff-surface-head">
+                                <div>
+                                    <p className="marketing-kicker">Priority queue</p>
+                                    <h3 className="mt-1 text-lg font-black text-slate-950">Finance actions</h3>
+                                </div>
+                            </div>
+                            <div className="p-4">
+                                <div className="staff-priority-list">
+                                    <button type="button" onClick={() => setActiveTab('bookings')} className="staff-priority-item">
+                                        <div className="staff-priority-copy">
+                                            <span className="staff-item-kicker">Verification</span>
+                                            <h3>Review customer payments</h3>
+                                            <p>{dashboardSummary.pending > 0 ? `${dashboardSummary.pending} payment records need review.` : 'No payments waiting for review.'}</p>
+                                        </div>
+                                        <div className="staff-priority-meta">
+                                            <StaffStatusBadge tone={dashboardSummary.pending > 0 ? 'warn' : 'good'}>{dashboardSummary.pending}</StaffStatusBadge>
+                                            <span>Open</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" onClick={() => setActiveTab('ledger')} className="staff-priority-item">
+                                        <div className="staff-priority-copy">
+                                            <span className="staff-item-kicker">Ledger</span>
+                                            <h3>Follow up overdue balances</h3>
+                                            <p>{dashboardSummary.overdue > 0 ? `${dashboardSummary.overdue} balances are past due.` : 'No overdue balances today.'}</p>
+                                        </div>
+                                        <div className="staff-priority-meta">
+                                            <StaffStatusBadge tone={dashboardSummary.overdue > 0 ? 'danger' : 'good'}>{dashboardSummary.overdue}</StaffStatusBadge>
+                                            <span>Open</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-priority-item">
+                                        <div className="staff-priority-copy">
+                                            <span className="staff-item-kicker">Exceptions</span>
+                                            <h3>Resolve provider mismatches</h3>
+                                            <p>{dashboardSummary.exceptions > 0 ? `${dashboardSummary.exceptions} PayMongo/local records need attention.` : 'Provider and local payment state are aligned.'}</p>
+                                        </div>
+                                        <div className="staff-priority-meta">
+                                            <StaffStatusBadge tone={dashboardSummary.exceptions > 0 ? 'danger' : 'good'}>{dashboardSummary.exceptions}</StaffStatusBadge>
+                                            <span>Open</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" onClick={() => setActiveTab('refunds')} className="staff-priority-item">
+                                        <div className="staff-priority-copy">
+                                            <span className="staff-item-kicker">Refunds</span>
+                                            <h3>Process refund cases</h3>
+                                            <p>{dashboardSummary.refunds > 0 ? `${dashboardSummary.refunds} refund cases are waiting.` : 'No refund cases waiting.'}</p>
+                                        </div>
+                                        <div className="staff-priority-meta">
+                                            <StaffStatusBadge tone={dashboardSummary.refunds > 0 ? 'warn' : 'good'}>{dashboardSummary.refunds}</StaffStatusBadge>
+                                            <span>Open</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                        <section className="staff-work-surface">
+                            <div className="staff-surface-head">
+                                <div>
+                                    <p className="marketing-kicker">Recent provider state</p>
+                                    <h3 className="mt-1 text-lg font-black text-slate-950">Exceptions preview</h3>
+                                </div>
+                                {reconciliationItems.length > 0 && (
+                                    <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-row-action">
+                                        View all
+                                    </button>
+                                )}
+                            </div>
+                            {reconciliationItems.length === 0 ? (
+                                <StaffEmptyState title="No provider exceptions" message="PayMongo checkout and local payment records are aligned." />
+                            ) : (
+                                <div className="staff-provider-list">
+                                    {reconciliationItems.slice(0, 5).map((item) => (
+                                        <button key={item.id} type="button" onClick={() => setActiveTab('reconciliation')} className="staff-provider-item">
+                                            <div className="staff-provider-main">
+                                                <span className="staff-item-kicker">Payment #{item.id}</span>
+                                                <h3>{item.client_full_name || 'Customer'}</h3>
+                                                <p>Booking #{item.booking_id} / {formatAccountingDate(item.event_date)}</p>
+                                            </div>
+                                            <div className="staff-provider-tags">
+                                                {(item.exceptions || []).slice(0, 2).map((exception) => (
+                                                    <span key={exception}>{exceptionLabels[exception] || exception}</span>
+                                                ))}
+                                            </div>
+                                            <StaffStatusBadge tone="danger">{(item.exceptions || []).length}</StaffStatusBadge>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
                     </div>
-                    <div className="marketing-metrics">
-                        <div><span>Bookings</span><strong>{dashboardSummary.bookings}</strong></div>
-                        <div><span>Pending</span><strong>{dashboardSummary.pending}</strong></div>
-                        <div><span>Overdue</span><strong>{dashboardSummary.overdue}</strong></div>
-                        <div><span>Refunds</span><strong>{dashboardSummary.refunds}</strong></div>
-                    </div>
-                </section>
-
-                <div className="marketing-nav-wrap mb-5">
-                    <nav className="marketing-nav">
-                        {['bookings', 'ledger', 'refunds'].map((tab) => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`marketing-tab ${activeTab === tab ? 'marketing-tab-active' : ''}`}
-                            >
-                                <span>{tabMeta[tab]}</span>
-                                {tab === 'bookings' && dashboardSummary.pending > 0 && <em>{dashboardSummary.pending}</em>}
-                                {tab === 'refunds' && dashboardSummary.refunds > 0 && <em>{dashboardSummary.refunds}</em>}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
+                )}
 
                 {activeTab === 'bookings' && (
                     <div className="marketing-panel p-5 lg:p-6">
@@ -347,20 +602,6 @@ const DashboardAccounting = () => {
                                             <option value="complete">Complete</option>
                                         </select>
                                     </div>
-                                    <div className="bg-[#fffaf3] p-1 rounded-xl inline-flex flex-shrink-0 self-start border border-amber-100">
-                                        <button onClick={() => setPaymentViewMode('list')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-colors ${paymentViewMode === 'list' ? 'bg-white text-[#720101] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                                            <div className="flex items-center gap-1">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-                                                List
-                                            </div>
-                                        </button>
-                                        <button onClick={() => setPaymentViewMode('card')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition-colors ${paymentViewMode === 'card' ? 'bg-white text-[#720101] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                                            <div className="flex items-center gap-1">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-                                                Cards
-                                            </div>
-                                        </button>
-                                    </div>
                                 </div>
                                 {(() => {
                                     const filteredBookings = bookings;
@@ -370,7 +611,7 @@ const DashboardAccounting = () => {
                                     }
 
                                     return (
-                                        <div className={paymentViewMode === 'card' ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" : "space-y-6"}>
+                                        <div className="space-y-3">
                                             {filteredBookings.map(function (booking) {
                                         var progress = getBookingProgress(booking.payments);
                                         var isExpanded = expandedBooking === booking.id;
@@ -381,22 +622,23 @@ const DashboardAccounting = () => {
                                         var remainingBalance = Math.max(totalCost - paidAmount, 0);
 
                                         return (
-                                            <div key={booking.id} className="bg-white rounded-2xl shadow-sm border border-[#720101]/10 overflow-hidden hover:shadow-md transition-shadow">
+                                            <div key={booking.id} className="bg-white rounded-xl border border-[#720101]/10 overflow-hidden hover:border-[#720101]/20 transition-colors">
                                                 <div
-                                                    className="px-6 py-4 cursor-pointer hover:bg-[#fffaf3] transition-colors"
+                                                    className="px-5 py-4 cursor-pointer hover:bg-[#fffaf3] transition-colors"
                                                     onClick={() => setExpandedBooking(isExpanded ? null : booking.id)}
                                                 >
                                                     <div className="flex items-center justify-between">
                                                         <div className="flex items-center gap-4">
-                                                            <div className="w-10 h-10 bg-[#720101] text-white rounded-full flex items-center justify-center font-bold text-sm ring-4 ring-amber-100">
-                                                                {'#' + booking.id}
+                                                            <div className="min-w-[5.4rem] rounded-lg border border-[#720101]/10 bg-[#fffaf3] px-3 py-2">
+                                                                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Booking</p>
+                                                                <p className="text-sm font-black text-[#720101]">{'#' + booking.id}</p>
                                                             </div>
                                                             <div>
                                                                 <h3 className="font-bold text-slate-950">
                                                                     {booking.client_full_name || booking.username}
                                                                 </h3>
                                                                 <p className="text-sm text-slate-500">
-                                                                    {'Event: ' + booking.event_date + ' | ' + booking.pax + ' pax'}
+                                                                    {formatAccountingDate(booking.event_date)} / {booking.pax || 0} pax
                                                                 </p>
                                                             </div>
                                                         </div>
@@ -471,7 +713,7 @@ const DashboardAccounting = () => {
                                                                             <tr key={payment.id} className="border-b border-amber-100/70 last:border-b-0">
                                                                                 <td className="py-3 pr-4">
                                                                                     <div className="flex items-center gap-2">
-                                                                                        <span className="text-lg w-8 h-8 rounded-full bg-[#720101]/10 flex items-center justify-center font-bold text-[#720101]">{typeInfo.icon}</span>
+                                                                                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#720101]/10 text-sm font-bold text-[#720101]">{typeInfo.icon}</span>
                                                                                         <div>
                                                                                             <p className="font-bold text-slate-950">{typeInfo.label}</p>
                                                                                             <p className="text-xs text-slate-400">{typeInfo.pct + ' of total'}</p>
@@ -482,10 +724,10 @@ const DashboardAccounting = () => {
                                                                                     <span className="font-bold text-slate-950">{'P' + (payment.amount ? payment.amount.toLocaleString() : '0')}</span>
                                                                                 </td>
                                                                                 <td className="text-center py-3 px-4">
-                                                                                    <span className="text-slate-600">{payment.due_date || '-'}</span>
+                                                                                    <span className="text-slate-600">{formatAccountingDate(payment.due_date, '-')}</span>
                                                                                 </td>
                                                                                 <td className="text-center py-3 px-4">
-                                                                                    <span className={'inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ' + badge.cls}>
+                                                                                    <span className={'staff-status ' + badge.cls}>
                                                                                         {badge.text}
                                                                                     </span>
                                                                                 </td>
@@ -556,8 +798,8 @@ const DashboardAccounting = () => {
                                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                                     Edit Term
                                                                 </button>
-                                                                <div className="text-xs text-slate-400">
-                                                                    {'Booking #' + booking.id + ' | Status: ' + booking.status}
+                                                                <div className="text-xs font-bold text-slate-400">
+                                                                    {'#' + booking.id + ' / ' + booking.status}
                                                                 </div>
                                                             </div>
                                                             <div className="flex gap-6 text-sm">
@@ -615,7 +857,7 @@ const DashboardAccounting = () => {
                 )}
                 {activeTab === 'ledger' && (
                     <div>
-                        <div className="marketing-panel p-5 mb-6 flex flex-wrap gap-4 items-end">
+                        <div className="marketing-panel staff-filter-bar mb-4">
                             <div className="flex flex-col flex-1 min-w-[200px]">
                                 <label className="text-xs font-black uppercase text-slate-500 mb-1">Search Client</label>
                                 <input
@@ -623,7 +865,7 @@ const DashboardAccounting = () => {
                                     placeholder="Search by name..."
                                     value={ledgerFilter.clientSearch || ''}
                                     onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { clientSearch: e.target.value })); }}
-                                    className="border border-[#720101]/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#720101]/20 focus:border-[#720101]/30 w-full bg-white text-slate-700"
+                                    className="staff-control"
                                 />
                             </div>
                             <div className="flex flex-col min-w-[150px]">
@@ -631,7 +873,7 @@ const DashboardAccounting = () => {
                                 <select
                                     value={ledgerFilter.packageFilter || 'All'}
                                     onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { packageFilter: e.target.value })); }}
-                                    className="border border-[#720101]/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#720101]/20 focus:border-[#720101]/30 bg-white text-slate-700"
+                                    className="staff-control"
                                 >
                                     <option value="All">All Packages</option>
                                     <option value="standard">Standard</option>
@@ -645,7 +887,7 @@ const DashboardAccounting = () => {
                                 <select
                                     value={ledgerFilter.status}
                                     onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { status: e.target.value })); }}
-                                    className="border border-[#720101]/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#720101]/20 focus:border-[#720101]/30 bg-white text-slate-700"
+                                    className="staff-control"
                                 >
                                     <option value="All">All</option>
                                     <option value="Verified">Verified</option>
@@ -659,7 +901,7 @@ const DashboardAccounting = () => {
                                     type="date"
                                     value={ledgerFilter.startDate}
                                     onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { startDate: e.target.value })); }}
-                                    className="border border-[#720101]/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#720101]/20 focus:border-[#720101]/30 bg-white text-slate-700"
+                                    className="staff-control"
                                 />
                             </div>
                             <div className="flex flex-col">
@@ -668,7 +910,7 @@ const DashboardAccounting = () => {
                                     type="date"
                                     value={ledgerFilter.endDate}
                                     onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { endDate: e.target.value })); }}
-                                    className="border border-[#720101]/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#720101]/20 focus:border-[#720101]/30 bg-white text-slate-700"
+                                    className="staff-control"
                                 />
                             </div>
                         </div>
@@ -701,16 +943,18 @@ const DashboardAccounting = () => {
                                     grouped[p.booking_id].payments.push(p);
                                 });
                                 const groupedArray = Object.values(grouped);
+                                const pagedGroupedArray = paginate(groupedArray, ledgerPage, ledgerPerPage);
 
                                 return (
-                                    <div className="space-y-6">
-                                        {groupedArray.map(booking => (
-                                            <div key={booking.id} className="bg-white border border-[#720101]/10 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                    <>
+                                    <div className="space-y-4">
+                                        {pagedGroupedArray.map(booking => (
+                                            <div key={booking.id} className="bg-white border border-[#720101]/10 rounded-xl overflow-hidden hover:border-[#720101]/20 transition-colors">
                                                 <div className="bg-[#fffaf3] px-6 py-4 border-b border-amber-100 flex flex-wrap justify-between items-center gap-4">
                                                     <div>
                                                         <h3 className="text-lg font-bold text-slate-950">{booking.client_full_name}</h3>
                                                         <p className="text-sm text-slate-500 mt-1">
-                                                            Booking #{booking.id} <span className="mx-2">•</span> 
+                                                            Booking #{booking.id} <span className="mx-2">/</span>
                                                             <span className="font-medium">{booking.package_id ? booking.package_id.charAt(0).toUpperCase() + booking.package_id.slice(1) : 'Custom'} Package</span>
                                                         </p>
                                                     </div>
@@ -739,7 +983,7 @@ const DashboardAccounting = () => {
                                                                     <tr key={p.id} className="hover:bg-[#fffaf3] transition-colors">
                                                                         <td className="py-4 px-6">
                                                                             <div className="flex items-center gap-3">
-                                                                                <div className="w-8 h-8 rounded-full bg-[#720101]/10 text-[#720101] flex items-center justify-center text-xs font-bold ring-1 ring-[#720101]/10">
+                                                                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#720101]/10 text-xs font-bold text-[#720101] ring-1 ring-[#720101]/10">
                                                                                     {typeInfo.icon}
                                                                                 </div>
                                                                                 <span className="font-bold text-slate-950">{typeInfo.label}</span>
@@ -752,7 +996,7 @@ const DashboardAccounting = () => {
                                                                             {p.due_date ? new Date(p.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}
                                                                         </td>
                                                                         <td className="py-4 px-6 text-center">
-                                                                            <span className={'inline-flex px-3 py-1 rounded-full text-xs font-bold tracking-wide shadow-sm ' + badge.cls}>
+                                                                            <span className={'staff-status ' + badge.cls}>
                                                                                 {badge.text}
                                                                             </span>
                                                                         </td>
@@ -765,22 +1009,125 @@ const DashboardAccounting = () => {
                                             </div>
                                         ))}
                                     </div>
+                                    <StaffPagination page={ledgerPage} perPage={ledgerPerPage} total={groupedArray.length} onPageChange={setLedgerPage} onPerPageChange={setLedgerPerPage} />
+                                    </>
                                 );
                             })()}
                         </div>
                     </div>
                 )}
 
+                {activeTab === 'reconciliation' && (
+                    <div className="marketing-panel overflow-hidden">
+                        <div className="staff-filter-bar">
+                            <input
+                                value={reconciliationSearch}
+                                onChange={(event) => setReconciliationSearch(event.target.value)}
+                                className="staff-control"
+                                placeholder="Search booking, customer, or provider reference"
+                            />
+                            <select value={reconciliationTypeFilter} onChange={(event) => setReconciliationTypeFilter(event.target.value)} className="staff-control">
+                                <option value="all">All exception types</option>
+                                {Object.entries(exceptionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                            </select>
+                        </div>
+                        {loading ? (
+                            <div className="p-6 text-center text-slate-500">Loading reconciliation...</div>
+                        ) : filteredReconciliationItems.length === 0 ? (
+                            <div className="p-12 text-center flex flex-col items-center">
+                                <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 mb-4">
+                                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-950">No payment exceptions</h3>
+                                <p className="text-slate-500 mt-1 max-w-sm">Online checkout and local payment records are currently aligned.</p>
+                            </div>
+                        ) : (
+                            <>
+                            <div className="staff-table-wrap custom-scrollbar">
+                                <table className="staff-table">
+                                    <thead>
+                                        <tr>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Payment</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Customer</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Provider References</th>
+                                            <th className="px-6 py-4 text-center font-bold text-slate-500 uppercase tracking-wider text-xs">Webhook</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Exception</th>
+                                            <th className="px-6 py-4 text-right font-bold text-slate-500 uppercase tracking-wider text-xs">Next Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pagedReconciliationItems.map((item) => {
+                                            const nextAction = getReconciliationAction(item);
+
+                                            return (
+                                            <tr key={item.id} className="border-b border-amber-50 hover:bg-[#fffaf3] transition-colors">
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-slate-950">#{item.id} / Booking #{item.booking_id}</div>
+                                                    <div className="text-xs text-slate-500 mt-0.5">{item.payment_type || 'Payment'} / {item.status}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-slate-950">{item.client_full_name || 'Customer'}</div>
+                                                    <div className="text-xs text-slate-500 mt-0.5">{formatAccountingDate(item.event_date)}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="space-y-1 text-xs font-semibold text-slate-500">
+                                                        <div>Checkout: <span className="font-mono text-slate-800">{item.paymongo_checkout_session_id || '-'}</span></div>
+                                                        <div>Payment: <span className="font-mono text-slate-800">{item.paymongo_payment_id || '-'}</span></div>
+                                                        <div>Reference: <span className="font-mono text-slate-800">{item.paymongo_reference_number || '-'}</span></div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    <span className={`staff-status ${item.webhook_received ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                                        {item.webhook_received ? 'Received' : 'Not Received'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(item.exceptions || []).map((exception) => (
+                                                            <span key={exception} className="staff-status bg-red-50 text-red-700 ring-1 ring-red-100">
+                                                                {exceptionLabels[exception] || exception}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <div className="staff-recon-action">
+                                                        <p>{nextAction.detail}</p>
+                                                        <button
+                                                            type="button"
+                                                            disabled={nextAction.disabled}
+                                                            onClick={nextAction.onClick}
+                                                            className={`staff-row-action ${nextAction.tone === 'primary' ? 'staff-row-action-primary' : ''} ${nextAction.tone === 'danger' ? 'staff-row-action-danger' : ''} ${nextAction.disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            {nextAction.label}
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <StaffPagination page={reconciliationPage} perPage={reconciliationPerPage} total={filteredReconciliationItems.length} onPageChange={setReconciliationPage} onPerPageChange={setReconciliationPerPage} />
+                            </>
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'refunds' && (
                     <div className="marketing-panel overflow-hidden">
-                        <div className="px-6 py-5 border-b border-amber-100 bg-[#fffaf3]">
-                            <p className="marketing-kicker">Refund Queue</p>
-                            <h3 className="mt-1 text-lg font-bold text-slate-950">Refund Queue</h3>
-                            <p className="text-sm text-slate-500 mt-1">Process manual financial returns for cancelled events outside the 7-day lock-in period. A 10% reservation fee will be deducted.</p>
+                        <div className="staff-filter-bar">
+                            <input
+                                value={refundSearch}
+                                onChange={(event) => setRefundSearch(event.target.value)}
+                                className="staff-control"
+                                placeholder="Search booking, customer, or email"
+                            />
                         </div>
                         {loading ? (
                             <div className="p-6 text-center text-slate-500">Loading refund queue...</div>
-                        ) : refundQueue.length === 0 ? (
+                        ) : filteredRefundQueue.length === 0 ? (
                             <div className="p-12 text-center flex flex-col items-center">
                                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 mb-4">
                                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -789,9 +1136,10 @@ const DashboardAccounting = () => {
                                 <p className="text-slate-500 mt-1 max-w-sm">There are currently no cancelled bookings with un-refunded payments.</p>
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-white border-b border-amber-100">
+                            <>
+                            <div className="staff-table-wrap custom-scrollbar">
+                                <table className="staff-table">
+                                    <thead>
                                         <tr>
                                             <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs w-20">Booking No.</th>
                                             <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Client Name</th>
@@ -802,7 +1150,7 @@ const DashboardAccounting = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {refundQueue.map((item) => {
+                                        {pagedRefundQueue.map((item) => {
                                             // Deduct 10% penalty for late cancellation
                                             const penalty = item.total_paid * 0.10;
                                             const refundAmount = item.total_paid - penalty;
@@ -814,17 +1162,17 @@ const DashboardAccounting = () => {
                                                         <div className="font-bold text-slate-950">{item.client_full_name}</div>
                                                         <div className="text-xs text-slate-500 mt-0.5">{item.client_email}</div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center text-slate-600 font-medium whitespace-nowrap">{item.event_date}</td>
+                                                    <td className="px-6 py-4 text-center text-slate-600 font-medium whitespace-nowrap">{formatAccountingDate(item.event_date)}</td>
                                                     <td className="px-6 py-4 text-right hidden md:table-cell text-slate-500 line-through">
-                                                        ₱{item.total_paid ? item.total_paid.toLocaleString() : '0'}
+                                                        PHP {item.total_paid ? item.total_paid.toLocaleString() : '0'}
                                                     </td>
                                                     <td className="px-6 py-4 text-right font-bold text-[#720101]">
-                                                        ₱{refundAmount > 0 ? refundAmount.toLocaleString() : '0'}
-                                                        <div className="text-[10px] text-slate-400 font-normal mt-1">(₱{penalty.toLocaleString()} fee deducted)</div>
+                                                        PHP {refundAmount > 0 ? refundAmount.toLocaleString() : '0'}
+                                                        <div className="text-[10px] text-slate-400 font-normal mt-1">(PHP {penalty.toLocaleString()} fee deducted)</div>
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
                                                         <button
-                                                            onClick={() => handleProcessRefund(item.booking_id)}
+                                                            onClick={() => openRefundConfirm(item.booking_id, refundAmount)}
                                                             className="marketing-primary-btn px-4 py-2 text-sm whitespace-nowrap"
                                                         >
                                                             Process Refund
@@ -836,11 +1184,11 @@ const DashboardAccounting = () => {
                                     </tbody>
                                 </table>
                             </div>
+                            <StaffPagination page={refundPage} perPage={refundPerPage} total={filteredRefundQueue.length} onPageChange={setRefundPage} onPerPageChange={setRefundPerPage} />
+                            </>
                         )}
                     </div>
                 )}
-            </main>
-
             {/* Receipt Modal */}
             <ReceiptModal
                 isOpen={receiptModal.isOpen}
@@ -862,8 +1210,19 @@ const DashboardAccounting = () => {
                 }}
             />
 
+            <ConfirmModal
+                isOpen={refundConfirm.isOpen}
+                title={`Process refund for booking #${refundConfirm.bookingId || ''}?`}
+                message={`Accounting will create a refund case, retain the non-refundable reservation fee, and refund ${'P' + Number(refundConfirm.refundAmount || 0).toLocaleString()} where provider references are available.`}
+                confirmText="Process Refund"
+                tone="danger"
+                busy={refundProcessing}
+                onCancel={() => setRefundConfirm({ isOpen: false, bookingId: null, refundAmount: 0 })}
+                onConfirm={handleProcessRefund}
+            />
+
             {toast && (
-                <div className="pointer-events-none fixed right-5 top-24 z-50 animate-slideUp">
+                <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                     <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                         <span className={'min-w-0 flex-1 font-semibold leading-5 ' + (toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]')}>{toast.message}</span>
                         <button onClick={function () { setToast(null); }} className="-mr-1 rounded-md p-1 text-[#8a6a46] transition hover:bg-[#f5eadb] hover:text-[#720101]">
@@ -872,7 +1231,7 @@ const DashboardAccounting = () => {
                     </div>
                 </div>
             )}
-        </div>
+        </StaffWorkspaceLayout>
     );
 };
 

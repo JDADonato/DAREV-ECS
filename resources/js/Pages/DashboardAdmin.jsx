@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import ConfirmModal from '../Components/common/ConfirmModal';
 import { getListData } from '../utils/apiResponses';
 import {
     formatBookingRef,
@@ -22,6 +23,7 @@ import {
 
 const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
 const PaymentTermEditorModal = lazy(() => import('../Components/finance/PaymentTermEditorModal'));
+const PreparationBoard = lazy(() => import('../Components/operations/PreparationBoard'));
 
 const paymentLabel = (type) => ({
     Reservation: 'Reservation Fee',
@@ -332,6 +334,7 @@ const DashboardAdmin = () => {
 
     // Toast notification
     const [toast, setToast] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', tone: 'default', busy: false, onConfirm: null });
     const { bustCache: bustAdminCache, fetchCachedJson } = useCachedJson(['/api/admin/audits?per_page=100']);
     const [packagePage, setPackagePage] = useState(1);
     const [eventTypePage, setEventTypePage] = useState(1);
@@ -381,6 +384,10 @@ const DashboardAdmin = () => {
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
+    };
+
+    const closeConfirmDialog = () => {
+        setConfirmDialog({ isOpen: false, title: '', message: '', confirmText: 'Confirm', tone: 'default', busy: false, onConfirm: null });
     };
 
     const formatAnalyticsCardValue = (value, format) => {
@@ -474,6 +481,11 @@ const DashboardAdmin = () => {
             title: 'Refund Queue',
             description: 'Process cancelled booking refunds while retaining reservation fees.',
         },
+        preparation: {
+            eyebrow: 'Operations handoff',
+            title: 'Preparation Board',
+            description: 'Track readiness and event preparation tasks for upcoming approved bookings.',
+        },
         audits: {
             eyebrow: 'Control history',
             title: 'Audits',
@@ -486,6 +498,7 @@ const DashboardAdmin = () => {
             items: [
                 { id: 'dashboard', label: 'Overview' },
                 { id: 'bookings', label: 'Bookings' },
+                { id: 'preparation', label: 'Preparation' },
                 { id: 'refunds', label: 'Refunds' },
             ],
         },
@@ -651,7 +664,7 @@ const DashboardAdmin = () => {
     }, [activeTab, availabilityMonth]);
 
     useSmartRefresh({
-        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
+        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'preparation', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
         interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
@@ -963,7 +976,18 @@ const DashboardAdmin = () => {
     };
 
     const handleDeleteEventType = async (eventType) => {
-        if (!confirm(`Delete ${eventType.label}? Packages using this type will move to Other.`)) return;
+        setConfirmDialog({
+            isOpen: true,
+            title: `Delete ${eventType.label}?`,
+            message: 'Packages using this event type will move to Other.',
+            confirmText: 'Delete',
+            tone: 'danger',
+            onConfirm: () => confirmDeleteEventType(eventType),
+        });
+    };
+
+    const confirmDeleteEventType = async (eventType) => {
+        closeConfirmDialog();
         setPackageSaving(true);
         try {
             const res = await fetch(`/api/admin/event-types/${eventType.id}`, { method: 'DELETE' });
@@ -1058,7 +1082,18 @@ const DashboardAdmin = () => {
     };
 
     const handleDeleteMenuItem = async (id) => {
-        if (!confirm('Are you sure you want to delete this menu item?')) return;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete menu item?',
+            message: 'This dish will no longer be available in the menu catalog.',
+            confirmText: 'Delete',
+            tone: 'danger',
+            onConfirm: () => confirmDeleteMenuItem(id),
+        });
+    };
+
+    const confirmDeleteMenuItem = async (id) => {
+        closeConfirmDialog();
         try {
             const res = await fetch(`/api/admin/menu-items/${id}`, { method: 'DELETE' });
             if (res.ok) {
@@ -1249,8 +1284,18 @@ const DashboardAdmin = () => {
 
     const deleteSavedReport = async () => {
         if (!reportTemplateId) return;
-        if (!window.confirm('Delete this saved report?')) return;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete saved report?',
+            message: 'This removes the saved report template from the builder.',
+            confirmText: 'Delete',
+            tone: 'danger',
+            onConfirm: confirmDeleteSavedReport,
+        });
+    };
 
+    const confirmDeleteSavedReport = async () => {
+        closeConfirmDialog();
         try {
             const res = await fetch(`/api/admin/report-templates/${reportTemplateId}`, { method: 'DELETE' });
             if (!res.ok) throw new Error('Delete failed');
@@ -1520,10 +1565,18 @@ const DashboardAdmin = () => {
     };
 
     const handleProcessRefund = async (bookingId) => {
-        if (!window.confirm(`Process refund for booking #${bookingId}? The 10% reservation fee will be retained.`)) {
-            return;
-        }
+        setConfirmDialog({
+            isOpen: true,
+            title: `Process refund for booking #${bookingId}?`,
+            message: 'The non-refundable reservation fee will be retained and a refund case will be recorded.',
+            confirmText: 'Process Refund',
+            tone: 'danger',
+            onConfirm: () => confirmProcessRefund(bookingId),
+        });
+    };
 
+    const confirmProcessRefund = async (bookingId) => {
+        closeConfirmDialog();
         setProcessingRefundId(bookingId);
         try {
             const res = await fetch(`/api/admin/refund/${bookingId}`, {
@@ -1597,7 +1650,18 @@ const DashboardAdmin = () => {
     };
 
     const handleDeleteEmployee = async (id) => {
-        if (!window.confirm("Are you sure you want to delete this employee?")) return;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete employee account?',
+            message: 'This staff account will lose access to the system.',
+            confirmText: 'Delete',
+            tone: 'danger',
+            onConfirm: () => confirmDeleteEmployee(id),
+        });
+    };
+
+    const confirmDeleteEmployee = async (id) => {
+        closeConfirmDialog();
         try {
             // Session auth - no token needed
             const res = await fetch(`/api/admin/employees/${id}`, {
@@ -1618,7 +1682,18 @@ const DashboardAdmin = () => {
     };
 
     const handleDeleteCustomer = async (id) => {
-        if (!window.confirm("Delete this customer account? This will also remove records tied to the account, including bookings.")) return;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete customer account?',
+            message: 'This will also remove records tied to the account, including bookings.',
+            confirmText: 'Delete',
+            tone: 'danger',
+            onConfirm: () => confirmDeleteCustomer(id),
+        });
+    };
+
+    const confirmDeleteCustomer = async (id) => {
+        closeConfirmDialog();
         try {
             const res = await fetch(`/api/admin/customers/${id}`, {
                 method: 'DELETE',
@@ -3716,6 +3791,11 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
+                    {activeTab === 'preparation' && (
+                        <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading preparation board...</div>}>
+                            <PreparationBoard />
+                        </Suspense>
+                    )}
                     {
                         activeTab === 'refunds' && (
                             <div className="animate-fadeIn space-y-5">
@@ -4051,25 +4131,25 @@ const DashboardAdmin = () => {
                                                 <p className="text-sm font-semibold text-gray-900">{eventDetailsModal.data?.client_full_name || eventDetailsModal.data?.username || 'N/A'}</p>
                                             </div>
                                             <div>
-                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Comm Link (Email)</p>
+                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Email)</p>
                                                 <p className="text-sm text-gray-700">{eventDetailsModal.data?.client_email || 'N/A'}</p>
                                             </div>
                                             <div>
-                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Comm Link (Phone)</p>
+                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Phone)</p>
                                                 <p className="text-sm text-gray-700">{eventDetailsModal.data?.client_phone || 'N/A'}</p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Temporal Constraints */}
+                                    {/* Schedule */}
                                     <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
                                         <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-4 flex items-center gap-2">
                                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                            Temporal Constraints
+                                            Schedule
                                         </h4>
                                         <div className="space-y-3">
                                             <div>
-                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Execution Date</p>
+                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Event Date</p>
                                                 <p className="text-sm font-semibold text-gray-900">{eventDetailsModal.data?.event_date}</p>
                                             </div>
                                             <div className="grid grid-cols-2 gap-2">
@@ -4079,7 +4159,7 @@ const DashboardAdmin = () => {
                                                 </div>
                                             </div>
                                             <div>
-                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Status Payload</p>
+                                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Booking Status</p>
                                                 <span className={`inline-flex mt-1 items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${eventDetailsModal.data?.status === 'Confirmed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
                                                     }`}>
                                                     {eventDetailsModal.data?.status}
@@ -4178,6 +4258,19 @@ const DashboardAdmin = () => {
                                         </table>
                                     </div>
                                 </div>
+                                {eventDetailsModal.data?.preparation_tasks?.length > 0 && (
+                                    <div>
+                                        <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Preparation Tasks</h4>
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            {eventDetailsModal.data.preparation_tasks.map(task => (
+                                                <div key={task.id} className={`rounded-lg border px-4 py-3 ${task.status === 'Done' ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-[#fffaf3]'}`}>
+                                                    <p className="text-sm font-bold text-gray-900">{task.label}</p>
+                                                    <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-gray-400">{task.department} / {task.status}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                         </>
                                     );
                                 })()}
@@ -4341,10 +4434,21 @@ const DashboardAdmin = () => {
                 </div>
             )}
 
+            <ConfirmModal
+                isOpen={confirmDialog.isOpen}
+                title={confirmDialog.title}
+                message={confirmDialog.message}
+                confirmText={confirmDialog.confirmText}
+                tone={confirmDialog.tone}
+                busy={confirmDialog.busy}
+                onCancel={closeConfirmDialog}
+                onConfirm={confirmDialog.onConfirm}
+            />
+
             {/* Toast */}
             {
                 toast && (
-                    <div className="pointer-events-none fixed right-5 top-24 z-50 animate-slideUp">
+                    <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                         <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                             <span className={`min-w-0 flex-1 font-semibold leading-5 ${toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]'}`}>{toast.message}</span>
                         </div>

@@ -1,15 +1,21 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, usePage, router } from '@inertiajs/react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import { useToast } from '../../context/ToastContext';
 import UserDropdown from '../../Components/common/UserDropdown';
 import NotificationBell from '../../Components/common/NotificationBell';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import logoImg from '../../../images/ECS_LOGO.png';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import ConfirmModal from '../../Components/common/ConfirmModal';
 
 const CATEGORY_LIMITS = { starter: 3, main: 4, side: 4, dessert: 4, drink: 3 };
 const STORAGE_KEY = 'ecs_booking_draft';
+
+const trackPublicFunnel = (event, payload = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('ecs:funnel', { detail: { event, ...payload } }));
+    window.dataLayer?.push({ event: `ecs_${event}`, ...payload });
+};
 
 const MenuGallery = () => {
     const { auth } = usePage().props;
@@ -28,9 +34,15 @@ const MenuGallery = () => {
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showConflictModal, setShowConflictModal] = useState(false);
+    const [exitBuildConfirmOpen, setExitBuildConfirmOpen] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
     const menuStartRef = useRef(null);
     const ITEMS_PER_PAGE = 9;
+
+    const exitBuildMode = () => {
+        setIsSelectionMode(false);
+        setExitBuildConfirmOpen(false);
+    };
 
     // Package builder state
     const [packageSelections, setPackageSelections] = useState({
@@ -184,6 +196,7 @@ const MenuGallery = () => {
     };
 
     const handleProceedToBooking = () => {
+        trackPublicFunnel('menu_to_booking', { selected_dishes: totalPackageDishes });
         // Check for existing booking draft
         try {
             const existing = localStorage.getItem(STORAGE_KEY);
@@ -277,6 +290,9 @@ const MenuGallery = () => {
 
     return (
         <div className="min-h-screen bg-white pt-[68px]">
+            <Head title="Menu Gallery | Eloquente Catering">
+                <meta name="description" content="Browse Eloquente Catering dishes, best sellers, price indicators, and build a custom menu package before booking." />
+            </Head>
             <ClientNavbar user={user} />
             {/* Navbar */}
             <nav className="hidden bg-brand-red shadow-lg py-4 relative z-50">
@@ -412,7 +428,10 @@ const MenuGallery = () => {
                                 </p>
                             </div>
                             <button
-                                onClick={() => setIsSelectionMode(true)}
+                                onClick={() => {
+                                    trackPublicFunnel('menu_plan_started');
+                                    setIsSelectionMode(true);
+                                }}
                                 className="flex items-center gap-2 bg-red-900 text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-red-800 transition-all shadow-md hover:shadow-lg transform hover:scale-[1.02] active:scale-95 whitespace-nowrap"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
@@ -445,8 +464,11 @@ const MenuGallery = () => {
                                 )}
                                 <button
                                     onClick={() => {
-                                        if (totalPackageDishes > 0 && !confirm('Exit build mode? Your selections will be kept.')) return;
-                                        setIsSelectionMode(false);
+                                        if (totalPackageDishes > 0) {
+                                            setExitBuildConfirmOpen(true);
+                                            return;
+                                        }
+                                        exitBuildMode();
                                     }}
                                     className="flex items-center gap-1.5 bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all"
                                 >
@@ -888,6 +910,15 @@ const MenuGallery = () => {
                 </div>
             )}
 
+            <ConfirmModal
+                isOpen={exitBuildConfirmOpen}
+                title="Exit build mode?"
+                message="Your dish selections will be kept so you can return to this package later."
+                confirmText="Exit"
+                onCancel={() => setExitBuildConfirmOpen(false)}
+                onConfirm={exitBuildMode}
+            />
+
             {/* Scroll to Top Button */}
             {showScrollTop && (
                 <button
@@ -899,8 +930,6 @@ const MenuGallery = () => {
                     <svg className="w-5 h-5 text-red-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
                 </button>
             )}
-            {/* Chat Bubble */}
-            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

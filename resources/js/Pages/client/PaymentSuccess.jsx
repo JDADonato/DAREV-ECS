@@ -103,6 +103,4 @@ const PaymentSuccess = ({ paymentStatus = 'Pending', syncMessage = 'Payment is s
     );
 };
 
-PaymentSuccess.layout = (page) => page;
-
 export default PaymentSuccess;

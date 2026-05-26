@@ -1,14 +1,14 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { router } from '@inertiajs/react';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import ConfirmModal from '../../Components/common/ConfirmModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
 
 const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
 
-const peso = (value) => `₱${Number(value || 0).toLocaleString()}`;
+const peso = (value) => `PHP ${Number(value || 0).toLocaleString()}`;
 const settledStatuses = ['Paid', 'Verified'];
 const isSettledPaymentStatus = (status) => settledStatuses.includes(status);
 const paymentLabel = (type) => ({
@@ -26,6 +26,16 @@ const menuCategories = [
 ];
 const dashboardSections = ['details', 'menu', 'tastings', 'payments', 'history'];
 const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
+const sharedSelectedBookingKey = 'ecs_selected_booking_id';
+const formatEventDate = (date, options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) => (
+    date ? new Date(date).toLocaleDateString('en-US', options) : 'Date pending'
+);
+const toDateInputValue = (date) => {
+    if (!date) return '';
+    const parsed = new Date(date);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString().slice(0, 10);
+};
 
 const readStoredDashboardValue = (key, fallback = null) => {
     if (typeof window === 'undefined') return fallback;
@@ -47,6 +57,153 @@ const writeStoredDashboardValue = (key, value) => {
     }
 };
 
+const readStoredDashboardJson = (key, fallback = null) => {
+    if (typeof window === 'undefined') return fallback;
+
+    try {
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : fallback;
+    } catch (e) {
+        return fallback;
+    }
+};
+
+const writeStoredDashboardJson = (key, value) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+        // Cache is a speed boost only.
+    }
+};
+
+const quickTimes = [
+    { label: '8:00 AM', value: '08:00' },
+    { label: '10:00 AM', value: '10:00' },
+    { label: '12:00 PM', value: '12:00' },
+    { label: '2:00 PM', value: '14:00' },
+    { label: '4:00 PM', value: '16:00' },
+    { label: '6:00 PM', value: '18:00' },
+    { label: '8:00 PM', value: '20:00' },
+];
+
+const motifPresets = [
+    { label: 'Burgundy', value: '#720101' },
+    { label: 'Gold', value: '#f0aa0b' },
+    { label: 'Ivory', value: '#fff7e6' },
+    { label: 'Navy', value: '#0f2742' },
+    { label: 'Sage', value: '#7f9a7a' },
+    { label: 'Blush', value: '#e7aaa5' },
+    { label: 'Black', value: '#151515' },
+];
+
+const timelineTemplates = {
+    Wedding: [
+        { time: '16:00', activity: 'Supplier ingress', note: 'Venue access and setup' },
+        { time: '17:30', activity: 'Guest arrival', note: 'Welcome and registration' },
+        { time: '19:00', activity: 'Dinner service', note: 'Serve after program cue' },
+    ],
+    Debut: [
+        { time: '15:00', activity: 'Supplier ingress', note: 'Setup and final styling' },
+        { time: '18:00', activity: 'Program starts', note: 'Entrance and opening remarks' },
+        { time: '19:30', activity: 'Dinner service', note: 'Coordinate with host' },
+    ],
+    Birthday: [
+        { time: '14:00', activity: 'Supplier ingress', note: 'Setup buffet and decor' },
+        { time: '16:00', activity: 'Guest arrival', note: 'Start receiving guests' },
+        { time: '17:00', activity: 'Food service', note: 'Open buffet' },
+    ],
+    Corporate: [
+        { time: '08:00', activity: 'Supplier ingress', note: 'Setup registration and meal area' },
+        { time: '10:00', activity: 'Program starts', note: 'Coordinate with event lead' },
+        { time: '12:00', activity: 'Meal service', note: 'Lunch service window' },
+    ],
+};
+
+const specialInstructionFields = [
+    { key: 'dietary', label: 'Dietary and allergies', placeholder: 'Allergies, halal, vegetarian, no pork...' },
+    { key: 'access', label: 'Access, loading, parking', placeholder: 'Parking, gate pass, elevator, loading bay...' },
+    { key: 'vip', label: 'VIP and program notes', placeholder: 'VIP tables, host cues, sensitive timing...' },
+    { key: 'other', label: 'Other instructions', placeholder: 'Anything else the team should know.' },
+];
+
+const formatTimeLabel = (value) => {
+    if (!value) return '';
+    const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return value;
+    const hour = Number(match[1]);
+    const minute = match[2];
+    const suffix = hour >= 12 ? 'PM' : 'AM';
+    return `${hour % 12 || 12}:${minute} ${suffix}`;
+};
+
+const parseEventStartTime = (value) => {
+    if (!value) return '';
+    const simple = String(value).match(/^(\d{1,2}):(\d{2})/);
+    if (simple) return `${String(simple[1]).padStart(2, '0')}:${simple[2]}`;
+    const meridiem = String(value).match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!meridiem) return '';
+    let hour = Number(meridiem[1]);
+    if (meridiem[3].toUpperCase() === 'PM' && hour !== 12) hour += 12;
+    if (meridiem[3].toUpperCase() === 'AM' && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, '0')}:${meridiem[2]}`;
+};
+
+const addMinutesToTime = (value, minutesToAdd) => {
+    const start = parseEventStartTime(value);
+    if (!start) return '';
+    const [hours, minutes] = start.split(':').map(Number);
+    const total = (hours * 60 + minutes + minutesToAdd + 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
+const parseTimelineRows = (value) => {
+    const lines = String(value || '').split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) return [{ time: '', activity: '', note: '' }];
+    return lines.map((line) => {
+        const match = line.match(/^(.+?)\s[-–]\s(.+?)(?:\s[-–]\s(.+))?$/);
+        return match
+            ? { time: parseEventStartTime(match[1]) || match[1], activity: match[2] || '', note: match[3] || '' }
+            : { time: '', activity: line, note: '' };
+    });
+};
+
+const serializeTimelineRows = (rows) => rows
+    .filter(row => row.time || row.activity || row.note)
+    .map(row => [formatTimeLabel(row.time) || row.time, row.activity, row.note].filter(Boolean).join(' - '))
+    .join('\n');
+
+const parseSpecialInstructions = (value) => {
+    const text = String(value || '');
+    const sections = { dietary: '', access: '', vip: '', other: text };
+    specialInstructionFields.forEach((field) => {
+        const pattern = new RegExp(`${field.label}:\\s*([\\s\\S]*?)(?=\\n[A-Za-z, &]+:|$)`, 'i');
+        const match = text.match(pattern);
+        if (match) {
+            sections[field.key] = match[1].trim();
+            if (field.key !== 'other') sections.other = sections.other.replace(match[0], '').trim();
+        }
+    });
+    return sections;
+};
+
+const serializeSpecialInstructions = (sections) => specialInstructionFields
+    .map(field => ({ label: field.label, value: String(sections[field.key] || '').trim() }))
+    .filter(field => field.value)
+    .map(field => `${field.label}: ${field.value}`)
+    .join('\n');
+
+const hasSelectedMenu = (selectedMenu) => {
+    if (!selectedMenu) return false;
+    try {
+        const parsed = typeof selectedMenu === 'string' ? JSON.parse(selectedMenu || '{}') : selectedMenu;
+        return Object.values(parsed || {}).some(items => Array.isArray(items) ? items.length > 0 : Boolean(items));
+    } catch (e) {
+        return Boolean(selectedMenu);
+    }
+};
+
 const buildJourneySteps = (booking, payments) => {
     const bookingPayments = payments.filter((payment) => payment.booking_id === booking.id);
     const total = Number(booking.total_cost || 0);
@@ -56,26 +213,33 @@ const buildJourneySteps = (booking, payments) => {
     const isApproved = ['Confirmed', 'Reserved', 'Completed'].includes(booking.status);
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettledPaymentStatus(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
-    const menuDone = Boolean(booking.selected_menu);
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettledPaymentStatus(payment.status));
-    const hasClarification = Boolean(booking.clarification_request);
     const needsClarification = Boolean(booking.clarification_request && !booking.clarification_response);
+    const needsMenuSelection = !hasSelectedMenu(booking.selected_menu);
 
-    return [
-        { label: 'Booking submitted', done: true, action: 'Review event details' },
-        {
-            label: 'Staff request',
-            done: hasClarification && !needsClarification,
-            action: hasClarification ? 'Answer the details requested by the team' : 'No staff details requested yet',
-            isPendingGate: needsClarification,
-            notRequired: !hasClarification,
-        },
-        { label: 'Menu selection', done: menuDone, action: 'Finalize menu choices' },
-        { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', isPendingGate: !isApproved },
-        { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', locked: !isApproved },
-        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline, venue notes, and motif' },
-        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${paymentLabel(booking.nextPaymentDue.payment_type)}` : 'No remaining payment', locked: !isApproved },
+    const steps = [
+        { label: 'Booking approved', done: isApproved, action: 'Awaiting Marketing Executive approval', tab: 'details', target: 'approval-status-panel', isPendingGate: !isApproved },
+        { label: 'Reservation payment', done: hasReservation, action: 'Complete the reservation fee', tab: 'payments', locked: !isApproved },
+        { label: 'Event details', done: eventDetailsDone, action: 'Add timeline, venue notes, and motif', tab: 'details', target: 'event-details-panel' },
+        { label: 'Payment balance', done: paymentsDone, action: booking.nextPaymentDue ? `Pay ${paymentLabel(booking.nextPaymentDue.payment_type)}` : 'No remaining payment', tab: 'payments', locked: !isApproved },
     ];
+
+    if (needsMenuSelection) {
+        steps.unshift({ label: 'Menu selection', done: false, action: 'Choose dishes for this event', tab: 'menu' });
+    }
+
+    if (needsClarification) {
+        steps.unshift({
+            label: 'Staff request',
+            done: false,
+            action: 'Answer the details requested by the team',
+            tab: 'details',
+            target: 'staff-request-panel',
+            isPendingGate: true,
+        });
+    }
+
+    return steps;
 };
 
 const HistoryPanel = ({ bookings, onRemove }) => (
@@ -104,13 +268,13 @@ const HistoryPanel = ({ bookings, onRemove }) => (
                                     </span>
                                 </div>
                                 <p className="text-sm font-semibold text-gray-600">
-                                    {new Date(booking.event_date).toLocaleDateString()} · {booking.pax} pax · {peso(booking.total_cost)}
+                                    {new Date(booking.event_date).toLocaleDateString()} - {booking.pax} pax - {peso(booking.total_cost)}
                                 </p>
                             </div>
                             <div className="flex items-center gap-3">
                                 {onRemove && (
                                     <button 
-                                        onClick={() => { if (window.confirm('Remove this event from your history?')) onRemove(booking.id); }}
+                                        onClick={() => onRemove(booking.id)}
                                         className="rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-bold text-red-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-700"
                                     >
                                         Remove
@@ -128,15 +292,269 @@ const HistoryPanel = ({ bookings, onRemove }) => (
     </div>
 );
 
+const SmartEventDetailsPanel = ({
+    activeBooking,
+    detailsForm,
+    setDetailsForm,
+    detailsEditMode,
+    setDetailsEditMode,
+    savingDetails,
+    saveEventDetails,
+    uploadingImage,
+    uploadInspirationImage,
+    timelineRows,
+    setDetailTime,
+    updateTimelineRow,
+    addTimelineRow,
+    removeTimelineRow,
+    applyTimelineTemplate,
+    specialInstructionSections,
+    updateSpecialInstructionSection,
+    customMotifColor,
+    setCustomMotifColor,
+    applyMotifPreset,
+    addCustomMotifColor,
+}) => {
+    const eventStartTime = parseEventStartTime(activeBooking.event_time);
+    const readSections = [
+        { label: 'Venue address', value: detailsForm.venue_address_line },
+        { label: 'Venue notes', value: detailsForm.venue_building_details },
+        { label: 'Reservation time', value: formatTimeLabel(detailsForm.reservation_time) || detailsForm.reservation_time },
+        { label: 'Serving time', value: formatTimeLabel(detailsForm.serving_time) || detailsForm.serving_time },
+        { label: 'Color motif', value: detailsForm.color_motif },
+        { label: 'Event timeline', value: serializeTimelineRows(timelineRows) || detailsForm.event_timeline },
+        { label: 'Special instructions', value: serializeSpecialInstructions(specialInstructionSections) || detailsForm.special_instructions },
+    ].filter(section => String(section.value || '').trim());
+    const detailCount = readSections.length + (detailsForm.theme_uploads ? 1 : 0);
+
+    const TimePicker = ({ label, value, fieldKey, helper }) => {
+        const isCustom = value && !quickTimes.some(time => time.value === value);
+        return (
+            <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">{label}</p>
+                        <p className="text-xs font-semibold text-gray-500">{helper}</p>
+                    </div>
+                    <strong className="text-sm text-[#720101]">{formatTimeLabel(value) || 'Not set'}</strong>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                    {quickTimes.map(time => (
+                        <button
+                            key={`${fieldKey}-${time.value}`}
+                            type="button"
+                            onClick={() => setDetailTime(fieldKey, time.value)}
+                            className={`rounded-xl border px-3 py-2 text-xs font-black transition ${value === time.value ? 'border-[#720101] bg-[#720101] text-white' : 'border-gray-200 bg-[#faf7f2] text-gray-700 hover:border-[#720101]/30'}`}
+                        >
+                            {time.label}
+                        </button>
+                    ))}
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                    <label className={`flex h-12 items-center gap-3 rounded-xl border px-3 ${isCustom ? 'border-[#720101] bg-[#720101]/5' : 'border-gray-200 bg-white'}`}>
+                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Custom</span>
+                        <input
+                            type="time"
+                            value={parseEventStartTime(value)}
+                            onChange={(event) => setDetailTime(fieldKey, event.target.value)}
+                            className="min-w-0 flex-1 bg-transparent text-sm font-bold text-gray-900 outline-none"
+                        />
+                    </label>
+                    {eventStartTime && (
+                        <>
+                            <button type="button" onClick={() => setDetailTime(fieldKey, eventStartTime)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">Event start</button>
+                            <button type="button" onClick={() => setDetailTime(fieldKey, addMinutesToTime(eventStartTime, 60))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">+1 hour</button>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div id="event-details-panel" className="max-w-full overflow-hidden rounded-3xl border border-gray-100 bg-white p-5 shadow-sm sm:p-7">
+            <div className="mb-5 flex flex-col gap-3 border-b border-gray-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Event details</p>
+                    <h3 className="mt-1 font-display text-2xl font-bold text-[#1a1a1a]">Planning details</h3>
+                </div>
+                {activeBooking.canEditSupplementary && (
+                    <div className="flex flex-wrap gap-2">
+                        {detailsEditMode && (
+                            <button
+                                type="button"
+                                onClick={() => setDetailsEditMode(false)}
+                                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-gray-500 hover:bg-gray-50"
+                            >
+                                Cancel
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => detailsEditMode ? saveEventDetails() : setDetailsEditMode(true)}
+                            disabled={savingDetails}
+                            className="rounded-xl bg-[#720101] px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-50"
+                        >
+                            {detailsEditMode ? (savingDetails ? 'Saving...' : 'Save changes') : 'Edit'}
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {!activeBooking.canEditSupplementary && activeBooking.status !== 'Cancelled' && (
+                <div className="mb-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+                    <p className="text-sm font-bold text-red-800">Hard Freeze Active</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-red-700">Your event details are locked because final preparations are underway. For urgent changes, message your Marketing Executive.</p>
+                </div>
+            )}
+
+            {!detailsEditMode ? (
+                <div className="space-y-4">
+                    <div className="rounded-2xl border border-[#720101]/10 bg-[#faf7f2]/70 p-4">
+                        <p className="text-sm font-black text-[#1a1a1a]">{detailCount ? `${detailCount} planning detail${detailCount > 1 ? 's' : ''} added` : 'Planning details are not filled yet'}</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-500">Use Edit when you are ready to share timing, motif, program, and venue notes with the team.</p>
+                    </div>
+                    {detailCount > 0 && (
+                        <div className="grid gap-3 lg:grid-cols-2">
+                            {readSections.map(section => (
+                                <div key={section.label} className={`rounded-2xl border border-gray-100 bg-white p-4 ${section.label.includes('timeline') || section.label.includes('instructions') ? 'lg:col-span-2' : ''}`}>
+                                    <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{section.label}</p>
+                                    <p className="mt-2 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-gray-900">{section.value}</p>
+                                </div>
+                            ))}
+                            {detailsForm.theme_uploads && (
+                                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                    <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">Inspiration image</p>
+                                    <a href={detailsForm.theme_uploads} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm font-black text-[#720101] hover:text-[#5a0101]">View uploaded reference</a>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div className="space-y-5">
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <label className="block">
+                            <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">Venue address</span>
+                            <input
+                                value={detailsForm.venue_address_line || ''}
+                                onChange={(event) => setDetailsForm(prev => ({ ...prev, venue_address_line: event.target.value }))}
+                                placeholder="Complete venue address"
+                                className="mt-2 h-12 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                            />
+                        </label>
+                        <label className="block">
+                            <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">Venue notes</span>
+                            <input
+                                value={detailsForm.venue_building_details || ''}
+                                onChange={(event) => setDetailsForm(prev => ({ ...prev, venue_building_details: event.target.value }))}
+                                placeholder="Building, floor, room, gate, landmarks"
+                                className="mt-2 h-12 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                            />
+                        </label>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-2">
+                        <TimePicker label="Reservation time" fieldKey="reservation_time" value={detailsForm.reservation_time} helper="When guests or organizers can access the setup." />
+                        <TimePicker label="Serving time" fieldKey="serving_time" value={detailsForm.serving_time} helper="When food service should begin." />
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-100 bg-[#faf7f2]/40 p-4">
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                            <label className="block min-w-0">
+                                <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">Color motif</span>
+                                <input
+                                    value={detailsForm.color_motif || ''}
+                                    onChange={(event) => setDetailsForm(prev => ({ ...prev, color_motif: event.target.value }))}
+                                    placeholder="e.g., Royal Gold, Deep Navy, Ivory"
+                                    className="mt-2 h-12 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                />
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <input type="color" value={customMotifColor} onChange={(event) => setCustomMotifColor(event.target.value)} className="h-12 w-14 cursor-pointer rounded-xl border border-gray-200 bg-white p-1" aria-label="Custom motif color" />
+                                <button type="button" onClick={addCustomMotifColor} className="h-12 rounded-xl border border-gray-200 bg-white px-4 text-xs font-black uppercase tracking-widest text-gray-600 hover:bg-gray-50">Add</button>
+                            </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {motifPresets.map(preset => (
+                                <button key={preset.label} type="button" onClick={() => applyMotifPreset(preset)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 hover:border-[#720101]/30">
+                                    <span className="h-4 w-4 rounded-full border border-black/10" style={{ backgroundColor: preset.value }} />
+                                    {preset.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">Event timeline / program</p>
+                                <p className="text-xs font-semibold text-gray-500">Add the moments the kitchen and service team should prepare around.</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {Object.keys(timelineTemplates).map(template => (
+                                    <button key={template} type="button" onClick={() => applyTimelineTemplate(template)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50">{template}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="mt-4 space-y-3">
+                            {timelineRows.map((row, index) => (
+                                <div key={index} className="grid gap-2 rounded-2xl border border-gray-100 bg-[#faf7f2]/40 p-3 lg:grid-cols-[8rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                    <input type="time" value={parseEventStartTime(row.time)} onChange={(event) => updateTimelineRow(index, 'time', event.target.value)} className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-900 outline-none focus:border-[#720101]" />
+                                    <input value={row.activity || ''} onChange={(event) => updateTimelineRow(index, 'activity', event.target.value)} placeholder="Activity" className="h-11 min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-900 outline-none focus:border-[#720101]" />
+                                    <input value={row.note || ''} onChange={(event) => updateTimelineRow(index, 'note', event.target.value)} placeholder="Note" className="h-11 min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none focus:border-[#720101]" />
+                                    <button type="button" onClick={() => removeTimelineRow(index)} className="h-11 rounded-xl border border-red-100 bg-red-50 px-3 text-xs font-black text-red-700 hover:bg-red-100">Remove</button>
+                                </div>
+                            ))}
+                        </div>
+                        <button type="button" onClick={addTimelineRow} className="mt-3 rounded-xl border border-[#720101]/20 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#720101] hover:bg-[#720101]/5">Add timeline row</button>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-2">
+                        {specialInstructionFields.map(field => (
+                            <label key={field.key} className="block rounded-2xl border border-gray-100 bg-white p-4">
+                                <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">{field.label}</span>
+                                <textarea
+                                    rows={3}
+                                    value={specialInstructionSections[field.key] || ''}
+                                    onChange={(event) => updateSpecialInstructionSection(field.key, event.target.value)}
+                                    placeholder={field.placeholder}
+                                    className="mt-2 w-full resize-none rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-semibold leading-6 text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                />
+                            </label>
+                        ))}
+                    </div>
+
+                    <div className="rounded-2xl border border-dashed border-[#720101]/20 bg-[#faf7f2]/60 p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">Inspiration image</p>
+                                {detailsForm.theme_uploads && <a href={detailsForm.theme_uploads} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-sm font-black text-[#720101] hover:text-[#5a0101]">Current reference uploaded</a>}
+                            </div>
+                            <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
+                                {uploadingImage ? 'Uploading...' : detailsForm.theme_uploads ? 'Replace image' : 'Upload image'}
+                                <input type="file" accept="image/*" className="hidden" disabled={uploadingImage} onChange={(event) => uploadInspirationImage(event.target.files?.[0])} />
+                            </label>
+                        </div>
+                        {detailsForm.theme_uploads && <img src={detailsForm.theme_uploads} alt="Event inspiration" className="mt-4 max-h-64 w-full rounded-2xl object-cover" />}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const ClientDashboard = () => {
     const { user, logout } = useAuth();
     const dashboardStoragePrefix = `ecs_client_dashboard_${user?.id || 'guest'}`;
     const activeBookingStorageKey = `${dashboardStoragePrefix}_active_booking_id`;
     const activeSectionStorageKey = `${dashboardStoragePrefix}_active_section`;
-    const [data, setData] = useState({ bookings: [], historyBookings: [], tastings: [], payments: [] });
-    const [loading, setLoading] = useState(true);
+    const dashboardDataStorageKey = `${dashboardStoragePrefix}_data`;
+    const cachedDashboardData = readStoredDashboardJson(dashboardDataStorageKey);
+    const [data, setData] = useState(cachedDashboardData || { bookings: [], historyBookings: [], tastings: [], payments: [] });
+    const [loading, setLoading] = useState(!cachedDashboardData);
     const [activeBookingId, setActiveBookingId] = useState(() => {
-        const stored = readStoredDashboardValue(activeBookingStorageKey);
+        const stored = readStoredDashboardValue(sharedSelectedBookingKey) || readStoredDashboardValue(activeBookingStorageKey);
         return stored ? Number(stored) : null;
     });
     const [activeSection, setActiveSection] = useState(() => {
@@ -153,12 +571,25 @@ const ClientDashboard = () => {
     const [savingMenu, setSavingMenu] = useState(false);
     const [menuEditMode, setMenuEditMode] = useState(false);
     const [eventPickerOpen, setEventPickerOpen] = useState(false);
+    const [detailsEditMode, setDetailsEditMode] = useState(false);
     const [activeDetailRow, setActiveDetailRow] = useState(null);
+    const [timelineRows, setTimelineRows] = useState([{ time: '', activity: '', note: '' }]);
+    const [specialInstructionSections, setSpecialInstructionSections] = useState({ dietary: '', access: '', vip: '', other: '' });
+    const [customMotifColor, setCustomMotifColor] = useState('#720101');
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
     const [clarificationResponse, setClarificationResponse] = useState('');
     const [submittingClarification, setSubmittingClarification] = useState(false);
+    const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', onConfirm: null });
+    const [feedbackRequests, setFeedbackRequests] = useState([]);
+    const [feedbackForm, setFeedbackForm] = useState({ rating: 5, food_rating: 5, service_rating: 5, communication_rating: 5, value_rating: 5, comments: '', testimonial_permission: false });
+    const [submittingFeedback, setSubmittingFeedback] = useState(false);
+
+    const closeConfirmModal = () => setConfirmModal({ isOpen: false, title: '', message: '', confirmText: 'Confirm', onConfirm: null });
 
     const [submittingPayment, setSubmittingPayment] = useState(false);
+    const [coreForm, setCoreForm] = useState({ event_date: '', pax: '' });
+    const [savingCore, setSavingCore] = useState(false);
+    const [pendingScrollTarget, setPendingScrollTarget] = useState(null);
 
     // Modal states
     const [editCoreModalOpen, setEditCoreModalOpen] = useState(false);
@@ -178,9 +609,18 @@ const ClientDashboard = () => {
     };
 
     useEffect(() => {
-        const tab = new URLSearchParams(window.location.search).get('tab');
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab');
+        const booking = Number(params.get('booking'));
+        const target = params.get('target');
         if (dashboardSections.includes(tab)) {
             setActiveSection(tab);
+        }
+        if (booking) {
+            setActiveBookingId(booking);
+        }
+        if (target) {
+            setPendingScrollTarget(target);
         }
         fetchData();
     }, []);
@@ -208,6 +648,7 @@ const ClientDashboard = () => {
     useEffect(() => {
         if (activeBookingId) {
             writeStoredDashboardValue(activeBookingStorageKey, activeBookingId);
+            writeStoredDashboardValue(sharedSelectedBookingKey, activeBookingId);
         }
     }, [activeBookingId, activeBookingStorageKey]);
 
@@ -229,6 +670,8 @@ const ClientDashboard = () => {
             special_instructions: booking.special_instructions || '',
             theme_uploads: booking.theme_uploads || '',
         });
+        setTimelineRows(parseTimelineRows(booking.event_timeline));
+        setSpecialInstructionSections(parseSpecialInstructions(booking.special_instructions));
 
         try {
             const parsed = typeof booking.selected_menu === 'string'
@@ -245,8 +688,28 @@ const ClientDashboard = () => {
             setMenuSelections({ starter: [], main: [], side: [], dessert: [], drink: [] });
         }
         setMenuEditMode(false);
+        setDetailsEditMode(false);
+        setActiveDetailRow(null);
         setClarificationResponse(booking.clarification_response || '');
+        setCoreForm({
+            event_date: toDateInputValue(booking.event_date),
+            pax: booking.pax || '',
+        });
     }, [activeBookingId, data.bookings]);
+
+    useEffect(() => {
+        if (!pendingScrollTarget || loading) return undefined;
+
+        const timer = setTimeout(() => {
+            const target = document.getElementById(pendingScrollTarget);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setPendingScrollTarget(null);
+            }
+        }, 180);
+
+        return () => clearTimeout(timer);
+    }, [pendingScrollTarget, activeSection, activeBookingId, loading]);
 
     useEffect(() => {
         if (toast) {
@@ -260,14 +723,18 @@ const ClientDashboard = () => {
             const response = await fetch('/api/dashboard/client');
             if (response.ok) {
                 const result = await response.json();
-                setData({
+                const nextData = {
                     bookings: result.bookings || [],
                     historyBookings: result.historyBookings || [],
                     tastings: result.tastings || [],
                     payments: result.payments || [],
-                });
+                };
+                setData(nextData);
+                writeStoredDashboardJson(dashboardDataStorageKey, nextData);
+                setLoading(false);
+
                 const activeBookings = result.bookings || [];
-                const storedBookingId = Number(readStoredDashboardValue(activeBookingStorageKey));
+                const storedBookingId = Number(readStoredDashboardValue(sharedSelectedBookingKey) || readStoredDashboardValue(activeBookingStorageKey));
                 const preferredBookingId = activeBookingId || storedBookingId || null;
 
                 if (activeBookings.length > 0 && (!preferredBookingId || !activeBookings.some((booking) => booking.id === preferredBookingId))) {
@@ -284,11 +751,42 @@ const ClientDashboard = () => {
                 } else if (activeBookings.length === 0) {
                     setActiveBookingId(null);
                 }
+
+                fetch('/api/customer/feedback-requests', { headers: { Accept: 'application/json' } })
+                    .then(response => response.ok ? response.json() : [])
+                    .then(pendingFeedback => {
+                        setFeedbackRequests(Array.isArray(pendingFeedback) ? pendingFeedback : []);
+                    })
+                    .catch((error) => {
+                        console.error('Error fetching feedback requests:', error);
+                    });
             }
         } catch (error) {
             console.error("Error fetching dashboard data:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const submitFeedback = async (token) => {
+        if (!token || submittingFeedback) return;
+        setSubmittingFeedback(true);
+        try {
+            const response = await fetch(`/api/customer/feedback-requests/${token}/responses`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(feedbackForm),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result.error || 'Could not submit feedback.');
+            setToast({ message: result.message || 'Thank you for your feedback.', type: 'success' });
+            setFeedbackForm({ rating: 5, food_rating: 5, service_rating: 5, communication_rating: 5, value_rating: 5, comments: '', testimonial_permission: false });
+            fetchData();
+        } catch (error) {
+            console.error(error);
+            setToast({ message: error.message || 'Could not submit feedback.', type: 'error' });
+        } finally {
+            setSubmittingFeedback(false);
         }
     };
 
@@ -373,14 +871,21 @@ const ClientDashboard = () => {
     const saveEventDetails = async () => {
         setSavingDetails(true);
         try {
+            const payload = {
+                ...detailsForm,
+                event_timeline: serializeTimelineRows(timelineRows),
+                special_instructions: serializeSpecialInstructions(specialInstructionSections),
+            };
             const res = await fetch(`/api/bookings/${activeBooking.id}/event-details`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(detailsForm),
+                body: JSON.stringify(payload),
             });
             const result = await res.json().catch(() => ({}));
             if (res.ok) {
                 setToast({ message: 'Event details saved.', type: 'success' });
+                setDetailsEditMode(false);
+                setActiveDetailRow(null);
                 fetchData();
             } else {
                 setToast({ message: result.error || 'Unable to save event details.', type: 'error' });
@@ -443,6 +948,53 @@ const ClientDashboard = () => {
         }
     };
 
+    const setDetailTime = (key, value) => {
+        setDetailsForm(prev => ({ ...prev, [key]: value }));
+    };
+
+    const applyMotifPreset = (preset) => {
+        const current = String(detailsForm.color_motif || '').trim();
+        const nextValue = `${preset.label} ${preset.value}`;
+        const hasPreset = current.toLowerCase().includes(preset.label.toLowerCase()) || current.includes(preset.value);
+        setDetailsForm(prev => ({
+            ...prev,
+            color_motif: hasPreset ? current : [current, nextValue].filter(Boolean).join(', '),
+        }));
+        setCustomMotifColor(preset.value);
+    };
+
+    const addCustomMotifColor = () => {
+        const current = String(detailsForm.color_motif || '').trim();
+        if (current.includes(customMotifColor)) return;
+        setDetailsForm(prev => ({
+            ...prev,
+            color_motif: [current, customMotifColor].filter(Boolean).join(', '),
+        }));
+    };
+
+    const updateTimelineRow = (index, key, value) => {
+        setTimelineRows(prev => prev.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
+    };
+
+    const addTimelineRow = () => {
+        setTimelineRows(prev => [...prev, { time: '', activity: '', note: '' }]);
+    };
+
+    const removeTimelineRow = (index) => {
+        setTimelineRows(prev => {
+            const nextRows = prev.filter((_, rowIndex) => rowIndex !== index);
+            return nextRows.length ? nextRows : [{ time: '', activity: '', note: '' }];
+        });
+    };
+
+    const applyTimelineTemplate = (templateName) => {
+        setTimelineRows(timelineTemplates[templateName] || [{ time: '', activity: '', note: '' }]);
+    };
+
+    const updateSpecialInstructionSection = (key, value) => {
+        setSpecialInstructionSections(prev => ({ ...prev, [key]: value }));
+    };
+
     const swapMenuItem = (category, oldIndex, newDishId) => {
         const dish = menuCatalog[category]?.find(item => String(item.id) === String(newDishId));
         if (!dish) return;
@@ -488,10 +1040,53 @@ const ClientDashboard = () => {
         });
     };
 
-    const handleRenegotiate = async () => {
-        setToast({ message: 'Renegotiation requested. Your event is back to Pending status.', type: 'success' });
-        setEditCoreModalOpen(false);
-        // Placeholder call for phase 4 frontend setup. Real logic would POST to a renegotiate endpoint.
+    const jumpToJourneyStep = (step) => {
+        if (!step || step.locked) return;
+        if (step.tab && dashboardSections.includes(step.tab)) {
+            setActiveSection(step.tab);
+        }
+        if (step.target) {
+            setPendingScrollTarget(step.target);
+        }
+    };
+
+    const handleCoreUpdate = async (event) => {
+        event.preventDefault();
+        if (!activeBooking?.id || savingCore) return;
+
+        const nextPax = Number(coreForm.pax);
+        if (!coreForm.event_date || !nextPax || nextPax < 1) {
+            setToast({ message: 'Choose a valid event date and guest count.', type: 'error' });
+            return;
+        }
+
+        setSavingCore(true);
+        try {
+            const res = await fetch(`/api/bookings/${activeBooking.id}/update`, {
+                method: 'PUT',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    event_date: coreForm.event_date,
+                    pax: nextPax,
+                }),
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const firstValidationMessage = result.errors ? Object.values(result.errors).flat()[0] : null;
+                throw new Error(firstValidationMessage || result.error || 'Unable to update date and guest count.');
+            }
+
+            setToast({ message: result.message || 'Date and guest count updated.', type: 'success' });
+            setEditCoreModalOpen(false);
+            fetchData();
+        } catch (error) {
+            setToast({ message: error.message || 'Unable to update date and guest count.', type: 'error' });
+        } finally {
+            setSavingCore(false);
+        }
     };
 
 
@@ -502,7 +1097,7 @@ const ClientDashboard = () => {
 
             <main className="max-w-7xl mx-auto py-8 px-5 sm:px-8 relative" style={{paddingTop: 100}}>
                 {toast && (
-                    <div className="pointer-events-none fixed right-5 top-24 z-50 animate-slideUp">
+                    <div className="pointer-events-none fixed bottom-5 right-5 z-50 animate-slideUp">
                         <div className="pointer-events-auto flex max-w-[360px] items-start gap-3 rounded-xl bg-[#fffaf3] px-4 py-3 text-sm shadow-[0_10px_30px_rgba(50,35,20,0.18)]">
                         <p className={`min-w-0 flex-1 font-semibold leading-5 ${toast.type === 'error' ? 'text-[#8b0000]' : 'text-[#374151]'}`}>{toast.message}</p>
                         </div>
@@ -510,6 +1105,71 @@ const ClientDashboard = () => {
                 )}
 
                 <CustomerAnnouncements />
+
+                {feedbackRequests.length > 0 && (
+                    <div className="mb-8 rounded-3xl border border-[#f0aa0b]/30 bg-[#fffaf3] p-6 shadow-sm">
+                        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="max-w-2xl">
+                                <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Feedback Request</p>
+                                <h2 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">How did your event go?</h2>
+                                <p className="mt-2 text-sm font-medium leading-6 text-gray-600">
+                                    Share your experience for {feedbackRequests[0].booking?.event_name || feedbackRequests[0].booking?.event_type || 'your completed event'}.
+                                </p>
+                            </div>
+                            <form
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    submitFeedback(feedbackRequests[0].token);
+                                }}
+                                className="w-full space-y-4 lg:max-w-xl"
+                            >
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {[
+                                        ['rating', 'Overall'],
+                                        ['food_rating', 'Food'],
+                                        ['service_rating', 'Service'],
+                                        ['communication_rating', 'Communication'],
+                                        ['value_rating', 'Value'],
+                                    ].map(([field, label]) => (
+                                        <label key={field} className="block">
+                                            <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">{label}</span>
+                                            <select
+                                                value={feedbackForm[field]}
+                                                onChange={(event) => setFeedbackForm(prev => ({ ...prev, [field]: Number(event.target.value) }))}
+                                                className="mt-1 w-full rounded-xl border border-[#720101]/10 bg-white px-3 py-2 text-sm font-bold text-gray-800 outline-none focus:border-[#720101]/30 focus:ring-2 focus:ring-[#720101]/15"
+                                            >
+                                                {[5, 4, 3, 2, 1].map(value => <option key={value} value={value}>{value} / 5</option>)}
+                                            </select>
+                                        </label>
+                                    ))}
+                                </div>
+                                <textarea
+                                    value={feedbackForm.comments}
+                                    onChange={(event) => setFeedbackForm(prev => ({ ...prev, comments: event.target.value }))}
+                                    placeholder="Tell us what went well or what we can improve."
+                                    rows={3}
+                                    className="w-full resize-none rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-medium text-gray-800 outline-none focus:border-[#720101]/30 focus:ring-2 focus:ring-[#720101]/15"
+                                />
+                                <label className="flex items-center gap-3 text-sm font-semibold text-gray-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={feedbackForm.testimonial_permission}
+                                        onChange={(event) => setFeedbackForm(prev => ({ ...prev, testimonial_permission: event.target.checked }))}
+                                        className="h-4 w-4 rounded border-gray-300 text-[#720101] focus:ring-[#720101]/20"
+                                    />
+                                    Eloquente may use my comments as a testimonial.
+                                </label>
+                                <button
+                                    type="submit"
+                                    disabled={submittingFeedback}
+                                    className="rounded-xl bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-[#5a0101] disabled:opacity-60"
+                                >
+                                    {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mb-8 rounded-3xl bg-[#1a1a1a] p-6 text-white shadow-xl shadow-black/10 sm:p-8">
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -559,57 +1219,6 @@ const ClientDashboard = () => {
                     <div className="flex flex-col lg:flex-row gap-8">
                         {/* LEFT COLUMN: Vertical Side-Nav & Booking Selector */}
                         <div className="w-full lg:w-64 flex-shrink-0 space-y-6">
-                            {data.bookings.length > 1 && (
-                                <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                                    <label className="block text-xs font-bold uppercase tracking-widest text-[#1a1a1a]/50 mb-2">Select Event</label>
-                                    <div className="relative">
-                                        <button
-                                            type="button"
-                                            onClick={() => setEventPickerOpen(!eventPickerOpen)}
-                                            className="flex w-full items-center justify-between rounded-2xl border border-[#720101]/25 bg-[#faf7f2] px-4 py-3 text-left shadow-inner transition-colors hover:bg-white"
-                                        >
-                                            <span className="min-w-0">
-                                                <span className="block truncate text-sm font-black text-[#1a1a1a]">{activeBooking ? eventDisplayName(activeBooking) : 'Select booking'}</span>
-                                                <span className="mt-1 block text-xs font-semibold text-gray-500">{activeBooking ? `${new Date(activeBooking.event_date).toLocaleDateString()} · ${activeBooking.pax} pax` : 'Choose an event'}</span>
-                                            </span>
-                                            <svg className={`ml-3 h-5 w-5 shrink-0 text-[#720101] transition-transform ${eventPickerOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M19 9l-7 7-7-7" /></svg>
-                                        </button>
-                                        {eventPickerOpen && (
-                                            <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl shadow-black/15">
-                                                {data.bookings.map((booking) => {
-                                                    const active = booking.id === activeBookingId;
-                                                    return (
-                                                        <button
-                                                            key={booking.id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setActiveBookingId(booking.id);
-                                                                setEventPickerOpen(false);
-                                                            }}
-                                                            className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${active ? 'bg-[#720101] text-white' : 'hover:bg-[#720101]/5'}`}
-                                                        >
-                                                            <span className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${active ? 'bg-white text-[#720101]' : 'bg-[#720101]/10 text-[#720101]'}`}>
-                                                                {eventDisplayName(booking)?.charAt(0)?.toUpperCase() || 'E'}
-                                                            </span>
-                                                            <span className="min-w-0">
-                                                                <span className={`block truncate text-sm font-black ${active ? 'text-white' : 'text-gray-950'}`}>{eventDisplayName(booking)}</span>
-                                                                <span className={`mt-1 block text-xs font-semibold ${active ? 'text-white/75' : 'text-gray-500'}`}>{new Date(booking.event_date).toLocaleDateString()} · {booking.pax} pax · {booking.status}</span>
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                    {activeBooking && (
-                                        <div className="mt-3 rounded-xl bg-[#720101]/5 p-3">
-                                            <p className="truncate text-sm font-bold text-[#720101]">{activeBooking.event_type || 'Eloquente event'}</p>
-                                            <p className="mt-1 text-xs font-semibold text-gray-500">{new Date(activeBooking.event_date).toLocaleDateString()} · {activeBooking.pax} pax</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
                             <nav className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                                 {[
                                     { id: 'details', label: 'Event Details', needsWork: activeJourneySteps.some(s => s.label === 'Event details' && !s.done), icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1 -18 0 a 9 9 0 0 1 18 0z' },
@@ -650,17 +1259,82 @@ const ClientDashboard = () => {
                         </div>
 
                         {/* RIGHT COLUMN: Content */}
-                        <div className="flex-1 space-y-6">
+                        <div className="min-w-0 flex-1 space-y-6">
                             {activeBooking && (
                                 <>
                                     {/* Event Snapshot */}
-                                    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                                        <div>
-                                            <div className="flex items-center gap-3 mb-2">
-                                                <h2 className="text-2xl font-display font-bold text-[#1a1a1a]">Event Snapshot</h2>
+                                    <div id="event-snapshot-card" className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8">
+                                        <div className="flex flex-col gap-6 sm:flex-row sm:items-center justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-3 mb-2">
+                                                {data.bookings.length > 1 && (
+                                                    <div className="relative max-w-full">
+                                                        <button
+                                                            type="button"
+                                                            aria-haspopup="listbox"
+                                                            aria-expanded={eventPickerOpen}
+                                                            onClick={() => setEventPickerOpen(open => !open)}
+                                                            onBlur={() => setTimeout(() => setEventPickerOpen(false), 140)}
+                                                            className="group inline-flex max-w-full items-center gap-3 rounded-2xl border border-transparent bg-transparent px-0 py-2 pr-2 text-left transition hover:border-[#720101]/20 hover:px-3 focus:border-[#720101]/30 focus:px-3 focus:outline-none focus:ring-4 focus:ring-[#720101]/10"
+                                                        >
+                                                            <span className="min-w-0 truncate font-display text-3xl font-bold leading-tight text-[#1a1a1a]">
+                                                                {eventDisplayName(activeBooking)}
+                                                            </span>
+                                                            <span className="hidden shrink-0 rounded-full border border-[#720101]/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-[#720101] sm:inline-flex">
+                                                                #{activeBooking.id}
+                                                            </span>
+                                                            <svg className={`h-5 w-5 shrink-0 text-[#720101] transition ${eventPickerOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                                                            </svg>
+                                                        </button>
+
+                                                        {eventPickerOpen && (
+                                                            <div className="absolute left-0 top-full z-30 mt-3 w-[min(28rem,calc(100vw-3rem))] overflow-hidden rounded-3xl border border-[#720101]/10 bg-white shadow-2xl shadow-[#720101]/10" role="listbox">
+                                                                <div className="border-b border-[#f0aa0b]/20 bg-[#fffaf3] px-4 py-3">
+                                                                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#9f6500]">Select event</p>
+                                                                </div>
+                                                                <div className="max-h-72 overflow-y-auto p-2">
+                                                                    {data.bookings.map((booking) => {
+                                                                        const isSelected = booking.id === activeBooking.id;
+                                                                        return (
+                                                                            <button
+                                                                                key={booking.id}
+                                                                                type="button"
+                                                                                role="option"
+                                                                                aria-selected={isSelected}
+                                                                                onMouseDown={(event) => event.preventDefault()}
+                                                                                onClick={() => {
+                                                                                    setActiveBookingId(booking.id);
+                                                                                    setEventPickerOpen(false);
+                                                                                }}
+                                                                                className={`w-full rounded-2xl px-4 py-3 text-left transition ${isSelected ? 'bg-[#720101] text-white' : 'text-[#1a1a1a] hover:bg-[#faf7f2]'}`}
+                                                                            >
+                                                                                <div className="flex items-center justify-between gap-4">
+                                                                                    <p className="min-w-0 truncate font-display text-lg font-bold">{eventDisplayName(booking)}</p>
+                                                                                    <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-white/75' : 'text-[#720101]'}`}>#{booking.id}</span>
+                                                                                </div>
+                                                                                <p className={`mt-1 text-xs font-semibold ${isSelected ? 'text-white/70' : 'text-gray-500'}`}>
+                                                                                    {formatEventDate(booking.event_date, { month: 'long', day: 'numeric', year: 'numeric' })} - {booking.pax} pax
+                                                                                </p>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {data.bookings.length <= 1 && (
+                                                    <h2 className="text-2xl font-display font-bold text-[#1a1a1a]">{eventDisplayName(activeBooking)}</h2>
+                                                )}
                                                 <span className={`px-3 py-1 text-[11px] font-bold rounded-full uppercase tracking-wider ${activeBooking.status === 'Confirmed' ? 'bg-green-100 text-green-700' : activeBooking.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
                                                     {activeBooking.status}
                                                 </span>
+                                                {data.bookings.length <= 1 && (
+                                                    <span className="text-xs font-black uppercase tracking-widest text-[#720101]">
+                                                        Booking #{activeBooking.id}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="flex flex-wrap gap-x-5 gap-y-2 text-[#1a1a1a]/60 text-sm font-medium">
                                                 <span className="flex items-center gap-1.5"><svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg> {new Date(activeBooking.event_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
@@ -668,14 +1342,15 @@ const ClientDashboard = () => {
                                                 <span className="flex items-center gap-1.5"><svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg> {activeBooking.pax} Pax</span>
                                             </div>
                                         </div>
-                                        <div className="text-left sm:text-right">
+                                        <div className="shrink-0 text-left sm:text-right">
                                             <p className="text-[#1a1a1a]/50 text-xs font-bold uppercase tracking-widest mb-1">Total Cost</p>
-                                            <p className="text-3xl font-display font-bold text-[#720101]">₱{parseFloat(activeBooking.total_cost || 0).toLocaleString()}</p>
+                                            <p className="text-3xl font-display font-bold text-[#720101]">PHP {parseFloat(activeBooking.total_cost || 0).toLocaleString()}</p>
+                                        </div>
                                         </div>
                                     </div>
 
                                     {activeBooking.clarification_request && !activeBooking.clarification_response && (
-                                        <div className="rounded-3xl border border-[#f0aa0b]/35 bg-[#fff7e8] p-6 shadow-sm sm:p-7">
+                                        <div id="staff-request-panel" className="rounded-3xl border border-[#f0aa0b]/35 bg-[#fff7e8] p-6 shadow-sm sm:p-7">
                                             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                                 <div className="max-w-2xl">
                                                     <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Details requested</p>
@@ -709,10 +1384,10 @@ const ClientDashboard = () => {
                                     )}
 
                                     <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-7">
-                                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                             <div>
                                                 <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">Journey Tracker</p>
-                                                <h3 className="mt-1 text-xl font-display font-bold text-[#1a1a1a]">
+                                                <h3 className="mt-1 text-lg font-display font-bold text-[#1a1a1a]">
                                                     {remainingJourneySteps.length === 0 ? 'Everything needed is complete' : `${remainingJourneySteps.length} step${remainingJourneySteps.length > 1 ? 's' : ''} remaining`}
                                                 </h3>
                                             </div>
@@ -729,22 +1404,33 @@ const ClientDashboard = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                                        <div
+                                            className="grid max-w-full gap-2"
+                                            style={{ gridTemplateColumns: `repeat(${Math.max(activeJourneySteps.length, 1)}, minmax(0, 1fr))` }}
+                                        >
                                             {activeJourneySteps.map((step, index) => (
-                                                <div key={step.label} className={`rounded-2xl border p-3 relative ${step.done ? 'border-green-200 bg-green-50' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20' : step.notRequired ? 'border-gray-100 bg-white' : step.locked ? 'border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50'}`}>
-                                                    <div className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.notRequired ? 'bg-gray-100 text-gray-400' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
+                                                <button
+                                                    type="button"
+                                                    key={step.label}
+                                                    onClick={() => jumpToJourneyStep(step)}
+                                                    disabled={step.locked}
+                                                    className={`min-w-0 rounded-xl border px-2.5 py-2 text-left transition ${step.done ? 'border-green-200 bg-green-50 hover:border-green-300' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20 hover:bg-[#f0aa0b]/10' : step.locked ? 'cursor-not-allowed border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50 hover:border-[#720101]/20 hover:bg-white'}`}
+                                                >
+                                                    <div className="mb-1.5 flex items-center gap-1.5">
+                                                    <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.notRequired ? 'bg-gray-100 text-gray-400' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
                                                         {step.done ? 'OK' : step.notRequired ? '-' : step.locked ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> : index + 1}
                                                     </div>
-                                                    <p className={`text-xs font-bold ${step.locked || step.notRequired ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
-                                                    {!step.done && <p className={`mt-1 text-[11px] font-medium leading-4 ${step.isPendingGate ? 'text-[#b27a00]' : 'text-gray-500'}`}>{step.action}</p>}
-                                                </div>
+                                                    <p className={`min-w-0 truncate text-[11px] font-bold ${step.locked || step.notRequired ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
+                                                    </div>
+                                                    {!step.done && <p className={`line-clamp-2 text-[10px] font-medium leading-4 ${step.isPendingGate ? 'text-[#b27a00]' : 'text-gray-500'}`}>{step.action}</p>}
+                                                </button>
                                             ))}
                                         </div>
                                     </div>
 
                                     {/* Pending Approval Banner */}
                                     {activeBooking.status === 'Pending' && (
-                                        <div className="rounded-3xl border-2 border-[#f0aa0b]/30 bg-gradient-to-r from-[#f0aa0b]/5 via-white to-[#f0aa0b]/5 p-6 sm:p-8 shadow-sm">
+                                        <div id="approval-status-panel" className="rounded-3xl border-2 border-[#f0aa0b]/30 bg-gradient-to-r from-[#f0aa0b]/5 via-white to-[#f0aa0b]/5 p-6 sm:p-8 shadow-sm">
                                             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
                                                 <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[#f0aa0b]/15">
                                                     <svg className="w-7 h-7 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -763,8 +1449,76 @@ const ClientDashboard = () => {
 
                                     {/* Content based on Active Section */}
                                     {activeSection === 'details' && (
-                                        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8">
-                                            <h3 className="text-xl font-bold font-display text-[#1a1a1a] mb-6">Supplementary Event Details</h3>
+                                        <SmartEventDetailsPanel
+                                            activeBooking={activeBooking}
+                                            detailsForm={detailsForm}
+                                            setDetailsForm={setDetailsForm}
+                                            detailsEditMode={detailsEditMode}
+                                            setDetailsEditMode={setDetailsEditMode}
+                                            savingDetails={savingDetails}
+                                            saveEventDetails={saveEventDetails}
+                                            uploadingImage={uploadingImage}
+                                            uploadInspirationImage={uploadInspirationImage}
+                                            timelineRows={timelineRows}
+                                            setDetailTime={setDetailTime}
+                                            updateTimelineRow={updateTimelineRow}
+                                            addTimelineRow={addTimelineRow}
+                                            removeTimelineRow={removeTimelineRow}
+                                            applyTimelineTemplate={applyTimelineTemplate}
+                                            specialInstructionSections={specialInstructionSections}
+                                            updateSpecialInstructionSection={updateSpecialInstructionSection}
+                                            customMotifColor={customMotifColor}
+                                            setCustomMotifColor={setCustomMotifColor}
+                                            applyMotifPreset={applyMotifPreset}
+                                            addCustomMotifColor={addCustomMotifColor}
+                                        />
+                                    )}
+
+                                    {false && activeSection === 'details' && (
+                                        <div id="event-details-panel" className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 sm:p-8">
+                                            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div>
+                                                    <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Event details</p>
+                                                    <h3 className="mt-1 text-xl font-bold font-display text-[#1a1a1a]">Planning notes</h3>
+                                                </div>
+                                                {activeBooking.canEditSupplementary && (
+                                                    <div className="flex gap-2">
+                                                        {detailsEditMode ? (
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setDetailsEditMode(false);
+                                                                        setActiveDetailRow(null);
+                                                                    }}
+                                                                    className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-gray-500 hover:bg-gray-50"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={saveEventDetails}
+                                                                    disabled={savingDetails}
+                                                                    className="rounded-xl bg-[#720101] px-5 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-50"
+                                                                >
+                                                                    {savingDetails ? 'Saving...' : 'Save'}
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setDetailsEditMode(true);
+                                                                    setActiveDetailRow('venue');
+                                                                }}
+                                                                className="rounded-xl bg-[#1a1a1a] px-5 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm hover:bg-black"
+                                                            >
+                                                                Edit Details
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
                                             
                                             {!activeBooking.canEditSupplementary && activeBooking.status !== 'Cancelled' && (
                                                 <div className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-red-50 border border-red-100">
@@ -776,7 +1530,109 @@ const ClientDashboard = () => {
                                                 </div>
                                             )}
 
-                                            <div className="flex flex-col gap-4">
+                                            {(() => {
+                                                const detailFields = [
+                                                    { id: 'venue', label: 'Venue Address', value: detailsForm.venue_address_line, type: 'text', key: 'venue_address_line', placeholder: 'Complete venue address' },
+                                                    { id: 'color_motif', label: 'Color Motif', value: detailsForm.color_motif, type: 'text', key: 'color_motif', placeholder: 'e.g., Royal Gold and Deep Navy' },
+                                                    { id: 'reservation_time', label: 'Reservation Time', value: detailsForm.reservation_time, type: 'text', key: 'reservation_time', placeholder: 'e.g., 4:00 PM' },
+                                                    { id: 'serving_time', label: 'Serving Time', value: detailsForm.serving_time, type: 'text', key: 'serving_time', placeholder: 'e.g., 6:30 PM' },
+                                                    { id: 'event_timeline', label: 'Event Timeline / Program', value: detailsForm.event_timeline, type: 'textarea', key: 'event_timeline', placeholder: 'Outline your program here' },
+                                                    { id: 'special_instructions', label: 'Special Instructions & Allergies', value: detailsForm.special_instructions, type: 'textarea', key: 'special_instructions', placeholder: 'Dietary restrictions, guest count adjustments, access notes, etc.' },
+                                                ];
+                                                const filledFields = detailFields.filter(field => String(field.value || '').trim());
+                                                const filledCount = filledFields.length + (detailsForm.theme_uploads ? 1 : 0);
+                                                const missingCount = detailFields.length + 1 - filledCount;
+
+                                                if (!detailsEditMode) {
+                                                    return (
+                                                        <div className="space-y-5">
+                                                            <div className="rounded-2xl border border-[#720101]/10 bg-[#faf7f2]/70 p-5">
+                                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                                    <div>
+                                                                        <p className="text-sm font-black text-[#1a1a1a]">{filledCount ? `${filledCount} planning detail${filledCount > 1 ? 's' : ''} added` : 'No planning notes added yet'}</p>
+                                                                        <p className="mt-1 text-sm font-semibold text-gray-500">{missingCount ? `${missingCount} optional detail${missingCount > 1 ? 's are' : ' is'} still blank.` : 'All planning fields have been filled.'}</p>
+                                                                    </div>
+                                                                    {activeBooking.canEditSupplementary && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setDetailsEditMode(true);
+                                                                                setActiveDetailRow('venue');
+                                                                            }}
+                                                                            className="rounded-xl bg-[#720101] px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101]"
+                                                                        >
+                                                                            Update Notes
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            {filledCount > 0 && (
+                                                                <div className="grid gap-3 md:grid-cols-2">
+                                                                    {filledFields.map(field => (
+                                                                        <div key={field.id} className="rounded-2xl border border-gray-100 bg-white p-4">
+                                                                            <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{field.label}</p>
+                                                                            <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-gray-900">{field.value}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                    {detailsForm.theme_uploads && (
+                                                                        <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                                                                            <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">Inspiration Image</p>
+                                                                            <a href={detailsForm.theme_uploads} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm font-black text-[#720101] hover:text-[#5a0101]">View uploaded reference</a>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <div className="space-y-5">
+                                                        <div className="grid gap-4 md:grid-cols-2">
+                                                            {detailFields.map(field => (
+                                                                <label key={field.id} className={field.type === 'textarea' ? 'block md:col-span-2' : 'block'}>
+                                                                    <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">{field.label}</span>
+                                                                    {field.type === 'textarea' ? (
+                                                                        <textarea
+                                                                            rows={4}
+                                                                            value={detailsForm[field.key] || ''}
+                                                                            onChange={(event) => setDetailsForm(prev => ({ ...prev, [field.key]: event.target.value }))}
+                                                                            placeholder={field.placeholder}
+                                                                            className="mt-2 w-full resize-none rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-semibold leading-6 text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                                                        />
+                                                                    ) : (
+                                                                        <input
+                                                                            value={detailsForm[field.key] || ''}
+                                                                            onChange={(event) => setDetailsForm(prev => ({ ...prev, [field.key]: event.target.value }))}
+                                                                            placeholder={field.placeholder}
+                                                                            className="mt-2 h-12 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                                                        />
+                                                                    )}
+                                                                </label>
+                                                            ))}
+                                                        </div>
+
+                                                        <div className="rounded-2xl border border-dashed border-[#720101]/20 bg-[#faf7f2]/60 p-5">
+                                                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                                <div>
+                                                                    <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">Inspiration Image</p>
+                                                                    <p className="mt-1 text-sm font-semibold text-gray-600">{detailsForm.theme_uploads ? 'Reference image uploaded.' : 'Optional mood board, theme sample, or layout reference.'}</p>
+                                                                </div>
+                                                                <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#5a0101]">
+                                                                    {uploadingImage ? 'Uploading...' : detailsForm.theme_uploads ? 'Replace Image' : 'Upload Image'}
+                                                                    <input type="file" accept="image/*" className="hidden" disabled={uploadingImage} onChange={(event) => uploadInspirationImage(event.target.files?.[0])} />
+                                                                </label>
+                                                            </div>
+                                                            {detailsForm.theme_uploads && (
+                                                                <img src={detailsForm.theme_uploads} alt="Event inspiration" className="mt-4 h-44 w-full rounded-2xl object-cover" />
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            <div className="hidden">
                                                 {[
                                                     { id: 'venue', label: 'Venue Address', value: detailsForm.venue_address_line, type: 'text', key: 'venue_address_line', placeholder: 'Complete Venue Address', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z' },
                                                     { id: 'color_motif', label: 'Color Motif', value: detailsForm.color_motif, type: 'text', key: 'color_motif', placeholder: 'e.g., Royal Gold & Deep Navy', icon: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01' },
@@ -789,28 +1645,28 @@ const ClientDashboard = () => {
                                                     return (
                                                         <div 
                                                             key={field.id}
-                                                            className={`group relative overflow-hidden rounded-2xl border transition-all duration-500 ${isExpanded ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/50 p-5 cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md'}`}
-                                                            onClick={() => { if (!isExpanded && activeBooking.canEditSupplementary) setActiveDetailRow(field.id); }}
+                                                            className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 ${isExpanded && detailsEditMode ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/40 p-5'} ${detailsEditMode ? 'cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md' : ''}`}
+                                                            onClick={() => { if (!isExpanded && activeBooking.canEditSupplementary && detailsEditMode) setActiveDetailRow(field.id); }}
                                                         >
                                                             <div className="flex items-start gap-4">
-                                                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${isExpanded ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
+                                                                <div className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors sm:flex ${isExpanded && detailsEditMode ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
                                                                     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={field.icon} /></svg>
                                                                 </div>
                                                                 <div className="flex-1 min-w-0">
                                                                     <div className="flex items-center justify-between gap-4">
                                                                         <h4 className={`text-xs font-black uppercase tracking-[0.15em] transition-colors ${isExpanded ? 'text-[#720101]' : 'text-gray-400 group-hover:text-gray-600'}`}>{field.label}</h4>
-                                                                        {!isExpanded && (
+                                                                        {!isExpanded && detailsEditMode && (
                                                                             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
                                                                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                                             </span>
                                                                         )}
                                                                     </div>
-                                                                    {!isExpanded && (
+                                                                    {(!isExpanded || !detailsEditMode) && (
                                                                         <p className="mt-1 text-sm font-bold text-gray-900 truncate pr-4">
-                                                                            {field.value ? field.value : <span className="text-gray-300 italic font-medium">Click to specify...</span>}
+                                                                            {field.value ? field.value : <span className="text-gray-300 italic font-medium">Not filled</span>}
                                                                         </p>
                                                                     )}
-                                                                    {isExpanded && (
+                                                                    {isExpanded && detailsEditMode && (
                                                                         <div className="mt-4 animate-fadeIn">
                                                                             {field.type === 'textarea' ? (
                                                                                 <textarea 
@@ -848,28 +1704,28 @@ const ClientDashboard = () => {
                                                 
                                                 {/* Image Upload Accordion */}
                                                 <div 
-                                                    className={`group relative overflow-hidden rounded-2xl border transition-all duration-500 ${activeDetailRow === 'image' ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/50 p-5 cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md'}`}
-                                                    onClick={() => { if (activeDetailRow !== 'image' && activeBooking.canEditSupplementary) setActiveDetailRow('image'); }}
+                                                    className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 ${activeDetailRow === 'image' && detailsEditMode ? 'border-[#720101] bg-white shadow-xl shadow-[#720101]/5 p-6' : 'border-gray-100 bg-[#faf7f2]/40 p-5'} ${detailsEditMode ? 'cursor-pointer hover:border-[#720101]/30 hover:bg-white hover:shadow-md' : ''}`}
+                                                    onClick={() => { if (activeDetailRow !== 'image' && activeBooking.canEditSupplementary && detailsEditMode) setActiveDetailRow('image'); }}
                                                 >
                                                     <div className="flex items-start gap-4">
-                                                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${activeDetailRow === 'image' ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
+                                                        <div className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors sm:flex ${activeDetailRow === 'image' && detailsEditMode ? 'bg-[#720101] text-white' : 'bg-white text-[#720101] group-hover:bg-[#720101]/10 shadow-sm border border-gray-100'}`}>
                                                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center justify-between gap-4">
                                                                 <h4 className={`text-xs font-black uppercase tracking-[0.15em] transition-colors ${activeDetailRow === 'image' ? 'text-[#720101]' : 'text-gray-400 group-hover:text-gray-600'}`}>Inspiration Image</h4>
-                                                                {activeDetailRow !== 'image' && (
+                                                                {activeDetailRow !== 'image' && detailsEditMode && (
                                                                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100">
                                                                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                                     </span>
                                                                 )}
                                                             </div>
-                                                            {activeDetailRow !== 'image' && (
+                                                            {(activeDetailRow !== 'image' || !detailsEditMode) && (
                                                                 <p className="mt-1 text-sm font-bold text-gray-900 truncate pr-4">
-                                                                    {detailsForm.theme_uploads ? <span className="text-green-600 flex items-center gap-1.5"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" /></svg>Image uploaded</span> : <span className="text-gray-300 italic font-medium">Click to upload reference...</span>}
+                                                                    {detailsForm.theme_uploads ? <span className="text-green-600 flex items-center gap-1.5"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" /></svg>Image uploaded</span> : <span className="text-gray-300 italic font-medium">No image uploaded</span>}
                                                                 </p>
                                                             )}
-                                                            {activeDetailRow === 'image' && (
+                                                            {activeDetailRow === 'image' && detailsEditMode && (
                                                                 <div className="mt-4 animate-fadeIn">
                                                                     <div className="flex flex-col gap-6">
                                                                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -907,7 +1763,7 @@ const ClientDashboard = () => {
                                                 </div>
                                             </div>
 
-                                            {activeBooking.canEditSupplementary && (
+                                            {false && activeBooking.canEditSupplementary && detailsEditMode && (
                                                 <div className="mt-8 pt-6 border-t border-gray-100 flex justify-end">
                                                     <button onClick={saveEventDetails} disabled={savingDetails} className="group relative bg-[#1a1a1a] hover:bg-black text-white font-black uppercase tracking-widest text-xs py-4 px-8 rounded-2xl shadow-xl transition-all active:scale-95 disabled:opacity-50 overflow-hidden">
                                                         <span className="relative z-10 flex items-center gap-2">
@@ -926,9 +1782,18 @@ const ClientDashboard = () => {
 
                                     {activeSection === 'history' && (
                                         <HistoryPanel bookings={data.historyBookings} onRemove={(id) => {
-                                            fetch(`/api/bookings/${id}/remove-history`, { method: 'DELETE' })
-                                                .then(() => fetchData())
-                                                .catch(err => setToast({ message: 'Error removing history.', type: 'error' }));
+                                            setConfirmModal({
+                                                isOpen: true,
+                                                title: 'Remove event from history?',
+                                                message: 'This hides the event from your dashboard history.',
+                                                confirmText: 'Remove',
+                                                onConfirm: () => {
+                                                    closeConfirmModal();
+                                                    fetch(`/api/bookings/${id}/remove-history`, { method: 'DELETE' })
+                                                        .then(() => fetchData())
+                                                        .catch(err => setToast({ message: 'Error removing history.', type: 'error' }));
+                                                },
+                                            });
                                         }} />
                                     )}
 
@@ -1129,13 +1994,18 @@ const ClientDashboard = () => {
                                                                     {tasting.status !== 'Cancelled' && (
                                                                         <div className="flex gap-2">
                                                                             <button 
-                                                                                onClick={() => {
-                                                                                    if (window.confirm('Cancel this food tasting session?')) {
+                                                                                onClick={() => setConfirmModal({
+                                                                                    isOpen: true,
+                                                                                    title: 'Cancel tasting session?',
+                                                                                    message: 'This will cancel the selected food tasting request.',
+                                                                                    confirmText: 'Cancel Session',
+                                                                                    onConfirm: () => {
+                                                                                        closeConfirmModal();
                                                                                         fetch(`/api/food-tasting/${tasting.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' } })
                                                                                             .then(() => { setToast({ message: 'Tasting cancelled.', type: 'success' }); fetchData(); })
                                                                                             .catch(() => setToast({ message: 'Error cancelling tasting.', type: 'error' }));
-                                                                                    }
-                                                                                }}
+                                                                                    },
+                                                                                })}
                                                                                 className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg"
                                                                             >
                                                                                 Cancel Session
@@ -1170,11 +2040,11 @@ const ClientDashboard = () => {
                                                             <div className="grid grid-cols-2 gap-6 mb-6">
                                                                 <div>
                                                                     <p className="text-white/60 text-xs font-bold uppercase tracking-widest mb-1">Total Paid</p>
-                                                                    <p className="text-2xl font-bold">₱{paid.toLocaleString()}</p>
+                                                                    <p className="text-2xl font-bold">PHP {paid.toLocaleString()}</p>
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-white/60 text-xs font-bold uppercase tracking-widest mb-1">Remaining Balance</p>
-                                                                    <p className="text-2xl font-bold text-[#f0aa0b]">₱{balance.toLocaleString()}</p>
+                                                                    <p className="text-2xl font-bold text-[#f0aa0b]">PHP {balance.toLocaleString()}</p>
                                                                 </div>
                                                             </div>
                                                             <div>
@@ -1295,7 +2165,7 @@ const ClientDashboard = () => {
                                                                         </div>
                                                                     </div>
                                                                     <div className="text-right">
-                                                                        <p className="font-bold text-gray-900">₱{parseFloat(tranche.amount).toLocaleString()}</p>
+                                                                        <p className="font-bold text-gray-900">PHP {parseFloat(tranche.amount).toLocaleString()}</p>
                                                                         <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${isSettledPayment(tranche) ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
                                                                             {isSettledPayment(tranche) ? 'Paid' : tranche.status}
                                                                         </span>
@@ -1328,7 +2198,7 @@ const ClientDashboard = () => {
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Amount Due</p>
-                                                            <p className="text-2xl font-bold text-[#1a1a1a]">₱{parseFloat(activeBooking.nextPaymentDue.amount).toLocaleString()}</p>
+                                                            <p className="text-2xl font-bold text-[#1a1a1a]">PHP {parseFloat(activeBooking.nextPaymentDue.amount).toLocaleString()}</p>
                                                         </div>
                                                     </div>
                                                     
@@ -1384,40 +2254,64 @@ const ClientDashboard = () => {
             {editCoreModalOpen && activeBooking && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditCoreModalOpen(false)}></div>
-                    <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn">
-                        <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    <form onSubmit={handleCoreUpdate} className="relative w-full max-w-lg animate-fadeIn rounded-3xl bg-white p-7 shadow-2xl">
+                        <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Update event schedule</p>
+                        <h3 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">Change date or guest count</h3>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">
+                            We will check availability before saving. Your booking status will stay as-is unless the server blocks the change.
+                        </p>
+                        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                            <label className="block">
+                                <span className="text-xs font-black uppercase tracking-widest text-gray-500">Event date</span>
+                                <input
+                                    type="date"
+                                    value={coreForm.event_date}
+                                    onChange={(event) => setCoreForm(prev => ({ ...prev, event_date: event.target.value }))}
+                                    className="mt-2 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-bold text-gray-900 outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                    required
+                                />
+                            </label>
+                            <label className="block">
+                                <span className="text-xs font-black uppercase tracking-widest text-gray-500">Guests</span>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={coreForm.pax}
+                                    onChange={(event) => setCoreForm(prev => ({ ...prev, pax: event.target.value }))}
+                                    className="mt-2 w-full rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-bold text-gray-900 outline-none focus:border-[#720101] focus:ring-4 focus:ring-[#720101]/10"
+                                    required
+                                />
+                            </label>
                         </div>
-                        <h3 className="text-2xl font-display font-bold text-center text-[#1a1a1a] mb-2">Renegotiate Details</h3>
-                        <p className="text-center text-gray-500 mb-8">Changing core details (Date, Pax) requires a system re-validation to ensure capacity availability. Your booking will be reset to Pending status.</p>
-                        <div className="flex gap-4">
-                            <button onClick={() => setEditCoreModalOpen(false)} className="flex-1 py-3 px-4 font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Cancel</button>
-                            <button onClick={handleRenegotiate} className="flex-1 py-3 px-4 font-bold text-white bg-[#f0aa0b] hover:bg-[#d9970a] rounded-xl shadow-md transition-colors">Proceed</button>
+                        <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button type="button" onClick={() => setEditCoreModalOpen(false)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>
+                            <button type="submit" disabled={savingCore} className="rounded-xl bg-[#720101] px-6 py-3 text-sm font-black text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-60">
+                                {savingCore ? 'Checking...' : 'Save Changes'}
+                            </button>
                         </div>
-                    </div>
+                    </form>
                 </div>
             )}
 
             {cancelModalOpen && activeBooking && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setCancelModalOpen(false)}></div>
-                    <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn">
-                        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    <div className="relative w-full max-w-lg animate-fadeIn rounded-3xl bg-white p-7 shadow-2xl">
+                        <p className="text-xs font-black uppercase tracking-widest text-red-700">Cancel booking</p>
+                        <h3 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">{eventDisplayName(activeBooking)}</h3>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">
+                            Booking #{activeBooking.id} on {formatEventDate(activeBooking.event_date, { month: 'long', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 p-4">
+                            <p className="text-sm font-semibold leading-6 text-red-800">{activeBooking.cancellationImpact?.message || "This will cancel the selected booking and move it to your history."}</p>
                         </div>
-                        <h3 className="text-2xl font-display font-bold text-center text-[#1a1a1a] mb-4">Cancel Booking</h3>
-                        <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-6">
-                            <p className="text-sm font-medium text-red-800 text-center">{activeBooking.cancellationImpact?.message || "Are you sure you want to cancel?"}</p>
-                        </div>
-                        <div className="flex gap-4">
-                            <button onClick={() => setCancelModalOpen(false)} className="flex-1 py-3 px-4 font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Go Back</button>
-                            <button onClick={handleCancelBooking} className="flex-1 py-3 px-4 font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-colors">Confirm Cancel</button>
+                        <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button onClick={() => setCancelModalOpen(false)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Keep Booking</button>
+                            <button onClick={handleCancelBooking} className="rounded-xl bg-red-700 px-6 py-3 text-sm font-black text-white shadow-sm hover:bg-red-800">Cancel Booking</button>
                         </div>
                     </div>
                 </div>
             )}
-
-            {user && <DeferredChatBubble user={user} />}
 
             {receiptModal.isOpen && (
                 <Suspense fallback={null}>
@@ -1429,6 +2323,15 @@ const ClientDashboard = () => {
                     />
                 </Suspense>
             )}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                tone="danger"
+                onCancel={closeConfirmModal}
+                onConfirm={confirmModal.onConfirm}
+            />
         </div>
     );
 };

@@ -6,9 +6,11 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
 use App\Http\Controllers\CalendarAvailabilityController;
 use App\Http\Controllers\ClientDashboardController;
+use App\Http\Controllers\ContactInquiryController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\AccountingController;
+use App\Http\Controllers\FeedbackController;
 use App\Http\Controllers\FoodTastingController;
 use App\Http\Controllers\MenuController;
 use App\Http\Controllers\ChatController;
@@ -18,6 +20,8 @@ use App\Http\Controllers\MarketingController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PayMongoWebhookController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingsController;
 use Illuminate\Http\Request;
@@ -41,23 +45,27 @@ Route::get('/about', fn () => Inertia::render('About'))->name('about');
 Route::get('/amenities', fn () => Inertia::render('Amenities'))->name('amenities');
 Route::get('/contact', fn () => Inertia::render('Contact'))->name('contact');
 Route::get('/api/announcements', [AnnouncementController::class, 'publicIndex'])->middleware('cache.headers:public;max_age=60;etag');
+Route::post('/api/contact-inquiries', [ContactInquiryController::class, 'store'])->middleware('throttle:10,1');
 Route::post('/webhook/paymongo', PayMongoWebhookController::class)->name('webhook.paymongo');
 
 Route::middleware('guest')->group(function () {
     Route::get('/login', fn () => Inertia::render('Login'))->name('login');
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
     Route::get('/register', fn () => Inertia::render('Register'))->name('register');
-    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
 });
 
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
-    Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])->name('verify.otp');
-    Route::post('/resend-otp', [AuthController::class, 'resendOtp'])->name('resend.otp');
+    Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:6,1')->name('verify.otp');
+    Route::post('/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:3,1')->name('resend.otp');
 
     // Profile Routes
     Route::get('/profile', fn () => Inertia::render('Profile/Edit'))->name('profile.edit');
-    Route::put('/profile', [App\Http\Controllers\ProfileController::class, 'update'])->name('profile.update');
+    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::get('/profile/avatar', [ProfileController::class, 'avatar'])->name('profile.avatar');
+    Route::post('/profile/password-code', [ProfileController::class, 'sendPasswordCode'])->middleware('throttle:5,1')->name('profile.password-code');
+    Route::get('/api/profile/activity', [ProfileController::class, 'activity'])->name('profile.activity');
 
     // ─── Notification Routes ───
     Route::get('/api/notifications', [NotificationController::class, 'index']);
@@ -96,7 +104,7 @@ Route::get('/api/pricing', [AdminController::class, 'getPricingOverrides'])->mid
 Route::get('/api/menu-items', [AdminController::class, 'getMenuItems'])->middleware('cache.headers:public;max_age=120;etag');
 
 // Public food tasting (guests can submit without auth)
-Route::post('/api/food-tasting', [FoodTastingController::class, 'store']);
+Route::post('/api/food-tasting', [FoodTastingController::class, 'store'])->middleware('throttle:5,1');
 
 // Booking availability is public (calendar needs it without auth sometimes)
 Route::get('/api/bookings/availability/{date}', [BookingController::class, 'checkAvailability'])->middleware('cache.headers:public;max_age=60;etag');
@@ -135,8 +143,12 @@ Route::get('/food-tasting', fn () => Inertia::render('client/FoodTasting'))->nam
 Route::middleware(['auth', 'role:Client'])->group(function () {
     // Dashboard — renders original ClientDashboard.jsx which fetches via API
     Route::get('/dashboard/client', fn () => Inertia::render('client/ClientDashboard'))->name('dashboard.client');
-    Route::get('/pay', fn () => Inertia::render('client/PaymentPage'))->name('payment.page');
-    Route::post('/checkout/initialize', [PaymentController::class, 'initializeCheckout'])->name('checkout.initialize');
+    Route::get('/pay', function () {
+        return redirect()
+            ->route('dashboard.client')
+            ->with('error', 'The manual payment page has been retired. Please use Secure Checkout from your dashboard so PayMongo or Accounting can confirm the payment safely.');
+    })->name('payment.page');
+    Route::post('/checkout/initialize', [PaymentController::class, 'initializeCheckout'])->middleware('throttle:10,1')->name('checkout.initialize');
     Route::get('/checkout/secure', [PaymentController::class, 'showSecureCheckout'])->middleware('signed')->name('checkout.secure');
     Route::post('/checkout/process', [PaymentController::class, 'processPayment'])->name('checkout.process');
     Route::get('/checkout/success', [PaymentController::class, 'success'])->name('checkout.success');
@@ -144,9 +156,10 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 
     // Dashboard data API (used by original ClientDashboard.jsx fetch calls)
     Route::get('/api/dashboard/client', [ClientDashboardController::class, 'apiData']);
+    Route::get('/api/customer/journey-tracker', [ClientDashboardController::class, 'journeyTracker']);
 
     // Booking API endpoints (JSON responses for React AJAX calls)
-    Route::post('/api/bookings', [BookingController::class, 'store']);
+    Route::post('/api/bookings', [BookingController::class, 'store'])->middleware('throttle:10,1');
     Route::post('/api/bookings/abandoned-reminder', [BookingController::class, 'sendAbandonedReminder']);
     Route::put('/api/bookings/{id}/event-details', [BookingController::class, 'updateEventDetails']);
     Route::put('/api/bookings/{id}/menu', [BookingController::class, 'updateMenu']);
@@ -162,10 +175,12 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
     Route::delete('/api/food-tasting/{id}', [FoodTastingController::class, 'destroy']);
 
     // File upload
-    Route::post('/api/upload', [FileUploadController::class, 'store']);
+    Route::post('/api/upload', [FileUploadController::class, 'store'])->middleware('throttle:10,1');
 
     Route::get('/api/customer/announcements', [AnnouncementController::class, 'customerIndex']);
     Route::post('/api/customer/announcements/{announcement}/read', [AnnouncementController::class, 'markRead']);
+    Route::get('/api/customer/feedback-requests', [FeedbackController::class, 'index']);
+    Route::post('/api/customer/feedback-requests/{token}/responses', [FeedbackController::class, 'store']);
 });
 
 // ─── Marketing Routes (Marketing + Admin) ───
@@ -173,6 +188,8 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
+    Route::get('/api/marketing/contact-inquiries', [ContactInquiryController::class, 'index']);
+    Route::patch('/api/marketing/contact-inquiries/{inquiry}', [ContactInquiryController::class, 'update']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);
     Route::put('/api/marketing/bookings/{id}/assign', [MarketingController::class, 'assign']);
     Route::put('/api/marketing/bookings/{id}/review-status', [MarketingController::class, 'updateReviewStatus']);
@@ -180,6 +197,8 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
     Route::put('/api/marketing/bookings/{id}/livestatus', [MarketingController::class, 'updateLiveStatus']);
     Route::get('/api/marketing/bookings/{id}', [MarketingController::class, 'show']);
+    Route::get('/api/operations/preparation-board', [OperationsController::class, 'preparationBoard']);
+    Route::patch('/api/operations/preparation-tasks/{task}', [OperationsController::class, 'updatePreparationTask']);
     Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);
     Route::put('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'upsert']);
     Route::delete('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'destroy']);
@@ -209,6 +228,7 @@ Route::middleware(['auth', 'role:Accounting,Admin'])->group(function () {
     Route::put('/api/accounting/payments/{id}', [AccountingController::class, 'updatePayment']);
     Route::put('/api/accounting/bookings/{id}/payment-terms', [AccountingController::class, 'updateBookingPaymentTerms']);
     Route::get('/api/accounting/ledger', [AccountingController::class, 'getLedger']);
+    Route::get('/api/accounting/reconciliation', [AccountingController::class, 'getReconciliation']);
     Route::post('/api/accounting/remind/{paymentId}', [AccountingController::class, 'remindClient']);
     Route::get('/api/accounting/refunds/queue', [AccountingController::class, 'getRefundQueue']);
     Route::post('/api/accounting/refund/{bookingId}', [AccountingController::class, 'processRefund']);

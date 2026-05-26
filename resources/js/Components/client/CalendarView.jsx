@@ -40,6 +40,23 @@ const parseStartTime = (value) => {
     return `${String(hour).padStart(2, '0')}:${minute}`;
 };
 
+const nearbyAvailableDates = (baseDate, disabledSet, minDate, count = 3) => {
+    const start = baseDate ? new Date(`${baseDate}T00:00:00`) : new Date(`${minDate}T00:00:00`);
+    const suggestions = [];
+
+    for (let offset = 1; offset <= 21 && suggestions.length < count; offset += 1) {
+        const candidate = new Date(start);
+        candidate.setDate(start.getDate() + offset);
+        const value = formatDateInput(candidate);
+
+        if (value >= minDate && !disabledSet.has(value)) {
+            suggestions.push(value);
+        }
+    }
+
+    return suggestions;
+};
+
 const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
     const [selectedDate, setSelectedDate] = useState(bookingData.date || '');
     const [selectedTime, setSelectedTime] = useState(parseStartTime(bookingData.time));
@@ -56,6 +73,7 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
     const [availabilityLoading, setAvailabilityLoading] = useState(false);
     const [availabilityError, setAvailabilityError] = useState('');
     const [error, setError] = useState('');
+    const [suggestedDates, setSuggestedDates] = useState([]);
     const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '' });
     const isCustomTime = selectedTime && !QUICK_TIMES.some(time => time.value === selectedTime);
 
@@ -153,12 +171,23 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
             setAvailability(null);
             setAvailabilityError('');
             setError('That date is unavailable. Please choose another date.');
+            setSuggestedDates(nearbyAvailableDates(date || minDate, disabledDateSet, minDate));
             return;
         }
         setSelectedDate(date);
         setAvailability(null);
         setAvailabilityError('');
         setError('');
+        setSuggestedDates([]);
+    };
+
+    const chooseSuggestedDate = (date) => {
+        setSelectedDate(date);
+        setVisibleMonth(new Date(`${date}T00:00:00`));
+        setAvailability(null);
+        setAvailabilityError('');
+        setError('');
+        setSuggestedDates([]);
     };
 
     useEffect(() => {
@@ -184,8 +213,10 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                 setAvailability(data);
                 if (data.isFull) {
                     setError('That date is unavailable. Please choose another date.');
+                    setSuggestedDates(nearbyAvailableDates(selectedDate, disabledDateSet, minDate));
                 } else {
                     setError('');
+                    setSuggestedDates([]);
                 }
             })
             .catch(() => {
@@ -226,7 +257,14 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
             const availability = await checkAvailability();
             if (availability.isFull) {
                 setError('That date is unavailable. Please choose another date.');
-                setModal({ isOpen: true, title: 'Date unavailable', message: 'Please choose another event date.', type: 'error' });
+                const dates = nearbyAvailableDates(selectedDate, disabledDateSet, minDate);
+                setSuggestedDates(dates);
+                setModal({
+                    isOpen: true,
+                    title: 'Date unavailable',
+                    message: dates.length ? 'Please choose another event date. We also found nearby options below.' : 'Please choose another event date.',
+                    type: 'error',
+                });
                 return;
             }
 
@@ -288,6 +326,23 @@ const CalendarView = ({ bookingData, updateBooking, onNext, onBack }) => {
                     </div>
                     {loadingDates && <p className="mt-2 text-sm font-semibold text-slate-400">Checking calendar...</p>}
                     {error && <p className="booking-inline-error">{error}</p>}
+                    {suggestedDates.length > 0 && (
+                        <div className="mt-4 rounded-2xl border border-[#f0aa0b]/30 bg-[#fff7e8] p-4">
+                            <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Nearby available dates</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {suggestedDates.map((date) => (
+                                    <button
+                                        key={date}
+                                        type="button"
+                                        onClick={() => chooseSuggestedDate(date)}
+                                        className="rounded-full border border-[#720101]/15 bg-white px-4 py-2 text-xs font-black text-[#720101] transition hover:border-[#720101] hover:bg-[#fffaf3]"
+                                    >
+                                        {formatDisplayDate(date)}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </section>
 
                 <section className="booking-choice-area booking-schedule-panel">

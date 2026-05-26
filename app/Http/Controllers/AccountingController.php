@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Resources\PaymentResource;
 use App\Models\Booking;
 use App\Models\Payment;
+use App\Models\RefundCase;
 use App\Models\User;
 use App\Notifications\PaymentReminderNotification;
 use App\Services\BookingManagementService;
+use App\Services\PaymentEventService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -166,6 +168,17 @@ class AccountingController extends Controller
             'verified_by' => $verifiedBy,
             'verified_at' => now(),
         ]);
+
+        PaymentEventService::record(
+            $newStatus === 'Verified' ? 'verified_by_accounting' : 'rejected_by_accounting',
+            'accounting',
+            $payment,
+            [
+                'action' => $request->action,
+                'status' => $newStatus,
+            ],
+            $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+        );
 
         // ─── Send notification to the client ───
         try {
@@ -336,6 +349,10 @@ class AccountingController extends Controller
                 'verified_by',
                 'verified_at',
                 'created_at',
+                'paymongo_checkout_session_id',
+                'paymongo_payment_id',
+                'paymongo_reference_number',
+                'paymongo_event_id',
             ])
             ->with(['booking:id,event_date,client_full_name,package_id,user_id', 'booking.user:id,username'])
             ->whereHas('booking', function ($q) {
@@ -368,6 +385,62 @@ class AccountingController extends Controller
 
         $payments = $query->get()
             ->map(fn ($p) => $this->paymentWithBookingContext($p));
+
+        return response()->json($payments);
+    }
+
+    public function getReconciliation(Request $request)
+    {
+        $payments = Payment::query()
+            ->with(['booking:id,event_date,client_full_name,client_email,status,total_cost', 'events'])
+            ->whereHas('booking', fn ($query) => $query->whereNotIn('status', ['Pending']))
+            ->latest()
+            ->limit(300)
+            ->get()
+            ->map(function (Payment $payment) {
+                $hasCheckout = filled($payment->paymongo_checkout_session_id);
+                $hasProviderPayment = filled($payment->paymongo_payment_id);
+                $hasPaidWebhook = $payment->events->contains('event_type', 'webhook_paid');
+                $hasMismatch = $payment->events->contains(fn ($event) => in_array($event->event_type, ['webhook_mismatch', 'webhook_unmatched'], true));
+                $isPaidLocally = in_array($payment->status, ['Paid', 'Verified', 'Refunded'], true);
+                $isOverdue = $payment->due_date && $payment->due_date->isPast() && $payment->status === 'Pending';
+
+                $exceptions = [];
+                if ($hasCheckout && !$isPaidLocally) {
+                    $exceptions[] = 'checkout_started_unpaid';
+                }
+                if ($hasProviderPayment && !$isPaidLocally) {
+                    $exceptions[] = 'provider_paid_not_local';
+                }
+                if ($isOverdue) {
+                    $exceptions[] = 'pending_past_due';
+                }
+                if (str_contains(strtolower((string) $payment->payment_method), 'paymongo') && $isPaidLocally && !$hasProviderPayment) {
+                    $exceptions[] = 'missing_paymongo_payment_id_for_refund';
+                }
+                if ($hasMismatch) {
+                    $exceptions[] = 'webhook_mismatch';
+                }
+
+                return [
+                    'id' => $payment->id,
+                    'booking_id' => $payment->booking_id,
+                    'client_full_name' => $payment->booking?->client_full_name,
+                    'event_date' => $payment->booking?->event_date,
+                    'amount' => $payment->amount,
+                    'payment_type' => $payment->payment_type,
+                    'status' => $payment->status,
+                    'due_date' => $payment->due_date,
+                    'paymongo_checkout_session_id' => $payment->paymongo_checkout_session_id,
+                    'paymongo_payment_id' => $payment->paymongo_payment_id,
+                    'paymongo_reference_number' => $payment->paymongo_reference_number,
+                    'webhook_received' => $hasPaidWebhook,
+                    'mismatch' => $hasMismatch,
+                    'exceptions' => $exceptions,
+                ];
+            })
+            ->filter(fn ($payment) => $request->query('exceptions_only') ? count($payment['exceptions']) > 0 : true)
+            ->values();
 
         return response()->json($payments);
     }
@@ -536,13 +609,39 @@ class AccountingController extends Controller
         $refundCount = 0;
         $forfeitedCount = 0;
         $errors = [];
+        $safeMissingReferenceMessage = 'This payment cannot be refunded automatically because the original online payment reference is missing.';
 
         foreach ($payments as $payment) {
+            $refundCase = null;
             try {
                 $paidAmount = round((float) $payment->amount, 2);
                 $forfeitedForPayment = min($paidAmount, $nonRefundableRemaining);
                 $nonRefundableRemaining = round($nonRefundableRemaining - $forfeitedForPayment, 2);
                 $refundAmount = min(round($paidAmount - $forfeitedForPayment, 2), $remainingRefundable);
+
+                $refundCase = RefundCase::create([
+                    'booking_id' => $booking->id,
+                    'payment_id' => $payment->id,
+                    'amount' => max($refundAmount, 0),
+                    'non_refundable_amount' => $forfeitedForPayment,
+                    'reason' => 'cancelled_booking',
+                    'status' => $refundAmount > 0 ? 'Approved' : 'Refunded',
+                    'requested_by' => Auth::id(),
+                    'approved_by' => Auth::id(),
+                    'notes' => $refundAmount > 0 ? null : 'Paid amount was fully non-refundable under cancellation policy.',
+                ]);
+
+                PaymentEventService::record(
+                    'refund_requested',
+                    'accounting',
+                    $payment,
+                    [
+                        'refund_case_id' => $refundCase->id,
+                        'amount' => max($refundAmount, 0),
+                        'non_refundable_amount' => $forfeitedForPayment,
+                    ],
+                    $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                );
 
                 if ($refundAmount <= 0) {
                     $payment->update([
@@ -552,25 +651,78 @@ class AccountingController extends Controller
                         'payment_method' => trim(($payment->payment_method ?: 'Payment') . ' (Forfeited)')
                     ]);
                     $forfeitedCount++;
+                    PaymentEventService::record(
+                        'refund_completed',
+                        'accounting',
+                        $payment,
+                        [
+                            'refund_case_id' => $refundCase->id,
+                            'amount' => 0,
+                            'non_refundable_amount' => $forfeitedForPayment,
+                        ],
+                        $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                    );
                     continue;
                 }
 
                 // If it was paid via PayMongo and has a payment ID, issue a real refund
                 if ($payment->paymongo_payment_id) {
                     try {
-                        $payMongo->createRefund(
+                        $refundCase->update(['status' => 'Processing']);
+                        $providerResponse = $payMongo->createRefund(
                             paymentId: $payment->paymongo_payment_id,
                             amount: $refundAmount,
                             reason: 'requested_by_customer',
                             notes: "Refunded via Accounting Dashboard for Booking #{$bookingId}, Payment #{$payment->id}"
                         );
+                        $refundCase->update([
+                            'status' => 'Refunded',
+                            'provider_refund_id' => data_get($providerResponse, 'id'),
+                            'provider_response' => $providerResponse,
+                        ]);
                     } catch (\Exception $apiException) {
-                        Log::error("PayMongo API failed for payment #{$payment->id}: " . $apiException->getMessage());
-                        $errors[] = "Payment #{$payment->id} failed: " . $apiException->getMessage();
+                        Log::error("PayMongo API failed for payment #{$payment->id}: " . $apiException->getMessage(), [
+                            'payment_id' => $payment->id,
+                            'booking_id' => $bookingId,
+                        ]);
+                        $refundCase->update([
+                            'status' => 'Failed',
+                            'provider_response' => ['error' => $apiException->getMessage()],
+                            'notes' => 'Automatic provider refund failed. Review PayMongo logs before retrying.',
+                        ]);
+                        PaymentEventService::record(
+                            'refund_failed',
+                            'paymongo',
+                            $payment,
+                            [
+                                'refund_case_id' => $refundCase->id,
+                                'reason' => 'provider_error',
+                            ],
+                            $payment->paymongo_payment_id
+                        );
+                        $errors[] = 'Automatic refund failed for one payment. Please review the refund case before retrying.';
                         continue; // Skip local update if the real refund failed
                     }
                 } elseif (str_contains(strtolower((string) $payment->payment_method), 'paymongo')) {
-                    $errors[] = "Payment #{$payment->id} is missing the PayMongo payment ID needed for an API refund.";
+                    Log::warning('PayMongo refund skipped because provider payment ID is missing.', [
+                        'payment_id' => $payment->id,
+                        'booking_id' => $bookingId,
+                    ]);
+                    $refundCase->update([
+                        'status' => 'Failed',
+                        'notes' => $safeMissingReferenceMessage,
+                    ]);
+                    PaymentEventService::record(
+                        'refund_failed',
+                        'accounting',
+                        $payment,
+                        [
+                            'refund_case_id' => $refundCase->id,
+                            'reason' => 'missing_provider_payment_id',
+                        ],
+                        $payment->paymongo_checkout_session_id
+                    );
+                    $errors[] = $safeMissingReferenceMessage;
                     continue;
                 }
 
@@ -586,16 +738,32 @@ class AccountingController extends Controller
 
                 $remainingRefundable = round($remainingRefundable - $refundAmount, 2);
                 $refundCount++;
+                PaymentEventService::record(
+                    'refund_completed',
+                    $payment->paymongo_payment_id ? 'paymongo' : 'accounting',
+                    $payment,
+                    [
+                        'refund_case_id' => $refundCase->id,
+                        'amount' => $refundAmount,
+                        'non_refundable_amount' => $forfeitedForPayment,
+                    ],
+                    $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                );
             } catch (\Exception $e) {
                 Log::error("Failed to process refund for payment #{$payment->id}: " . $e->getMessage());
-                $errors[] = "Payment #{$payment->id}: " . $e->getMessage();
+                $refundCase?->update([
+                    'status' => 'Failed',
+                    'notes' => 'Refund case could not be completed. Please review server logs.',
+                    'provider_response' => ['error' => $e->getMessage()],
+                ]);
+                $errors[] = 'A refund case could not be completed. Please review it before retrying.';
             }
         }
 
         if (count($errors) > 0 && $refundCount === 0) {
             return response()->json([
                 'error' => 'Failed to process refunds.',
-                'details' => $errors
+                'details' => array_values(array_unique($errors))
             ], 500);
         }
 

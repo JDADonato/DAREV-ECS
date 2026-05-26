@@ -10,6 +10,7 @@ use App\Mail\BookingContinuationReminder;
 use App\Notifications\NewBookingNotification;
 use App\Services\BookingValidationService;
 use App\Services\CalendarAvailabilityService;
+use App\Services\PaymentEventService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -134,7 +135,7 @@ class BookingController extends Controller
                 'task_type' => 'review',
                 'label' => $label,
                 'status' => 'Pending',
-                'customer_visible' => DB::raw('false'),
+                'customer_visible' => false,
             ]);
         }
 
@@ -205,7 +206,7 @@ class BookingController extends Controller
 
         $booking->reviewTasks()
             ->where('task_type', 'clarification')
-            ->whereRaw('customer_visible = true')
+            ->where('customer_visible', true)
             ->whereIn('status', ['Pending', 'Needs Customer'])
             ->latest()
             ->first()
@@ -622,10 +623,10 @@ class BookingController extends Controller
 
         $request->validate([
             'booking_id'     => 'required|integer',
-            'payment_method' => 'required|string',
+            'payment_id'     => 'nullable|integer',
+            'payment_method' => 'nullable|string',
         ]);
 
-        // Verify the booking belongs to this user
         $booking = Booking::where('id', $request->booking_id)
             ->where('user_id', $userId)
             ->first();
@@ -634,32 +635,33 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking not found.'], 404);
         }
 
-        if ($request->pay_in_full) {
-            // Update all pending payments for this booking
-            Payment::where('booking_id', $request->booking_id)
-                ->where('status', 'Pending')
-                ->update([
-                    'payment_method' => $request->payment_method,
-                    'status'         => 'Verified',
-                    'verified_at'    => now(),
-                ]);
-        } else {
-            // Update single payment
-            Payment::where('id', $request->payment_id)
-                ->where('booking_id', $request->booking_id)
-                ->update([
-                    'payment_method' => $request->payment_method,
-                    'status'         => 'Verified',
-                    'verified_at'    => now(),
-                ]);
+        $payment = null;
+        if ($request->filled('payment_id')) {
+            $payment = Payment::where('id', $request->integer('payment_id'))
+                ->where('booking_id', $booking->id)
+                ->first();
         }
 
-        // If the booking is 'Pending' and payment was verified, we update the status
-        if ($booking->status === 'Pending') {
-            $booking->update(['status' => 'Confirmed', 'live_status' => 'Payment Verified']);
-        }
+        PaymentEventService::record(
+            'manual_payment_blocked',
+            'customer',
+            $payment,
+            [
+                'booking_id' => $booking->id,
+                'payment_id' => $request->input('payment_id'),
+                'payment_method' => $request->input('payment_method'),
+                'amount' => $request->input('amount'),
+                'reference_number_provided' => $request->filled('reference_number'),
+                'reason' => 'legacy_manual_payment_disabled',
+            ],
+            null,
+            null,
+            $booking->id
+        );
 
-        return response()->json(['message' => 'Payment processed and verified successfully.']);
+        return response()->json([
+            'error' => 'Manual payment confirmation is retired. Please use Secure Checkout from your dashboard or contact Accounting so a staff member can review any manual payment proof.',
+        ], 410);
     }
 
     private function normalizeJsonPayload(mixed $value): mixed

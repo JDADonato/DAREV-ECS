@@ -19,6 +19,10 @@ class User extends Authenticatable
         'password',
         'email',
         'phone',
+        'avatar_path',
+        'preferred_contact_method',
+        'notification_preferences',
+        'profile_preferences',
         'role',
         'email_verified_at',
         'otp_code',
@@ -43,6 +47,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'email_verified_at' => 'datetime',
             'otp_expires_at' => 'datetime',
+            'notification_preferences' => 'array',
+            'profile_preferences' => 'array',
         ];
     }
 

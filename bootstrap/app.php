@@ -24,10 +24,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'cache.headers' => \Illuminate\Http\Middleware\SetCacheHeaders::class,
         ]);
 
-        // Exclude /api/* from CSRF verification — original React components
-        // use fetch() for API calls without CSRF tokens.
+        // PayMongo signs webhook requests separately. Browser API calls keep
+        // CSRF protection and receive tokens from the frontend fetch wrapper.
         $middleware->validateCsrfTokens(except: [
-            'api/*',
             'webhook/paymongo',
         ]);
     })

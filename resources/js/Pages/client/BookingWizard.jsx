@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { router, Link } from '@inertiajs/react';
+import { Head, router, Link } from '@inertiajs/react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -12,8 +12,8 @@ import EventSurcharges from '../../Components/client/EventSurcharges';
 import FoodTastingStep from '../../Components/client/FoodTastingStep';
 import BlueprintPanel from '../../Components/client/BlueprintPanel';
 import Modal from '../../Components/common/Modal';
-import DeferredChatBubble from '../../Components/common/DeferredChatBubble';
 import ClientNavbar from '../../Components/common/ClientNavbar';
+import { getCustomerSafeValidationMessage } from '../../utils/dashboardUtils';
 
 const totalSteps = 7;
 
@@ -38,6 +38,12 @@ const stepMessages = {
 };
 
 const money = (value) => `₱${Number(value || 0).toLocaleString()}`;
+
+const trackPublicFunnel = (event, payload = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('ecs:funnel', { detail: { event, ...payload } }));
+    window.dataLayer?.push({ event: `ecs_${event}`, ...payload });
+};
 
 const summarizeBookingCosts = (data = {}) => {
     const baseEventCost = data.totalCost || 0;
@@ -169,6 +175,7 @@ const BookingWizard = () => {
 
     const nextStep = (skipValidation = false) => {
         if (skipValidation || validateStep(currentStep)) {
+            trackPublicFunnel('booking_step_completed', { step: currentStep, next_step: Math.min(currentStep + 1, totalSteps) });
             setCurrentStep(prev => prev + 1);
         }
     };
@@ -284,12 +291,9 @@ const BookingWizard = () => {
 
             if (error.response && error.response.data) {
                 const data = error.response.data;
-                errorMsg = data.error || data.message || errorMsg;
-
-                if (data.errors) {
-                    const validationErrors = Object.values(data.errors).flat().join(' ');
-                    errorMsg += ` ${validationErrors}`;
-                }
+                errorMsg = data.errors
+                    ? getCustomerSafeValidationMessage(data)
+                    : getCustomerSafeValidationMessage(data, data.error || data.message || errorMsg);
             }
 
             showModal('error', 'Booking Failed', errorMsg);
@@ -328,6 +332,9 @@ const BookingWizard = () => {
 
     return (
         <div className="booking-page min-h-screen bg-[#fffaf3] font-sans text-slate-900">
+            <Head title="Book Your Event | Eloquente Catering">
+                <meta name="description" content="Plan your Eloquente Catering event with guided steps for event type, date availability, guests, packages, menu, logistics, and tasting." />
+            </Head>
             <ClientNavbar user={user} />
 
             {showResumeModal && (
@@ -503,8 +510,6 @@ const BookingWizard = () => {
                     onToggle={() => setSummaryCollapsed(prev => !prev)}
                 />
             </div>
-
-            {user && <DeferredChatBubble user={user} />}
         </div>
     );
 };

@@ -15,13 +15,17 @@ class VerifyEmailOTP extends Mailable implements ShouldQueue
     use Queueable, SerializesModels;
 
     public $otpCode;
+    public string $purpose;
+    public int $expiresInMinutes;
 
     /**
      * Create a new message instance.
      */
-    public function __construct($otpCode)
+    public function __construct($otpCode, string $purpose = 'account verification', int $expiresInMinutes = 10)
     {
         $this->otpCode = $otpCode;
+        $this->purpose = $purpose;
+        $this->expiresInMinutes = $expiresInMinutes;
     }
 
     /**
@@ -30,7 +34,7 @@ class VerifyEmailOTP extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Your Verification Code',
+            subject: 'Your Eloquente Verification Code',
         );
     }
 

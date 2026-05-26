@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
@@ -15,6 +15,9 @@ const About = () => {
 
     return (
         <div className="min-h-screen bg-[#f7f4ee] font-sans">
+            <Head title="About Eloquente Catering">
+                <meta name="description" content="Learn about Eloquente Catering's event planning approach, catering service standards, and full-service event operations." />
+            </Head>
             <ClientNavbar user={user} logout={logout} activePath="/about" />
 
             <main className="pt-[68px]">

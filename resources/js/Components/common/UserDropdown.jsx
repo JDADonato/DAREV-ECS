@@ -4,6 +4,8 @@ import { Link, router } from '@inertiajs/react';
 const UserDropdown = ({ user, dashLink }) => {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef(null);
+    const displayName = user.full_name || user.username || 'Account';
+    const initial = displayName.charAt(0).toUpperCase();
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -26,8 +28,12 @@ const UserDropdown = ({ user, dashLink }) => {
                 onClick={() => setIsOpen(!isOpen)}
                 className="flex items-center space-x-2 text-white/80 hover:text-white focus:outline-none transition-colors"
             >
-                <div className="w-8 h-8 rounded-full bg-yellow-500 text-red-900 flex items-center justify-center font-bold shadow-md">
-                    {user.username.charAt(0).toUpperCase()}
+                <div className="w-8 h-8 overflow-hidden rounded-full bg-yellow-500 text-red-900 flex items-center justify-center font-bold shadow-md ring-2 ring-white/15">
+                    {user.avatar_url ? (
+                        <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" />
+                    ) : (
+                        initial
+                    )}
                 </div>
                 <span className="text-sm font-medium">{user.username}</span>
                 <svg className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
