@@ -44,7 +44,11 @@ class RecordStaffAuditLog
                     'route' => optional($request->route())->getName(),
                     'target_id' => $request->route()?->parameter('id')
                         ?? $request->route()?->parameter('bookingId')
-                        ?? $request->route()?->parameter('paymentId'),
+                        ?? $request->route()?->parameter('paymentId')
+                        ?? optional($request->route()?->parameter('booking'))->id
+                        ?? optional($request->route()?->parameter('payment'))->id
+                        ?? optional($request->route()?->parameter('conversation'))->id
+                        ?? optional($request->route()?->parameter('message'))->id,
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -68,8 +72,12 @@ class RecordStaffAuditLog
             return true;
         }
 
-        if ($request->is('api/admin/*', 'api/marketing/*', 'api/accounting/*', 'logout', 'profile')) {
+        if ($request->is('api/admin/*', 'api/marketing/*', 'api/accounting/*', 'api/chat/*', 'api/operations/*', 'api/calendar-availability*', 'logout', 'profile')) {
             return !$request->isMethod('GET');
+        }
+
+        if ($request->is('documents/*', 'preview/customer-booking/*')) {
+            return $request->isMethod('GET');
         }
 
         return false;
@@ -81,11 +89,13 @@ class RecordStaffAuditLog
         $path = '/' . ltrim($request->path(), '/');
 
         $phrases = [
+            'POST /api/admin/employees/' => $this->employeeActionLabel($path),
             'POST /api/admin/employees' => 'Created a staff account',
             'PUT /api/admin/employees' => 'Updated a staff account',
-            'DELETE /api/admin/employees' => 'Deleted a staff account',
+            'DELETE /api/admin/employees' => 'Deactivated a staff account',
             'PUT /api/admin/customers' => 'Updated a customer account',
-            'DELETE /api/admin/customers' => 'Deleted a customer account',
+            'DELETE /api/admin/customers' => 'Deactivated a customer account',
+            'POST /api/admin/customers/' => 'Reactivated a customer account',
             'POST /api/admin/pricing' => 'Changed pricing override',
             'PUT /api/admin/bookings' => 'Updated a booking',
             'POST /api/admin/bookings' => 'Changed booking financials',
@@ -100,7 +110,20 @@ class RecordStaffAuditLog
             'PUT /api/accounting/payments' => 'Updated payment record',
             'POST /api/accounting/remind' => 'Sent payment reminder',
             'POST /api/accounting/refund' => 'Processed refund',
+            'POST /api/accounting/refunds' => 'Updated refund case',
             'PUT /api/marketing/bookings' => 'Updated marketing booking status',
+            'POST /api/marketing/bookings' => $this->marketingBookingActionLabel($path),
+            'PATCH /api/marketing/bookings' => 'Updated booking review task',
+            'POST /api/chat/conversations' => $this->chatActionLabel($path),
+            'PATCH /api/chat/messages' => 'Edited a chat message',
+            'DELETE /api/chat/messages' => 'Deleted a chat message',
+            'PATCH /api/operations/preparation-tasks' => 'Updated preparation task',
+            'PUT /api/calendar-availability' => 'Updated date availability',
+            'DELETE /api/calendar-availability' => 'Cleared date availability',
+            'GET /documents/payments' => 'Downloaded a payment receipt',
+            'GET /documents/bookings' => 'Downloaded an event preparation list',
+            'GET /documents/calendar.pdf' => 'Downloaded calendar report',
+            'GET /preview/customer-booking' => 'Previewed a customer booking',
             'POST /logout' => 'Signed out',
             'GET /dashboard/admin' => 'Opened admin dashboard',
             'GET /dashboard/marketing' => 'Opened marketing dashboard',
@@ -118,6 +141,44 @@ class RecordStaffAuditLog
             'PUT', 'PATCH' => 'Updated a record',
             'DELETE' => 'Deleted a record',
             default => 'Viewed a staff page',
+        };
+    }
+
+    private function employeeActionLabel(string $path): string
+    {
+        return match (true) {
+            str_contains($path, '/reset-password') => 'Reset a staff password',
+            str_contains($path, '/force-password-change') => 'Required staff password change',
+            str_contains($path, '/reactivate') => 'Reactivated a staff account',
+            default => 'Updated a staff account',
+        };
+    }
+
+    private function marketingBookingActionLabel(string $path): string
+    {
+        return match (true) {
+            str_contains($path, '/claim') => 'Claimed a booking',
+            str_contains($path, '/release') => 'Released a booking claim',
+            str_contains($path, '/transfer/accept') => 'Accepted a booking transfer',
+            str_contains($path, '/transfer/decline') => 'Declined a booking transfer',
+            str_contains($path, '/transfer') => 'Requested booking transfer',
+            str_contains($path, '/clarification') => 'Requested booking clarification',
+            default => 'Updated marketing booking',
+        };
+    }
+
+    private function chatActionLabel(string $path): string
+    {
+        return match (true) {
+            str_contains($path, '/claim') => 'Claimed a conversation',
+            str_contains($path, '/join') => 'Joined a conversation',
+            str_contains($path, '/internal-notes') => 'Added an internal chat note',
+            str_contains($path, '/collaborators') => 'Updated chat collaborators',
+            str_contains($path, '/transfer') => 'Transferred a conversation',
+            str_contains($path, '/resolve') => 'Resolved a conversation',
+            str_contains($path, '/reopen') => 'Reopened a conversation',
+            str_contains($path, '/messages') => 'Sent a chat message',
+            default => 'Updated a conversation',
         };
     }
 }

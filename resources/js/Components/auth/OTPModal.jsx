@@ -8,12 +8,26 @@ const OTPModal = () => {
     const toast = useToast();
     const [otpValues, setOtpValues] = useState(Array(6).fill(''));
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [expiresAt, setExpiresAt] = useState(user?.otp_expires_at || null);
+    const [resendAvailableAt, setResendAvailableAt] = useState(user?.otp_resend_available_at || null);
+    const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [resendSeconds, setResendSeconds] = useState(0);
     const inputRefs = useRef([]);
 
     // Initialize refs array
     useEffect(() => {
         inputRefs.current = inputRefs.current.slice(0, 6);
     }, []);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            const now = Date.now();
+            setRemainingSeconds(expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000)) : 0);
+            setResendSeconds(resendAvailableAt ? Math.max(0, Math.ceil((new Date(resendAvailableAt).getTime() - now) / 1000)) : 0);
+        }, 1000);
+
+        return () => window.clearInterval(timer);
+    }, [expiresAt, resendAvailableAt]);
 
     if (!user || user.email_verified_at || user.role !== 'Client') {
         return null;
@@ -91,14 +105,31 @@ const OTPModal = () => {
         });
     };
 
-    const handleResend = () => {
-        router.post('/resend-otp', {}, {
-            preserveScroll: true,
-            onSuccess: () => toast.success('Verification code resent!')
+    const handleResend = async () => {
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const response = await fetch('/resend-otp', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': token,
+            },
         });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            toast.error(payload.error || 'Please wait before requesting another code.');
+            if (payload.retry_after_seconds) {
+                setResendAvailableAt(new Date(Date.now() + Number(payload.retry_after_seconds) * 1000).toISOString());
+            }
+            return;
+        }
+        if (payload.expires_at) setExpiresAt(payload.expires_at);
+        if (payload.retry_after_seconds) setResendAvailableAt(new Date(Date.now() + Number(payload.retry_after_seconds) * 1000).toISOString());
+        toast.success('Verification code resent!');
     };
 
     const isComplete = otpValues.every(val => val !== '');
+    const expired = expiresAt && remainingSeconds <= 0;
+    const countdown = remainingSeconds > 0 ? `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}` : 'expired';
 
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" style={{ animation: 'fadeIn .3s ease' }}>
@@ -109,8 +140,10 @@ const OTPModal = () => {
                     </div>
                     <h3 className="text-white font-display font-bold text-xl mb-2">Verify Your Email</h3>
                     <p className="text-red-100/80 text-sm">We've sent a 6-digit verification code to <br/><strong className="text-yellow-400">{user.email}</strong></p>
+                    <p className="mt-3 text-xs font-bold uppercase tracking-widest text-yellow-100">Code {expired ? 'expired' : `expires in ${countdown}`}</p>
                 </div>
                 <div className="p-6 bg-white space-y-6 text-center">
+                    {expired && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">This code has expired. Please request a new one.</p>}
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
                             {otpValues.map((digit, index) => (
@@ -130,7 +163,7 @@ const OTPModal = () => {
                         </div>
                         <button 
                             type="submit" 
-                            disabled={isSubmitting || !isComplete}
+                            disabled={isSubmitting || !isComplete || expired}
                             className="w-full py-3 px-4 rounded-xl font-bold text-white bg-[#720101] hover:bg-red-900 shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 flex justify-center items-center gap-2"
                         >
                             {isSubmitting ? (
@@ -148,8 +181,8 @@ const OTPModal = () => {
                     </form>
                     <p className="text-sm text-gray-500">
                         Didn't receive the code?{' '}
-                        <button onClick={handleResend} className="text-[#720101] font-bold hover:underline transition-colors">
-                            Resend Code
+                        <button type="button" disabled={resendSeconds > 0} onClick={handleResend} className="text-[#720101] font-bold hover:underline transition-colors disabled:text-gray-400 disabled:no-underline">
+                            {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend Code'}
                         </button>
                     </p>
                     <p className="text-xs text-gray-400 mt-4">

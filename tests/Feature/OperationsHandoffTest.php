@@ -91,7 +91,7 @@ class OperationsHandoffTest extends TestCase
     public function test_completing_booking_creates_one_feedback_request(): void
     {
         $marketing = $this->user('Marketing');
-        $booking = $this->booking(['status' => 'Confirmed']);
+        $booking = $this->booking(['status' => 'Confirmed', 'assigned_to' => $marketing->id]);
 
         $this->actingAs($marketing)
             ->putJson("/api/marketing/bookings/{$booking->id}/status", ['status' => 'Completed'])
@@ -104,6 +104,101 @@ class OperationsHandoffTest extends TestCase
             ->assertOk();
 
         $this->assertSame(1, FeedbackRequest::where('booking_id', $booking->id)->count());
+    }
+
+    public function test_command_completes_past_submitted_booking_once(): void
+    {
+        $marketing = $this->user('Marketing');
+        $pastSubmitted = $this->booking([
+            'status' => 'Pending',
+            'review_status' => 'Submitted',
+            'event_date' => now()->subDay()->toDateString(),
+            'assigned_to' => $marketing->id,
+        ]);
+
+        $this->artisan('bookings:complete-past-submitted')
+            ->expectsOutput('Completed 1 past submitted booking(s).')
+            ->assertSuccessful();
+
+        $pastSubmitted->refresh();
+        $this->assertSame('Completed', $pastSubmitted->status);
+        $this->assertSame('Completed', $pastSubmitted->review_status);
+        $this->assertSame('Completed', $pastSubmitted->live_status);
+        $this->assertNotNull($pastSubmitted->reviewed_at);
+        $this->assertSame(1, FeedbackRequest::where('booking_id', $pastSubmitted->id)->count());
+
+        $this->artisan('bookings:complete-past-submitted')
+            ->expectsOutput('Completed 0 past submitted booking(s).')
+            ->assertSuccessful();
+
+        $this->assertSame(1, FeedbackRequest::where('booking_id', $pastSubmitted->id)->count());
+    }
+
+    public function test_past_submitted_cleanup_skips_future_and_confirmed_bookings(): void
+    {
+        $futureSubmitted = $this->booking([
+            'status' => 'Pending',
+            'review_status' => 'Submitted',
+            'event_date' => now()->addDay()->toDateString(),
+        ]);
+        $pastConfirmed = $this->booking([
+            'status' => 'Confirmed',
+            'review_status' => 'Approved For Reservation',
+            'event_date' => now()->subDay()->toDateString(),
+        ]);
+
+        $this->artisan('bookings:complete-past-submitted')
+            ->expectsOutput('Completed 0 past submitted booking(s).')
+            ->assertSuccessful();
+
+        $this->assertSame('Pending', $futureSubmitted->fresh()->status);
+        $this->assertSame('Submitted', $futureSubmitted->fresh()->review_status);
+        $this->assertSame('Confirmed', $pastConfirmed->fresh()->status);
+        $this->assertSame('Approved For Reservation', $pastConfirmed->fresh()->review_status);
+        $this->assertSame(0, FeedbackRequest::whereIn('booking_id', [$futureSubmitted->id, $pastConfirmed->id])->count());
+    }
+
+    public function test_cleanup_normalizes_completed_bookings_stuck_with_submitted_review_status(): void
+    {
+        $booking = $this->booking([
+            'status' => 'Completed',
+            'review_status' => 'Submitted',
+            'event_date' => now()->subDay()->toDateString(),
+        ]);
+
+        $this->artisan('bookings:complete-past-submitted')
+            ->expectsOutput('Completed 1 past submitted booking(s).')
+            ->assertSuccessful();
+
+        $booking->refresh();
+        $this->assertSame('Completed', $booking->status);
+        $this->assertSame('Completed', $booking->review_status);
+        $this->assertSame('Completed', $booking->live_status);
+        $this->assertSame(1, FeedbackRequest::where('booking_id', $booking->id)->count());
+    }
+
+    public function test_completed_past_submitted_booking_leaves_marketing_review_counts(): void
+    {
+        $marketing = $this->user('Marketing');
+        $booking = $this->booking([
+            'status' => 'Pending',
+            'review_status' => 'Submitted',
+            'event_date' => now()->subDay()->toDateString(),
+        ]);
+
+        $this->actingAs($marketing)
+            ->getJson('/api/marketing/summary')
+            ->assertOk()
+            ->assertJsonPath('pending', 1);
+
+        $this->artisan('bookings:complete-past-submitted')->assertSuccessful();
+
+        $this->actingAs($marketing)
+            ->getJson('/api/marketing/summary')
+            ->assertOk()
+            ->assertJsonPath('pending', 0);
+
+        $this->assertSame('Completed', $booking->fresh()->status);
     }
 
     public function test_customer_submits_feedback_and_low_rating_requires_follow_up(): void

@@ -105,6 +105,12 @@ const Login = () => {
                     <span className="text-sm font-medium text-slate-600">Remember me for 30 days</span>
                 </label>
 
+                <div className="text-right">
+                    <Link href="/forgot-password" className="text-sm font-bold text-red-900 transition hover:text-amber-700">
+                        Forgot password?
+                    </Link>
+                </div>
+
                 {error && (
                     <div className="auth-error">
                         {error}

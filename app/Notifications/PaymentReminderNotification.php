@@ -12,9 +12,7 @@ class PaymentReminderNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(
-        public Payment $payment
-    ) {}
+    public function __construct(public Payment $payment) {}
 
     public function via(object $notifiable): array
     {
@@ -24,22 +22,28 @@ class PaymentReminderNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         $booking = $this->payment->booking;
-        $daysUntilDue = \Carbon\Carbon::parse($this->payment->due_date)->diffInDays(\Carbon\Carbon::now());
+        $dueDate = \Carbon\Carbon::parse($this->payment->due_date);
+        $daysUntilDue = $dueDate->diffInDays(\Carbon\Carbon::now());
 
         return (new MailMessage)
             ->subject('Payment Reminder - Eloquente Catering')
-            ->greeting("Hello {$notifiable->username}!")
-            ->line("This is a friendly reminder about your upcoming payment.")
-            ->line("Payment Type: {$this->payment->payment_type}")
-            ->line("Amount Due: ₱" . number_format($this->payment->amount, 2))
-            ->line("Due Date: " . \Carbon\Carbon::parse($this->payment->due_date)->format('F j, Y'))
-            ->when($daysUntilDue > 0, function ($mail) use ($daysUntilDue) {
-                return $mail->line("Days Remaining: {$daysUntilDue}");
-            })
-            ->line("Booking Reference: #" . str_pad($booking->id, 5, '0', STR_PAD_LEFT))
-            ->action('View Payment Details', route('payment.page'))
-            ->line('Please make your payment on or before the due date to maintain your booking.')
-            ->line('Thank you!');
+            ->view('emails.generic', [
+                'emailTitle' => 'Payment reminder',
+                'headline' => 'Your payment is coming up',
+                'preheader' => 'A friendly reminder for your Eloquente booking payment.',
+                'greeting' => "Hello {$notifiable->username},",
+                'lines' => ['This is a friendly reminder about an upcoming payment for your booking.'],
+                'details' => array_filter([
+                    'Payment type' => $this->payment->payment_type,
+                    'Amount due' => 'PHP ' . number_format((float) $this->payment->amount, 2),
+                    'Due date' => $dueDate->format('F j, Y'),
+                    'Days remaining' => $daysUntilDue > 0 ? $daysUntilDue : null,
+                    'Booking reference' => '#' . str_pad($booking->id, 5, '0', STR_PAD_LEFT),
+                ]),
+                'ctaLabel' => 'View payment',
+                'ctaUrl' => route('payment.page'),
+                'note' => 'Please make your payment on or before the due date to keep your booking on track.',
+            ]);
     }
 
     public function toDatabase(object $notifiable): array
@@ -48,7 +52,7 @@ class PaymentReminderNotification extends Notification implements ShouldQueue
             'payment_id' => $this->payment->id,
             'booking_id' => $this->payment->booking_id,
             'type' => 'payment_reminder',
-            'message' => "Payment reminder: ₱" . number_format($this->payment->amount, 2) . " ({$this->payment->payment_type}) due on " . \Carbon\Carbon::parse($this->payment->due_date)->format('F j, Y'),
+            'message' => 'Payment reminder: PHP ' . number_format((float) $this->payment->amount, 2) . " ({$this->payment->payment_type}) due on " . \Carbon\Carbon::parse($this->payment->due_date)->format('F j, Y'),
         ];
     }
 }

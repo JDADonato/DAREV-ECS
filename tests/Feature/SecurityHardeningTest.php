@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -67,6 +68,84 @@ class SecurityHardeningTest extends TestCase
                 && ($context['user_id'] ?? null) === $user->id);
 
         $this->assertOtpLoggingStringsWereRemoved();
+    }
+
+    public function test_resend_otp_enforces_cooldown_and_exposes_retry_seconds(): void
+    {
+        Mail::fake();
+
+        $user = User::create([
+            'username' => 'cooldown_client',
+            'email' => 'cooldown@example.test',
+            'password' => 'password123',
+            'role' => 'Client',
+            'otp_code' => '111111',
+            'otp_expires_at' => now()->addMinutes(15),
+            'otp_resend_available_at' => now()->addSeconds(45),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson('/resend-otp')
+            ->assertStatus(429)
+            ->assertJsonStructure(['error', 'retry_after_seconds']);
+    }
+
+    public function test_forgot_password_reset_is_single_use_for_active_accounts(): void
+    {
+        Mail::fake();
+
+        $user = User::create([
+            'username' => 'reset_client',
+            'email' => 'reset-client@example.test',
+            'password' => 'old-password',
+            'role' => 'Client',
+            'account_status' => 'active',
+        ]);
+
+        $this->post('/forgot-password', ['email' => $user->email])
+            ->assertSessionHas('message');
+
+        $record = DB::table('password_reset_tokens')->where('email', $user->email)->first();
+        $this->assertNotNull($record);
+
+        $token = 'known-reset-token';
+        DB::table('password_reset_tokens')->where('email', $user->email)->update([
+            'token' => \Illuminate\Support\Facades\Hash::make($token),
+            'created_at' => now(),
+        ]);
+
+        $this->post('/reset-password', [
+            'email' => $user->email,
+            'token' => $token,
+            'password' => 'new-password-123',
+            'password_confirmation' => 'new-password-123',
+        ])->assertRedirect('/login');
+
+        $this->assertDatabaseMissing('password_reset_tokens', ['email' => $user->email]);
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('new-password-123', $user->fresh()->password));
+
+        $this->post('/reset-password', [
+            'email' => $user->email,
+            'token' => $token,
+            'password' => 'another-password-123',
+            'password_confirmation' => 'another-password-123',
+        ])->assertSessionHasErrors('email');
+    }
+
+    public function test_deactivated_account_does_not_receive_reset_token(): void
+    {
+        $user = User::create([
+            'username' => 'inactive_client',
+            'email' => 'inactive-client@example.test',
+            'password' => 'password123',
+            'role' => 'Client',
+            'account_status' => 'deactivated',
+        ]);
+
+        $this->post('/forgot-password', ['email' => $user->email])
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseMissing('password_reset_tokens', ['email' => $user->email]);
     }
 
     public function test_upload_endpoint_accepts_images_and_rejects_non_images(): void

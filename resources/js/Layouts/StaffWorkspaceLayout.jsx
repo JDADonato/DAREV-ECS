@@ -1,9 +1,12 @@
 import React from 'react';
+import { Link } from '@inertiajs/react';
+
 const StaffWorkspaceLayout = ({
     brand = 'Eloquente',
     title,
     roleLabel,
     username,
+    profileHref = '/profile',
     navGroups = [],
     active,
     onNavigate,
@@ -42,7 +45,10 @@ const StaffWorkspaceLayout = ({
                         <p>{roleLabel}</p>
                         <strong>{username || 'Staff'}</strong>
                     </div>
-                    <button type="button" onClick={onLogout}>Logout</button>
+                    <div className="staff-sidebar-user-actions">
+                        {profileHref && <Link href={profileHref}>Profile</Link>}
+                        <button type="button" onClick={onLogout}>Logout</button>
+                    </div>
                 </div>
             </aside>
 

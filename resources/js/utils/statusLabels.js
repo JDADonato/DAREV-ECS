@@ -7,6 +7,22 @@ export const paymentTypeLabel = (type) => ({
     Final: 'Final Payment',
 }[type] || type || 'Payment');
 
+export const paymentMethodLabel = (method) => {
+    const raw = String(method || '').trim();
+    const normalized = raw.toLowerCase();
+
+    if (!raw || normalized === 'pending') return 'Pending';
+    if (normalized.includes('gcash')) return normalized.includes('paymongo') ? 'GCash via PayMongo' : 'GCash';
+    if (normalized.includes('paymaya') || normalized.includes('maya')) return normalized.includes('paymongo') ? 'Maya via PayMongo' : 'Maya';
+    if (normalized.includes('card')) return normalized.includes('paymongo') ? 'Card via PayMongo' : 'Card';
+    if (normalized.includes('bank')) return 'Bank Transfer';
+    if (normalized.includes('cash')) return 'Cash';
+    if (normalized.includes('paymongo') || normalized.includes('online checkout')) return 'PayMongo Checkout';
+    if (normalized.includes('manual')) return 'Manual Payment';
+
+    return raw;
+};
+
 export const isSettledPaymentStatus = (status) => ['Paid', 'Verified'].includes(status);
 
 export const customerBookingStatus = (status) => {

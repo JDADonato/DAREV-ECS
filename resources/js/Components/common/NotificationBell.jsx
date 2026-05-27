@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { usePage } from '@inertiajs/react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
 
 /**
@@ -10,11 +11,16 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
  *   - variant: 'light' (for dark backgrounds like navbar) or 'dark' (for light backgrounds)
  */
 const NotificationBell = ({ variant = 'light' }) => {
+    const { auth } = usePage().props;
+    const notificationPreferences = auth?.user?.notification_preferences || {};
     const [isOpen, setIsOpen] = useState(false);
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [loading, setLoading] = useState(false);
     const dropdownRef = useRef(null);
+    const previousUnreadRef = useRef(0);
+    const soundReadyRef = useRef(false);
+    const lastSoundAtRef = useRef(0);
 
     // Close dropdown on outside click
     useEffect(() => {
@@ -24,14 +30,67 @@ const NotificationBell = ({ variant = 'light' }) => {
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        const unlockSound = () => {
+            soundReadyRef.current = true;
+            window.removeEventListener('pointerdown', unlockSound);
+            window.removeEventListener('keydown', unlockSound);
+        };
+        window.addEventListener('pointerdown', unlockSound, { once: true });
+        window.addEventListener('keydown', unlockSound, { once: true });
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('pointerdown', unlockSound);
+            window.removeEventListener('keydown', unlockSound);
+        };
     }, []);
+
+    const playNotificationSound = () => {
+        const soundEnabled = !notificationPreferences.quiet_mode && (
+            notificationPreferences.sound_enabled ||
+            notificationPreferences.notification_sounds ||
+            notificationPreferences.message_sounds ||
+            notificationPreferences.booking_update_sounds ||
+            notificationPreferences.payment_update_sounds ||
+            notificationPreferences.staff_update_sounds
+        );
+        if (!soundEnabled || !soundReadyRef.current) return;
+        if (Date.now() - lastSoundAtRef.current < 8000) return;
+
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            const gain = ctx.createGain();
+            gain.gain.value = 0.035;
+            gain.connect(ctx.destination);
+
+            [440, 660].forEach((frequency, index) => {
+                const oscillator = ctx.createOscillator();
+                oscillator.type = 'sine';
+                oscillator.frequency.value = frequency;
+                oscillator.connect(gain);
+                oscillator.start(ctx.currentTime + index * 0.08);
+                oscillator.stop(ctx.currentTime + index * 0.08 + 0.12);
+            });
+
+            lastSoundAtRef.current = Date.now();
+            window.setTimeout(() => ctx.close(), 500);
+        } catch (e) {
+            // Browser audio can fail if the user has not interacted yet.
+        }
+    };
 
     const fetchUnreadCount = async () => {
         try {
             const res = await fetch('/api/notifications/unread-count');
             if (res.ok) {
                 const data = await res.json();
+                const nextCount = data.count || 0;
+                if (previousUnreadRef.current > 0 && nextCount > previousUnreadRef.current) {
+                    playNotificationSound();
+                }
+                previousUnreadRef.current = nextCount;
                 setUnreadCount(data.count);
             }
         } catch (e) {

@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\VerifyEmailOTP;
+use App\Notifications\PasswordResetLinkNotification;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -55,9 +58,27 @@ class AuthController extends Controller
             ]);
         }
 
+        if (($user->account_status ?? 'active') !== 'active') {
+            throw ValidationException::withMessages([
+                'username' => ['This account is deactivated. Please contact Eloquente support.'],
+            ]);
+        }
+
+        if ($user->temporary_password_expires_at && now()->isAfter($user->temporary_password_expires_at)) {
+            throw ValidationException::withMessages([
+                'password' => ['This temporary password has expired. Please ask an administrator for a reset.'],
+            ]);
+        }
+
         $remember = $request->boolean('remember', false);
         Auth::login($user, $remember);
         $request->session()->regenerate();
+        $user->forceFill(['last_login_at' => now()])->save();
+
+        if ($user->must_change_password) {
+            return redirect()->route('password.change-required')
+                ->with('message', 'Please set your own password before continuing.');
+        }
 
         // Redirect based on role. Avoid redirect()->intended() here because
         // unauthenticated API fetches can store /api/* as the intended URL,
@@ -85,6 +106,8 @@ class AuthController extends Controller
             'phone'    => $request->phone,
             'otp_code' => $otp,
             'otp_expires_at' => now()->addMinutes(15),
+            'otp_resend_available_at' => now()->addSeconds(60),
+            'otp_resend_attempts' => 0,
         ]);
 
         try {
@@ -137,6 +160,8 @@ class AuthController extends Controller
             'email_verified_at' => now(),
             'otp_code' => null,
             'otp_expires_at' => null,
+            'otp_resend_available_at' => null,
+            'otp_resend_attempts' => 0,
         ]);
 
         return redirect('/')
@@ -154,10 +179,29 @@ class AuthController extends Controller
             return response()->json(['message' => 'Already verified']);
         }
 
+        if ($user->otp_resend_available_at && now()->isBefore($user->otp_resend_available_at)) {
+            $seconds = now()->diffInSeconds($user->otp_resend_available_at);
+            return response()->json([
+                'error' => 'Please wait before requesting another code.',
+                'retry_after_seconds' => $seconds,
+                'expires_at' => $user->otp_expires_at?->toIso8601String(),
+                'expires_in_seconds' => $user->otp_expires_at ? now()->diffInSeconds($user->otp_expires_at, false) : 0,
+            ], 429);
+        }
+
+        if ((int) ($user->otp_resend_attempts ?? 0) >= 5) {
+            return response()->json([
+                'error' => 'Too many resend attempts. Please try again later.',
+                'retry_after_seconds' => 3600,
+            ], 429);
+        }
+
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         $user->update([
             'otp_code' => $otp,
             'otp_expires_at' => now()->addMinutes(15),
+            'otp_resend_available_at' => now()->addSeconds(60),
+            'otp_resend_attempts' => (int) ($user->otp_resend_attempts ?? 0) + 1,
         ]);
 
         try {
@@ -170,7 +214,117 @@ class AuthController extends Controller
             ]);
         }
 
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'A new verification code has been sent to your email.',
+                'expires_at' => $user->otp_expires_at?->toIso8601String(),
+                'expires_in_seconds' => now()->diffInSeconds($user->otp_expires_at),
+                'retry_after_seconds' => now()->diffInSeconds($user->otp_resend_available_at),
+                'resend_attempts_remaining' => max(0, 5 - (int) $user->otp_resend_attempts),
+            ]);
+        }
+
         return back()->with('message', 'A new verification code has been sent to your email.');
+    }
+
+    public function showChangeRequired()
+    {
+        return Inertia::render('Auth/ChangeRequiredPassword');
+    }
+
+    public function changeRequiredPassword(Request $request)
+    {
+        $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            abort(401);
+        }
+
+        $user->forceFill([
+            'password' => $request->password,
+            'must_change_password' => false,
+            'temporary_password_expires_at' => null,
+            'password_changed_at' => now(),
+        ])->save();
+
+        return redirect($this->getDashboardRoute($user->role))
+            ->with('message', 'Password updated. Welcome to your workspace.');
+    }
+
+    public function showForgotPassword()
+    {
+        return Inertia::render('Auth/ForgotPassword');
+    }
+
+    public function sendPasswordReset(Request $request)
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+        if ($user && ($user->account_status ?? 'active') === 'active') {
+            $token = Str::random(64);
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $user->email],
+                ['token' => Hash::make($token), 'created_at' => now()]
+            );
+
+            try {
+                $user->notify(new PasswordResetLinkNotification(url('/reset-password/' . $token . '?email=' . urlencode($user->email))));
+            } catch (\Throwable $e) {
+                Log::warning('Password reset email failed.', ['user_id' => $user->id, 'message' => $e->getMessage()]);
+            }
+        }
+
+        return back()->with('message', 'If that email belongs to an active account, a reset link has been sent.');
+    }
+
+    public function showResetPassword(Request $request, string $token)
+    {
+        return Inertia::render('Auth/ResetPassword', [
+            'token' => $token,
+            'email' => $request->query('email', ''),
+        ]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+            'token' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $record = DB::table('password_reset_tokens')->where('email', $data['email'])->first();
+        $user = User::where('email', $data['email'])->first();
+
+        if (
+            !$record ||
+            !$user ||
+            ($user->account_status ?? 'active') !== 'active' ||
+            now()->subMinutes(60)->greaterThan($record->created_at) ||
+            !Hash::check($data['token'], $record->token)
+        ) {
+            throw ValidationException::withMessages([
+                'email' => ['This reset link is invalid or expired. Please request a new one.'],
+            ]);
+        }
+
+        $user->forceFill([
+            'password' => $data['password'],
+            'must_change_password' => false,
+            'temporary_password_expires_at' => null,
+            'password_changed_at' => now(),
+            'remember_token' => Str::random(60),
+        ])->save();
+
+        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+
+        return redirect('/login')->with('message', 'Password reset. Please sign in with your new password.');
     }
 
     /**

@@ -9,14 +9,17 @@ use App\Models\AuditLog;
 use App\Models\MenuItem;
 use App\Models\PricingOverride;
 use App\Models\User;
+use App\Notifications\StaffAccountAccessNotification;
 use App\Services\AdminReportService;
 use App\Services\EventPreparationService;
+use App\Services\PostEventLifecycleService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
@@ -53,12 +56,12 @@ class AdminController extends Controller
 
         if ($request->boolean('paginated')) {
             $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
-            $employees = $query->paginate($perPage, ['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
+            $employees = $query->paginate($perPage, ['id', 'full_name', 'username', 'email', 'phone', 'role', 'account_status', 'must_change_password', 'last_login_at', 'deactivated_at', 'created_at']);
 
             return ApiResponse::paginated($employees, UserSummaryResource::collection($employees->getCollection())->resolve());
         }
 
-        $employees = $query->get(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at']);
+        $employees = $query->get(['id', 'full_name', 'username', 'email', 'phone', 'role', 'account_status', 'must_change_password', 'last_login_at', 'deactivated_at', 'created_at']);
 
         return response()->json(UserSummaryResource::collection($employees)->resolve());
     }
@@ -73,16 +76,30 @@ class AdminController extends Controller
             'role'     => 'required|in:Marketing,Accounting',
         ]);
 
+        $temporaryPassword = Str::password(14);
+
         $user = User::create([
             'full_name' => $request->full_name,
             'username' => $request->username,
-            'password' => 'eloquestaff@2026',
+            'password' => $temporaryPassword,
             'email'    => $request->email,
             'phone'    => $request->phone,
             'role'     => $request->role,
+            'account_status' => 'active',
+            'must_change_password' => true,
+            'temporary_password_expires_at' => now()->addDays(7),
         ]);
 
-        return response()->json(['id' => $user->id, 'message' => 'Employee account created'], 201);
+        if ($user->email) {
+            $user->notify(new StaffAccountAccessNotification($temporaryPassword, 'created'));
+        }
+
+        return response()->json([
+            'id' => $user->id,
+            'message' => 'Employee account created. Share the temporary password through a private channel.',
+            'temporary_password' => $temporaryPassword,
+            'temporary_password_expires_at' => $user->temporary_password_expires_at,
+        ], 201);
     }
 
     public function updateEmployee(Request $request, int $id)
@@ -110,6 +127,8 @@ class AdminController extends Controller
         if ($request->has('role'))     $updates['role'] = $request->role;
         if ($request->has('password') && $request->password) {
             $updates['password'] = Hash::make($request->password);
+            $updates['must_change_password'] = true;
+            $updates['temporary_password_expires_at'] = now()->addDays(7);
         }
 
         if (empty($updates)) {
@@ -129,15 +148,73 @@ class AdminController extends Controller
             return response()->json(['error' => 'Cannot delete this user'], 403);
         }
 
-        $user->delete();
+        $user->forceFill([
+            'account_status' => 'deactivated',
+            'deactivated_at' => now(),
+            'deactivated_by' => Auth::id(),
+            'deactivation_reason' => 'Deactivated by administrator.',
+        ])->save();
 
-        return response()->json(['message' => 'Employee account deleted successfully']);
+        return response()->json(['message' => 'Employee account deactivated successfully']);
+    }
+
+    public function resetEmployeePassword(int $id)
+    {
+        $user = User::find($id);
+
+        if (!$user || in_array($user->role, ['Admin', 'Client'])) {
+            return response()->json(['error' => 'Cannot modify this user'], 403);
+        }
+
+        $temporaryPassword = Str::password(14);
+        $user->forceFill([
+            'password' => Hash::make($temporaryPassword),
+            'must_change_password' => true,
+            'temporary_password_expires_at' => now()->addDays(7),
+        ])->save();
+
+        return response()->json([
+            'message' => 'Temporary password generated. Share it through a private channel.',
+            'temporary_password' => $temporaryPassword,
+            'temporary_password_expires_at' => $user->temporary_password_expires_at,
+        ]);
+    }
+
+    public function forceEmployeePasswordChange(int $id)
+    {
+        $user = User::find($id);
+
+        if (!$user || in_array($user->role, ['Admin', 'Client'])) {
+            return response()->json(['error' => 'Cannot modify this user'], 403);
+        }
+
+        $user->forceFill(['must_change_password' => true])->save();
+
+        return response()->json(['message' => 'Staff will be asked to change password on next sign-in.']);
+    }
+
+    public function reactivateEmployee(int $id)
+    {
+        $user = User::find($id);
+
+        if (!$user || in_array($user->role, ['Admin', 'Client'])) {
+            return response()->json(['error' => 'Cannot modify this user'], 403);
+        }
+
+        $user->forceFill([
+            'account_status' => 'active',
+            'deactivated_at' => null,
+            'deactivated_by' => null,
+            'deactivation_reason' => null,
+        ])->save();
+
+        return response()->json(['message' => 'Employee account reactivated successfully']);
     }
 
     public function getCustomers(Request $request)
     {
         $query = User::where('role', 'Client')
-            ->select(['id', 'full_name', 'username', 'email', 'phone', 'role', 'created_at'])
+            ->select(['id', 'full_name', 'username', 'email', 'phone', 'role', 'account_status', 'last_login_at', 'deactivated_at', 'created_at'])
             ->withCount('bookings')
             ->withMax('bookings', 'event_date')
             ->when($request->query('search'), function ($q, $search) {
@@ -199,9 +276,39 @@ class AdminController extends Controller
             return response()->json(['error' => 'Cannot delete this user'], 403);
         }
 
-        $user->delete();
+        $hasRecords = $user->bookings()->exists();
+        if (!$hasRecords) {
+            $user->delete();
 
-        return response()->json(['message' => 'Customer account deleted successfully']);
+            return response()->json(['message' => 'Customer test account deleted successfully']);
+        }
+
+        $user->forceFill([
+            'account_status' => 'deactivated',
+            'deactivated_at' => now(),
+            'deactivated_by' => Auth::id(),
+            'deactivation_reason' => 'Deactivated by administrator.',
+        ])->save();
+
+        return response()->json(['message' => 'Customer account deactivated. Booking and payment records were preserved.']);
+    }
+
+    public function reactivateCustomer(int $id)
+    {
+        $user = User::find($id);
+
+        if (!$user || $user->role !== 'Client') {
+            return response()->json(['error' => 'Cannot modify this user'], 403);
+        }
+
+        $user->forceFill([
+            'account_status' => 'active',
+            'deactivated_at' => null,
+            'deactivated_by' => null,
+            'deactivation_reason' => null,
+        ])->save();
+
+        return response()->json(['message' => 'Customer account reactivated successfully']);
     }
 
     // ==========================================
@@ -233,6 +340,9 @@ class AdminController extends Controller
                 'status',
                 'review_status',
                 'assigned_to',
+                'transfer_requested_to',
+                'transfer_requested_by',
+                'transfer_requested_at',
                 'clarification_request',
                 'clarification_response',
                 'clarification_requested_at',
@@ -244,11 +354,13 @@ class AdminController extends Controller
             ->with([
                 'user:id,full_name,username,email,phone,role',
                 'assignee:id,full_name,username',
+                'transferRequestedTo:id,full_name,username',
+                'transferRequestedBy:id,full_name,username',
                 'reviewTasks',
                 'preparationTasks',
                 'payments:id,booking_id,amount,status,payment_type,due_date',
             ])
-            ->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed'])
+            ->when(!$request->boolean('include_history'), fn ($q) => $q->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed']))
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('search'), function ($q, $search) {
                 $term = '%' . trim((string) $search) . '%';

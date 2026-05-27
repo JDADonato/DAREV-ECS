@@ -6,6 +6,10 @@ import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Fil
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import ConfirmModal from '../Components/common/ConfirmModal';
+import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
+import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
+import StaffPageHeader from '../Components/staff/StaffPageHeader';
+import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import { getListData } from '../utils/apiResponses';
 import {
     formatBookingRef,
@@ -80,9 +84,9 @@ const DEFAULT_ANALYTICS_FILTERS = {
     snapshot_window: 'all',
 };
 
-const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=100';
-const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=100';
-const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=100';
+const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=25';
+const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=25';
+const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=25';
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -116,6 +120,16 @@ const emptyEventTypeForm = () => ({
 const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
 const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
 const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
+const formatMonthLabel = (value) => {
+    if (!value) return 'Selected month';
+    const [year, month] = value.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+const shiftMonthValue = (value, offset) => {
+    const [year, month] = value.split('-').map(Number);
+    const date = new Date(year, month - 1 + offset, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
 
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
@@ -148,6 +162,7 @@ const DashboardAdmin = () => {
     const [pricingLoading, setPricingLoading] = useState(false);
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
     const [activeConfigTab, setActiveConfigTab] = useState('packages');
+    const [catalogDrawer, setCatalogDrawer] = useState(null);
     const [packages, setPackages] = useState([]);
     const [eventTypes, setEventTypes] = useState([]);
     const [eventTypeForm, setEventTypeForm] = useState(emptyEventTypeForm());
@@ -236,7 +251,7 @@ const DashboardAdmin = () => {
     const [reportLoading, setReportLoading] = useState(false);
     const [reportSaving, setReportSaving] = useState(false);
     const reportPreviewTimerRef = useRef(null);
-    const [audits, setAudits] = useState([]);
+        const [audits, setAudits] = useState([]);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
     const [auditRoleFilter, setAuditRoleFilter] = useState('All');
@@ -245,6 +260,7 @@ const DashboardAdmin = () => {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
     const [availabilityOverrides, setAvailabilityOverrides] = useState([]);
+    const [availabilityEvents, setAvailabilityEvents] = useState([]);
     const [availabilityLoading, setAvailabilityLoading] = useState(false);
     const [availabilitySaving, setAvailabilitySaving] = useState(false);
     const [availabilityDate, setAvailabilityDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -331,7 +347,7 @@ const DashboardAdmin = () => {
     // Toast notification
     const [toast, setToast] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmText: 'Confirm', tone: 'default', busy: false, onConfirm: null });
-    const { bustCache: bustAdminCache, fetchCachedJson } = useCachedJson(['/api/admin/audits?per_page=100']);
+    const { bustCache: bustAdminCache, fetchCachedJson } = useCachedJson(['/api/admin/audits?per_page=25']);
     const [packagePage, setPackagePage] = useState(1);
     const [eventTypePage, setEventTypePage] = useState(1);
     const [menuItemPage, setMenuItemPage] = useState(1);
@@ -402,7 +418,10 @@ const DashboardAdmin = () => {
             fetchPricingOverrides({ silent });
             fetchCustomMenuItems();
             fetchPackages();
-        } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
+        } else if (activeTab === 'dashboard') {
+            bustAdminCache('/api/admin/analytics/summary');
+            fetchAnalyticsSummary({ silent });
+        } else if (activeTab === 'analytics') {
             bustAdminCache('/api/admin/analytics');
             fetchAnalytics({ silent });
         } else if (activeTab === 'reports') {
@@ -417,7 +436,7 @@ const DashboardAdmin = () => {
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides({ silent });
         } else if (activeTab === 'audits') {
-            bustAdminCache('/api/admin/audits?per_page=100');
+            bustAdminCache('/api/admin/audits?per_page=25');
             fetchAudits({ silent });
         }
     };
@@ -443,7 +462,7 @@ const DashboardAdmin = () => {
             description: 'Maintain packages, event types, pricing, and operating rules.',
         },
         reports: {
-            eyebrow: 'Admin reporting',
+            eyebrow: 'Reports',
             title: 'Report Builder',
             description: 'Choose the exact information to preview, save, or export.',
         },
@@ -459,8 +478,8 @@ const DashboardAdmin = () => {
         },
         availability: {
             eyebrow: 'Calendar control',
-            title: 'Availability',
-            description: 'Lock dates and control remaining event slots or guest capacity.',
+            title: 'Date Availability',
+            description: 'Close dates or control remaining event slots and guest capacity.',
         },
         users: {
             eyebrow: 'Access & clients',
@@ -479,13 +498,18 @@ const DashboardAdmin = () => {
         },
         preparation: {
             eyebrow: 'Operations handoff',
-            title: 'Preparation Board',
+            title: 'Event Preparation',
             description: 'Track readiness and event preparation tasks for upcoming approved bookings.',
         },
         audits: {
-            eyebrow: 'Control history',
-            title: 'Audits',
+            eyebrow: 'Activity history',
+            title: 'Activity Log',
             description: 'Monitor staff and admin activity across Eloquente operations.',
+        },
+        history: {
+            eyebrow: 'Shared history',
+            title: 'Event History',
+            description: 'Completed events, staff notes, and limited post-event follow-up context.',
         },
     };
     const adminNavGroups = [
@@ -494,8 +518,8 @@ const DashboardAdmin = () => {
             items: [
                 { id: 'dashboard', label: 'Overview' },
                 { id: 'bookings', label: 'Bookings' },
-                { id: 'preparation', label: 'Preparation' },
-                { id: 'refunds', label: 'Refunds' },
+                { id: 'preparation', label: 'Event Preparation' },
+                { id: 'refunds', label: 'Refund Queue' },
             ],
         },
         {
@@ -509,11 +533,11 @@ const DashboardAdmin = () => {
             label: 'Management',
             items: [
                 { id: 'content', label: 'Announcements' },
-                { id: 'availability', label: 'Availability' },
-                { id: 'users', label: 'Users' },
+                { id: 'availability', label: 'Date Availability' },
+                { id: 'users', label: 'People' },
                 { id: 'configuration', label: 'Business Setup' },
-                { id: 'audits', label: 'Audits' },
-                { id: 'profile', label: 'Profile' },
+                { id: 'history', label: 'Event History' },
+                { id: 'audits', label: 'Activity Log' },
             ],
         },
     ];
@@ -580,6 +604,41 @@ const DashboardAdmin = () => {
             });
     }, [bookings, bookingSearch, bookingStatusFilter, bookingSort]);
 
+    const getAuditWorkspace = (audit) => {
+        const path = String(audit.path || '').toLowerCase();
+
+        if (path.includes('/dashboard/admin') || path.includes('/api/admin')) return 'Admin workspace';
+        if (path.includes('/dashboard/marketing') || path.includes('/api/marketing')) return 'Marketing workspace';
+        if (path.includes('/dashboard/accounting') || path.includes('/api/accounting')) return 'Accounting workspace';
+        if (path.includes('/api/operations')) return 'Event preparation';
+        if (path.includes('/api/calendar-availability')) return 'Date availability';
+        if (path.includes('/api/settings') || path.includes('/api/menu') || path.includes('/api/packages') || path.includes('/api/event-types')) return 'Business setup';
+        if (path.includes('/profile')) return 'Profile';
+        if (path.includes('/logout')) return 'Sign out';
+        if (path.includes('/login')) return 'Sign in';
+        if (path.includes('/dashboard/client') || path.includes('/api/dashboard/client')) return 'Customer dashboard';
+
+        return 'System activity';
+    };
+
+    const getAuditResult = (audit) => {
+        const statusCode = Number(audit.status_code || 0);
+
+        if (!statusCode || statusCode < 400) {
+            return { label: 'Completed', className: 'bg-emerald-50 text-emerald-700' };
+        }
+
+        if (statusCode === 401 || statusCode === 403) {
+            return { label: 'Access blocked', className: 'bg-amber-50 text-amber-700' };
+        }
+
+        if (statusCode === 404) {
+            return { label: 'Not found', className: 'bg-amber-50 text-amber-700' };
+        }
+
+        return { label: 'Needs review', className: 'bg-red-50 text-red-700' };
+    };
+
     const visibleAudits = useMemo(() => {
         const query = auditSearch.trim().toLowerCase();
 
@@ -587,15 +646,49 @@ const DashboardAdmin = () => {
             if (auditRoleFilter !== 'All' && audit.role !== auditRoleFilter) return false;
             if (!query) return true;
 
+            const workspace = getAuditWorkspace(audit);
+            const result = getAuditResult(audit).label;
+
             return [
                 audit.username,
                 audit.role,
                 audit.action,
-                audit.path,
-                audit.method,
+                workspace,
+                result,
             ].filter(Boolean).join(' ').toLowerCase().includes(query);
         });
     }, [audits, auditSearch, auditRoleFilter]);
+    const selectedAvailabilityEvents = useMemo(() => (
+        availabilityEvents.filter((event) => event.date === availabilityDate)
+    ), [availabilityEvents, availabilityDate]);
+    const availabilityEventCounts = useMemo(() => (
+        availabilityEvents.reduce((counts, event) => ({
+            ...counts,
+            [event.date]: (counts[event.date] || 0) + 1,
+        }), {})
+    ), [availabilityEvents]);
+    const availabilityCalendarDays = useMemo(() => {
+        const [year, month] = availabilityMonth.split('-').map(Number);
+        const firstWeekday = new Date(year, month - 1, 1).getDay();
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const blanks = Array.from({ length: firstWeekday }, (_, index) => ({ key: `blank-${index}`, blank: true }));
+        const days = Array.from({ length: daysInMonth }, (_, index) => {
+            const day = index + 1;
+            const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+            return {
+                key: date,
+                date,
+                day,
+                eventCount: availabilityEventCounts[date] || 0,
+            };
+        });
+
+        return [...blanks, ...days];
+    }, [availabilityMonth, availabilityEventCounts]);
+    const monthlyAvailabilityEventCount = useMemo(() => (
+        availabilityEvents.reduce((count, event) => count + (event.date ? 1 : 0), 0)
+    ), [availabilityEvents]);
 
     const paginatedPackages = paginate(packages, packagePage, rowsPerPage);
     const paginatedEventTypes = paginate(eventTypes, eventTypePage, rowsPerPage);
@@ -640,7 +733,9 @@ const DashboardAdmin = () => {
             fetchPricingOverrides();
             fetchCustomMenuItems();
             fetchPackages();
-        } else if (activeTab === 'dashboard' || activeTab === 'analytics') {
+        } else if (activeTab === 'dashboard') {
+            fetchAnalyticsSummary();
+        } else if (activeTab === 'analytics') {
             if (activeTab === 'analytics' && (!packages.length || !eventTypes.length)) {
                 fetchPackages();
             }
@@ -693,6 +788,7 @@ const DashboardAdmin = () => {
             if (!response.ok) throw new Error('Availability load failed');
             const data = await response.json();
             setAvailabilityOverrides(getListData(data));
+            setAvailabilityEvents(Array.isArray(data.events) ? data.events : []);
         } catch (error) {
             console.error(error);
             showToast('Could not load availability controls', 'error');
@@ -703,6 +799,9 @@ const DashboardAdmin = () => {
 
     const selectAvailabilityDate = async (date) => {
         setAvailabilityDate(date);
+        if (date?.slice(0, 7) && date.slice(0, 7) !== availabilityMonth) {
+            setAvailabilityMonth(date.slice(0, 7));
+        }
         const existing = availabilityOverrides.find(item => item.date === date);
         if (existing) {
             setAvailabilityForm({
@@ -728,6 +827,12 @@ const DashboardAdmin = () => {
         } catch (error) {
             console.error(error);
         }
+    };
+
+    const moveAvailabilityMonth = (offset) => {
+        const nextMonth = shiftMonthValue(availabilityMonth, offset);
+        setAvailabilityMonth(nextMonth);
+        selectAvailabilityDate(`${nextMonth}-01`);
     };
 
     const saveAvailabilityOverride = async (event) => {
@@ -879,6 +984,7 @@ const DashboardAdmin = () => {
                 showToast(editingPackageId ? 'Package preset updated' : 'Package preset created');
                 setEditingPackageId(null);
                 setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
+                setCatalogDrawer(null);
                 bustAdminCache('/api/packages?per_page=100');
                 fetchPackages();
             } else {
@@ -942,6 +1048,7 @@ const DashboardAdmin = () => {
             if (res.ok) {
                 showToast(editingEventTypeId ? 'Event type updated' : 'Event type created');
                 resetEventTypeForm();
+                setCatalogDrawer(null);
                 bustAdminCache('/api/event-types?per_page=100', '/api/packages?per_page=100');
                 fetchPackages();
             } else {
@@ -1124,6 +1231,27 @@ const DashboardAdmin = () => {
                 _isCustom: true,
             }));
     }
+
+    const fetchAnalyticsSummary = async ({ silent = false, filters = analyticsFilters } = {}) => {
+        if (!silent) setAnalyticsLoading(true);
+        try {
+            const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''));
+            const query = params.toString() ? `?${params.toString()}` : '';
+            const res = await fetch(`/api/admin/analytics/summary${query}`);
+            if (!res.ok) throw new Error('Analytics summary request failed');
+            const summary = await res.json();
+
+            setAnalytics((current) => ({
+                ...(current || {}),
+                summary: summary.summary || {},
+                businessSnapshot: summary.businessSnapshot || {},
+            }));
+        } catch (error) {
+            console.error(error);
+        } finally {
+            if (!silent) setAnalyticsLoading(false);
+        }
+    };
 
     const fetchAnalytics = async ({ silent = false, filters = analyticsFilters } = {}) => {
         if (!silent) setAnalyticsLoading(true);
@@ -1452,6 +1580,217 @@ const DashboardAdmin = () => {
         </button>
     );
 
+    const renderAnalyticsWorkbench = () => {
+        const insightCards = [
+            {
+                key: 'revenue',
+                title: 'Revenue',
+                value: formatCurrency(analyticsSummary.totalRevenue || 0),
+                context: `Collected ${formatCurrency(analyticsSummary.settledRevenue || 0)} with ${formatCurrency(analyticsSummary.pendingRevenue || 0)} still pending.`,
+                action: 'Review payments',
+                onClick: () => setActiveTab('refunds'),
+            },
+            {
+                key: 'pipeline',
+                title: 'Booking pipeline',
+                value: analyticsSummary.activeBookings || 0,
+                context: `${analyticsSummary.pendingBookings || 0} booking requests still need attention.`,
+                action: 'Open bookings',
+                onClick: () => setActiveTab('bookings'),
+            },
+            {
+                key: 'payments',
+                title: 'Collection health',
+                value: `${analyticsSummary.collectionRate || 0}%`,
+                context: 'Collection rate based on verified and pending payment records.',
+                action: 'View finance',
+                onClick: () => setActiveTab('refunds'),
+            },
+            {
+                key: 'demand',
+                title: 'Guest demand',
+                value: Number(analyticsSummary.totalPax || 0).toLocaleString(),
+                context: `Average booking value is ${formatCurrency(analyticsSummary.averageBookingValue || 0)}.`,
+                action: 'Review menu demand',
+                onClick: () => setActiveAnalyticsFilterPanel(activeAnalyticsFilterPanel === 'menuPerformance' ? null : 'menuPerformance'),
+            },
+        ];
+        const topAlerts = visibleOperationalAlerts.slice(0, 3);
+        const topPackages = visiblePackagePerformanceData.slice(0, 5);
+        const topDishes = visibleMenuPerformanceData.slice(0, 5);
+
+        return (
+            <div className="admin-insight-workbench animate-fadeIn space-y-5">
+                <section className="admin-panel overflow-hidden">
+                    <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                            <p className="admin-kicker">Insight workbench</p>
+                            <h3 className="mt-1 text-2xl font-black text-gray-950">Understand the business without scrolling through every chart</h3>
+                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">Start with the signals that need decisions, then drill into revenue, bookings, payments, menu demand, operations, and forecasts.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {renderAnalyticsFilterButton('snapshot', businessSnapshot.label || 'Timeframe')}
+                            <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-black">
+                                <RefreshCw className={`h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
+                                {analyticsLoading ? 'Refreshing...' : 'Refresh insights'}
+                            </button>
+                        </div>
+                    </div>
+                    {activeAnalyticsFilterPanel === 'snapshot' && (
+                        <div className="border-b border-gray-100 bg-white p-5">
+                            <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                Timeframe
+                                <select
+                                    value={analyticsFilters.snapshot_window}
+                                    onChange={(event) => {
+                                        const nextFilters = { ...analyticsFilters, snapshot_window: event.target.value };
+                                        setAnalyticsFilters(nextFilters);
+                                        fetchAnalytics({ filters: nextFilters });
+                                    }}
+                                    className="mt-2 w-full max-w-xs rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none"
+                                >
+                                    {SNAPSHOT_WINDOW_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                            </label>
+                        </div>
+                    )}
+                    {analyticsLoading && !analytics ? (
+                        <StaffSkeleton variant="metrics" rows={4} />
+                    ) : (
+                        <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-4">
+                            {insightCards.map(card => (
+                                <article key={card.key} className="rounded-xl border border-gray-100 bg-white p-4">
+                                    <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">{card.title}</p>
+                                    <p className="mt-3 text-2xl font-black text-gray-950">{card.value}</p>
+                                    <p className="mt-2 min-h-12 text-sm font-semibold leading-6 text-gray-500">{card.context}</p>
+                                    <button type="button" onClick={card.onClick} className="mt-4 text-xs font-black uppercase tracking-widest text-[#720101]">{card.action}</button>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </section>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,.75fr)]">
+                    <section className="admin-panel overflow-hidden">
+                        <div className="border-b border-gray-100 bg-white p-5">
+                            <p className="admin-kicker">Revenue and pipeline</p>
+                            <h3 className="mt-1 text-xl font-black text-gray-950">Collections and booking movement</h3>
+                            <p className="mt-1 text-sm font-semibold text-gray-500">Use this section to see whether bookings are turning into collected revenue.</p>
+                        </div>
+                        <div className="grid gap-4 p-5 lg:grid-cols-2">
+                            <div className="rounded-xl border border-gray-100 p-4">
+                                <div className="mb-3 flex items-center justify-between">
+                                    <h4 className="text-sm font-black text-gray-950">Revenue trend</h4>
+                                    {renderAnalyticsFilterButton('revenueTrend', `Last ${analyticsFilters.trend_months} months`)}
+                                </div>
+                                {activeAnalyticsFilterPanel === 'revenueTrend' && (
+                                    <select
+                                        value={analyticsFilters.trend_months}
+                                        onChange={(event) => {
+                                            const nextFilters = { ...analyticsFilters, trend_months: event.target.value };
+                                            setAnalyticsFilters(nextFilters);
+                                            fetchAnalytics({ filters: nextFilters });
+                                        }}
+                                        className="mb-3 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none"
+                                    >
+                                        {[3, 6, 9, 12, 18, 24].map(months => <option key={months} value={months}>Last {months} months</option>)}
+                                    </select>
+                                )}
+                                <div className="h-64">
+                                    {revenueTrendData.length ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={revenueTrendData}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                                                <RechartsTooltip />
+                                                <Bar dataKey="revenue" fill="#720101" radius={[6, 6, 0, 0]} name="Revenue" />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : <StaffSkeleton variant="panel" rows={3} />}
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-gray-100 p-4">
+                                <h4 className="text-sm font-black text-gray-950">Booking pipeline</h4>
+                                <div className="mt-4 space-y-3">
+                                    {bookingPipelineData.slice(0, 6).map((row, index) => (
+                                        <div key={`${row.label || row.status}-${index}`} className="flex items-center justify-between rounded-lg bg-[#fbf8f2] px-3 py-2">
+                                            <span className="text-sm font-bold text-gray-600">{row.label || row.status || 'Bookings'}</span>
+                                            <strong className="text-sm font-black text-gray-950">{row.count ?? row.value ?? 0}</strong>
+                                        </div>
+                                    ))}
+                                    {!bookingPipelineData.length && <StaffSkeleton rows={4} className="p-0" />}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="admin-panel overflow-hidden">
+                        <div className="border-b border-gray-100 bg-white p-5">
+                            <p className="admin-kicker">Operations</p>
+                            <h3 className="mt-1 text-xl font-black text-gray-950">Priority alerts</h3>
+                        </div>
+                        <div className="space-y-3 p-5">
+                            {topAlerts.map((alert, index) => (
+                                <div key={`${alert.label}-${index}`} className="rounded-xl border border-amber-100 bg-[#fffaf3] p-4">
+                                    <p className="text-sm font-black text-gray-950">{alert.label || alert.title}</p>
+                                    <p className="mt-1 text-sm font-semibold text-gray-500">{alert.detail || alert.message || 'Review this item before the next operations update.'}</p>
+                                    <button onClick={() => alert.label?.toLowerCase().includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-[#720101]">Open queue</button>
+                                </div>
+                            ))}
+                            {!topAlerts.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No priority alerts for this timeframe.</div>}
+                        </div>
+                    </section>
+                </div>
+
+                <div className="grid gap-5 xl:grid-cols-2">
+                    <section className="admin-panel overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-gray-100 bg-white p-5">
+                            <div>
+                                <p className="admin-kicker">Menu demand</p>
+                                <h3 className="mt-1 text-xl font-black text-gray-950">Top packages</h3>
+                            </div>
+                            {renderAnalyticsFilterButton('packagePerformance', `Top ${packageViewFilters.limit}`)}
+                        </div>
+                        <div className="space-y-3 p-5">
+                            {topPackages.map((pkg, index) => (
+                                <div key={`${pkg.label || pkg.name}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-xl border border-gray-100 p-3">
+                                    <div>
+                                        <p className="font-black text-gray-950">{pkg.label || pkg.name || 'Package'}</p>
+                                        <p className="text-sm font-semibold text-gray-500">{pkg.count || 0} bookings</p>
+                                    </div>
+                                    <strong className="text-sm font-black text-[#720101]">{formatCurrency(pkg.revenue || 0)}</strong>
+                                </div>
+                            ))}
+                            {!topPackages.length && <StaffSkeleton rows={5} className="p-0" />}
+                        </div>
+                    </section>
+                    <section className="admin-panel overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-gray-100 bg-white p-5">
+                            <div>
+                                <p className="admin-kicker">Kitchen signal</p>
+                                <h3 className="mt-1 text-xl font-black text-gray-950">Most selected dishes</h3>
+                            </div>
+                            {renderAnalyticsFilterButton('menuPerformance', MENU_CATEGORY_OPTIONS.find(option => option.value === menuViewFilters.category)?.label || 'Dish type')}
+                        </div>
+                        <div className="space-y-3 p-5">
+                            {topDishes.map((dish, index) => (
+                                <div key={`${dish.label}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-xl border border-gray-100 p-3">
+                                    <div>
+                                        <p className="font-black text-gray-950">{dish.label || 'Dish'}</p>
+                                        <p className="text-sm font-semibold text-gray-500">{dish.category || 'Menu item'}</p>
+                                    </div>
+                                    <strong className="text-sm font-black text-[#720101]">{menuViewFilters.sort === 'pax' ? `${dish.paxServed || 0} guests` : `${dish.selections || 0} selections`}</strong>
+                                </div>
+                            ))}
+                            {!topDishes.length && <StaffSkeleton rows={5} className="p-0" />}
+                        </div>
+                    </section>
+                </div>
+            </div>
+        );
+    };
+
     const renderDashboardFilterButton = (panel, label = 'Filters') => (
         <button
             type="button"
@@ -1468,7 +1807,7 @@ const DashboardAdmin = () => {
     const fetchAudits = async ({ silent = false } = {}) => {
         if (!silent) setAuditLoading(true);
         try {
-            const data = await fetchCachedJson('/api/admin/audits?per_page=100', 15000);
+            const data = await fetchCachedJson('/api/admin/audits?per_page=25', 15000);
             setAudits(data.data || []);
         } catch (error) {
             console.error(error);
@@ -1628,7 +1967,9 @@ const DashboardAdmin = () => {
             });
 
             if (res.ok) {
-                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully`);
+                const data = await res.json().catch(() => ({}));
+                const tempMessage = data.temporary_password ? ` Temporary password: ${data.temporary_password}` : '';
+                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully.${tempMessage}`);
                 setEmpModal({ open: false, mode: 'add', data: null });
                 bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
                 fetchEmployees();
@@ -1650,7 +1991,7 @@ const DashboardAdmin = () => {
             isOpen: true,
             title: 'Delete employee account?',
             message: 'This staff account will lose access to the system.',
-            confirmText: 'Delete',
+            confirmText: 'Deactivate',
             tone: 'danger',
             onConfirm: () => confirmDeleteEmployee(id),
         });
@@ -1665,7 +2006,7 @@ const DashboardAdmin = () => {
                 headers: { }
             });
             if (res.ok) {
-                showToast("Employee deleted successfully");
+                showToast("Employee deactivated successfully");
                 bustAdminCache(ADMIN_EMPLOYEES_URL);
                 fetchEmployees();
             } else {
@@ -1674,6 +2015,38 @@ const DashboardAdmin = () => {
         } catch (error) {
             console.error(error);
             showToast("Could not delete employee. Please try again.", 'error');
+        }
+    };
+
+    const handleReactivateEmployee = async (id) => {
+        try {
+            const res = await fetch(`/api/admin/employees/${id}/reactivate`, { method: 'POST' });
+            if (res.ok) {
+                showToast('Employee reactivated successfully');
+                bustAdminCache(ADMIN_EMPLOYEES_URL);
+                fetchEmployees();
+            } else {
+                showToast('Could not reactivate employee', 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Could not reactivate employee. Please try again.', 'error');
+        }
+    };
+
+    const handleResetEmployeePassword = async (id) => {
+        try {
+            const res = await fetch(`/api/admin/employees/${id}/reset-password`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast(`Temporary password generated: ${data.temporary_password}`);
+                fetchEmployees();
+            } else {
+                showToast(getErrorMessage(data, 'Could not reset password'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Could not reset password. Please try again.', 'error');
         }
     };
 
@@ -1737,68 +2110,192 @@ const DashboardAdmin = () => {
         setEmpModal({ open: true, mode: 'edit', data: customer });
     };
 
+    const openPackageDrawer = (pkg = null) => {
+        if (pkg) {
+            startEditingPackage(pkg);
+        } else {
+            resetPackageForm();
+        }
+        setCatalogDrawer('package');
+    };
+
+    const openEventTypeDrawer = (eventType = null) => {
+        if (eventType) {
+            startEditingEventType(eventType);
+        } else {
+            resetEventTypeForm();
+        }
+        setCatalogDrawer('eventType');
+    };
+
+    const closeCatalogDrawer = () => {
+        if (catalogDrawer === 'package') resetPackageForm();
+        if (catalogDrawer === 'eventType') resetEventTypeForm();
+        setCatalogDrawer(null);
+    };
+
+    const togglePackageEventType = (slug) => {
+        const current = packageForm.event_type_slugs || [];
+        const next = current.includes(slug) ? current.filter(item => item !== slug) : [...current, slug];
+        setPackageForm({ ...packageForm, event_type_slugs: next });
+    };
+
+    const renderCatalogDrawer = () => catalogDrawer && (
+        <div className="staff-drawer-backdrop" role="dialog" aria-modal="true">
+            <form onSubmit={catalogDrawer === 'package' ? handlePackageSubmit : handleEventTypeSubmit} className="staff-catalog-drawer">
+                <header className="staff-drawer-header">
+                    <div>
+                        <p className="admin-kicker">{catalogDrawer === 'package' ? 'Package editor' : 'Event type editor'}</p>
+                        <h3 className="staff-section-title">{catalogDrawer === 'package' ? (editingPackageId ? 'Edit package' : 'Create package') : (editingEventTypeId ? 'Edit event type' : 'Create event type')}</h3>
+                    </div>
+                    <button type="button" onClick={closeCatalogDrawer} className="staff-icon-button" aria-label="Close editor">X</button>
+                </header>
+                <div className="staff-drawer-body custom-scrollbar">
+                    {catalogDrawer === 'package' ? (
+                        <>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Basics</p>
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="staff-control" />
+                                    <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="staff-control">
+                                        {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                    </select>
+                                    <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="staff-control">
+                                        {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                    </select>
+                                    <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="staff-control" />
+                                    <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Minimum guests" className="staff-control sm:col-span-2" />
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Connected event types</p>
+                                <div className="staff-checkbox-grid mt-4">
+                                    {eventTypes.map(type => (
+                                        <label key={type.id} className="staff-checkbox-chip">
+                                            <input type="checkbox" checked={(packageForm.event_type_slugs || []).includes(type.slug)} onChange={() => togglePackageEventType(type.slug)} />
+                                            <span>{type.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Customer-facing details</p>
+                                <div className="mt-4 grid gap-3">
+                                    <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" rows={3} className="staff-control" />
+                                    <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" rows={3} className="staff-control" />
+                                    <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" rows={3} className="staff-control" />
+                                    <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" rows={3} className="staff-control" />
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Menu structure</p>
+                                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                                    {[
+                                        ['starter', 'Starters'],
+                                        ['main', 'Main'],
+                                        ['side', 'Sides'],
+                                        ['dessert', 'Dessert'],
+                                        ['drink', 'Drinks'],
+                                    ].map(([key, label]) => (
+                                        <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                            {label}
+                                            <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="staff-control mt-2" />
+                                        </label>
+                                    ))}
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Security term</p>
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="staff-control">
+                                        {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                    </select>
+                                    <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="staff-control" />
+                                </div>
+                            </section>
+                        </>
+                    ) : (
+                        <>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Basics</p>
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="staff-control" />
+                                    <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name" className="staff-control" />
+                                    <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="staff-control sm:col-span-2">
+                                        {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                    </select>
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Display</p>
+                                <div className="mt-4 grid gap-3">
+                                    <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="staff-control" />
+                                    <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="staff-control" />
+                                    <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" rows={3} className="staff-control" />
+                                </div>
+                            </section>
+                            <section className="staff-drawer-section">
+                                <p className="staff-section-title">Security and notes</p>
+                                <div className="mt-4 grid gap-3">
+                                    <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="staff-control">
+                                        {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                    </select>
+                                    <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="staff-control" />
+                                    <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" rows={3} className="staff-control" />
+                                    <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" rows={3} className="staff-control" />
+                                </div>
+                            </section>
+                        </>
+                    )}
+                </div>
+                <footer className="staff-drawer-footer flex justify-end gap-2">
+                    <button type="button" onClick={closeCatalogDrawer} className="staff-button-secondary">Cancel</button>
+                    <button type="submit" disabled={packageSaving} className="staff-button-primary">
+                        {packageSaving ? 'Saving...' : catalogDrawer === 'package' ? (editingPackageId ? 'Save package' : 'Create package') : (editingEventTypeId ? 'Save event type' : 'Create event type')}
+                    </button>
+                </footer>
+            </form>
+        </div>
+    );
+
+    if (analyticsLoading && activeTab === 'dashboard' && !analytics?.summary) {
+        return (
+            <StaffWorkspaceSkeleton
+                title="Admin Console"
+                roleLabel="Owner operations"
+                label="Preparing admin console"
+                navGroups={[
+                    { label: 'Daily Work', items: ['Overview', 'Bookings', 'Event Preparation', 'Refund Queue'] },
+                    { label: 'Business Insight', items: ['Analytics', 'Reports'] },
+                    { label: 'Management', items: ['Announcements', 'Date Availability', 'People', 'Business Setup', 'Event History', 'Activity Log'] },
+                ]}
+            />
+        );
+    }
 
     return (
-        <div className="admin-page min-h-screen overflow-hidden">
-            {/* Sidebar Navigation */}
-            <aside className="fixed inset-y-0 left-0 z-30 flex w-72 admin-sidebar flex-col">
-                <div className="p-5 pb-2">
-                    <div className="admin-brand-mark">
-                        <div>
-                            <p className="admin-kicker">Eloquente Catering</p>
-                            <h1 className="text-2xl font-black font-display tracking-wide text-[#720101]">Admin Console</h1>
-                            <p className="mt-1 text-xs font-bold uppercase text-[#5c4b45]">Owner operations</p>
-                        </div>
-                    </div>
-                </div>
+        <StaffWorkspaceLayout
+            title="Admin Console"
+            roleLabel="Owner operations"
+            username={user?.username}
+            active={activeTab}
+            onNavigate={setActiveTab}
+            onLogout={handleLogout}
+            navGroups={adminNavGroups}
+        >
+                <StaffPageHeader
+                    eyebrow={currentPage.eyebrow}
+                    title={currentPage.title}
+                    description={currentPage.description}
+                    metrics={[
+                        { label: 'Bookings', value: bookingStats.total },
+                        { label: 'Customers', value: customers.length },
+                        { label: 'Staff', value: employees.length },
+                        { label: 'Refunds', value: refundQueue.length },
+                    ]}
+                />
 
-                <nav className="flex-1 overflow-y-auto px-4 py-3">
-                    {adminNavGroups.map((group) => (
-                        <div key={group.label} className="staff-nav-group">
-                            <p className="staff-nav-section-label">{group.label}</p>
-                            <div className="mt-2 space-y-1">
-                                {group.items.map(item => (
-                                    <button
-                                        key={item.id}
-                                        onClick={() => setActiveTab(item.id)}
-                                        className={`admin-nav-item w-full flex items-center justify-between gap-3 px-3.5 py-2.5 transition-all ${activeTab === item.id ? 'admin-nav-item-active' : 'text-[#5c4b45] hover:text-[#720101]'}`}
-                                    >
-                                        <span className="font-bold text-sm">{item.label}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </nav>
-
-                <div className="border-t border-[#720101]/10 bg-[#fffaf3]/95 p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-[#720101] flex items-center justify-center text-[#f0aa0b] font-bold">
-                            {user?.username?.charAt(0).toUpperCase() || 'A'}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-[#241612] truncate">{user?.username}</p>
-                            <p className="text-xs font-semibold text-[#720101]/55 truncate">Administrator</p>
-                        </div>
-                    </div>
-                    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#720101] hover:bg-[#5f0101] text-white rounded-lg transition-colors text-sm font-bold">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        Logout
-                    </button>
-                </div>
-            </aside>
-
-            {/* Main Content Area */}
-            <main className="ml-72 flex h-screen flex-col min-w-0 overflow-y-auto admin-main relative">
-                <header className="admin-header px-8 py-5 flex items-center justify-between sticky top-0 z-20">
-                    <div>
-                        <p className="admin-kicker">{currentPage.eyebrow}</p>
-                        <h2 className="text-2xl font-bold text-[#1a1a1a]">{currentPage.title}</h2>
-                        <p className="mt-1 text-sm font-medium text-slate-500">{currentPage.description}</p>
-                    </div>
-                </header>
-
-                <div className="p-8">
+                <div className="space-y-5">
                     {activeTab === 'dashboard' && (
                         <div className="animate-fadeIn">
                             <div className="space-y-6">
@@ -1840,7 +2337,7 @@ const DashboardAdmin = () => {
                                             ['Total revenue', formatCurrency(analyticsSummary.totalRevenue || 0), `Collected ${formatCurrency(analyticsSummary.settledRevenue || 0)}`],
                                             ['Collection rate', `${analyticsSummary.collectionRate || 0}%`, `Pending ${formatCurrency(analyticsSummary.pendingRevenue || 0)}`],
                                             ['Active bookings', analyticsSummary.activeBookings || 0, `${analyticsSummary.pendingBookings || 0} pending requests`],
-                                            ['Total pax', Number(analyticsSummary.totalPax || 0).toLocaleString(), `Avg booking ${formatCurrency(analyticsSummary.averageBookingValue || 0)}`],
+                                            ['Total guests', Number(analyticsSummary.totalPax || 0).toLocaleString(), `Avg booking ${formatCurrency(analyticsSummary.averageBookingValue || 0)}`],
                                         ].map(([label, value, hint]) => (
                                             <div key={label} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
                                                 <p className="text-[11px] font-black uppercase tracking-widest text-gray-400">{label}</p>
@@ -2003,7 +2500,7 @@ const DashboardAdmin = () => {
                                                     </select>
                                                 </label>
                                                 <label className="text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                                    <span className="flex items-center gap-2"><Users className="h-3.5 w-3.5" /> Minimum pax</span>
+                                                    <span className="flex items-center gap-2"><Users className="h-3.5 w-3.5" /> Minimum guests</span>
                                                     <input type="number" min="0" value={workloadFilters.minPax} onChange={(e) => setWorkloadFilters({ ...workloadFilters, minPax: e.target.value })} placeholder="Show all" className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none" />
                                                 </label>
                                             </div>
@@ -2020,7 +2517,7 @@ const DashboardAdmin = () => {
                                         <div className="mt-5 overflow-hidden rounded-xl border border-gray-100">
                                             <table className="w-full text-sm">
                                                 <thead className="bg-gray-50 text-xs font-black uppercase tracking-widest text-gray-500">
-                                                    <tr><th className="px-4 py-3 text-left">Upcoming Event</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Pax</th><th className="px-4 py-3 text-left">Status</th></tr>
+                                                    <tr><th className="px-4 py-3 text-left">Upcoming Event</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Guests</th><th className="px-4 py-3 text-left">Status</th></tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {visibleUpcomingWorkloadData.slice(0, 6).map((event) => (
@@ -2089,7 +2586,7 @@ const DashboardAdmin = () => {
                                                 </select>
                                                 <select value={menuViewFilters.sort} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, sort: e.target.value })} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 outline-none">
                                                     <option value="selections">Selections</option>
-                                                    <option value="pax">Pax served</option>
+                                                    <option value="pax">Guests served</option>
                                                     <option value="name">Dish name</option>
                                                 </select>
                                             </div>
@@ -2173,7 +2670,7 @@ const DashboardAdmin = () => {
                                     <div className="px-5 py-5">
                                         <dt className="text-sm font-bold text-slate-500 truncate flex items-center gap-2">
                                             <svg className="w-4 h-4 text-[#f0aa0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m8-4a4 4 0 10-8 0 4 4 0 008 0z" /></svg>
-                                            Total Pax
+                                            Total Guests
                                         </dt>
                                         <dd className="mt-2 text-3xl font-extrabold text-gray-900">{Number(analyticsSummary.totalPax || 0).toLocaleString()}</dd>
                                         <p className="mt-2 text-xs font-semibold text-slate-500">Avg. value: {formatCurrency(analyticsSummary.averageBookingValue)}</p>
@@ -2276,7 +2773,9 @@ const DashboardAdmin = () => {
                         </div>
                     )}
                     {activeTab === 'analytics' && (
-                        <div className="animate-fadeIn space-y-6">
+                        <>
+                        {renderAnalyticsWorkbench()}
+                        <div className="hidden">
                             <section className="admin-panel overflow-hidden">
                                 <div className="flex flex-col gap-4 border-b border-gray-100 bg-[#fffaf3] p-6 lg:flex-row lg:items-center lg:justify-between">
                                     <div>
@@ -2397,7 +2896,7 @@ const DashboardAdmin = () => {
                                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                             <div>
                                                 <p className="admin-kicker">Operations Forecast</p>
-                                                <h3 className="mt-1 text-xl font-black text-gray-950">Moving Averages for Pax Demand Projection</h3>
+                                                <h3 className="mt-1 text-xl font-black text-gray-950">Moving Averages for Guest Demand Projection</h3>
                                                 <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">Smooths historical guest demand so culinary and logistics planning is not distorted by one-off spikes.</p>
                                             </div>
                                             {renderAnalyticsFilterButton('paxForecast', `${analyticsFilters.pax_projection_period} demand`)}
@@ -2440,8 +2939,8 @@ const DashboardAdmin = () => {
                                     </div>
                                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
                                         {[
-                                            ['Next pax forecast', Number(paxDemandSummary.nextForecast || 0).toLocaleString()],
-                                            ['Forecast horizon pax', Number(paxDemandSummary.forecastPax || 0).toLocaleString()],
+                                            ['Next guest forecast', Number(paxDemandSummary.nextForecast || 0).toLocaleString()],
+                                            ['Forecast horizon guests', Number(paxDemandSummary.forecastPax || 0).toLocaleString()],
                                             ['Peak historical period', paxDemandSummary.peakPeriod || 'No data'],
                                         ].map(([label, value]) => (
                                             <div key={label} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
@@ -2458,11 +2957,11 @@ const DashboardAdmin = () => {
                                                     <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
                                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
                                                     <RechartsTooltip />
-                                                    <Bar dataKey="pax" fill="#2563eb" radius={[6, 6, 0, 0]} name="Actual pax" />
+                                                    <Bar dataKey="pax" fill="#2563eb" radius={[6, 6, 0, 0]} name="Actual guests" />
                                                     <Bar dataKey="forecast" fill="#22c55e" radius={[6, 6, 0, 0]} name="SMA forecast" />
                                                 </BarChart>
                                             </ResponsiveContainer>
-                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No pax demand data available.</div>}
+                                        ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No guest demand data available.</div>}
                                     </div>
                                     <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-900">{paxDemandProjection.insight}</p>
                                 </section>
@@ -2652,7 +3151,7 @@ const DashboardAdmin = () => {
                                                 Rank by
                                                 <select value={menuViewFilters.sort} onChange={(e) => setMenuViewFilters({ ...menuViewFilters, sort: e.target.value })} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black normal-case tracking-normal text-gray-800 outline-none">
                                                     <option value="selections">Selections</option>
-                                                    <option value="pax">Pax served</option>
+                                                    <option value="pax">Guests served</option>
                                                     <option value="name">Dish name</option>
                                                 </select>
                                             </label>
@@ -2666,7 +3165,7 @@ const DashboardAdmin = () => {
                                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
                                                     <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#374151', fontWeight: 700 }} width={150} />
                                                     <RechartsTooltip />
-                                                    <Bar dataKey={menuViewFilters.sort === 'pax' ? 'paxServed' : 'selections'} fill="#720101" radius={[0, 6, 6, 0]} name={menuViewFilters.sort === 'pax' ? 'Pax served' : 'Selections'} />
+                                                    <Bar dataKey={menuViewFilters.sort === 'pax' ? 'paxServed' : 'selections'} fill="#720101" radius={[0, 6, 6, 0]} name={menuViewFilters.sort === 'pax' ? 'Guests served' : 'Selections'} />
                                                 </BarChart>
                                             </ResponsiveContainer>
                                         ) : <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm font-bold text-gray-400">No menu selections for the selected filters.</div>}
@@ -2674,16 +3173,35 @@ const DashboardAdmin = () => {
                                 </section>
                             </div>
                         </div>
+                        </>
                     )}
                     {activeTab === 'configuration' && (
                         <div className="animate-fadeIn">
                             <div className="animate-fadeIn">
                                 {pricingLoading ? (
-                                    <div className="p-8 text-center text-gray-500">Loading pricing configuration...</div>
+                                    <StaffSkeleton variant="panel" rows={3} label="Loading pricing configuration" />
                                 ) : (
                                     <>
                                     <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
-                                        <div className="border-b border-gray-100 bg-gray-50 px-6 pt-5">
+                                        <div className="staff-catalog-head">
+                                            <div>
+                                                <p className="admin-kicker">Catalog setup</p>
+                                                <h3 className="staff-section-title">
+                                                    {activeConfigTab === 'packages' ? 'Packages' : activeConfigTab === 'eventTypes' ? 'Event Types' : 'Menu Items'}
+                                                </h3>
+                                                <p className="staff-section-copy">
+                                                    {activeConfigTab === 'packages'
+                                                        ? 'Manage package presets, pricing, connected event types, and customer-facing details.'
+                                                        : activeConfigTab === 'eventTypes'
+                                                            ? 'Manage the event categories used by booking flows and package presets.'
+                                                            : 'Review menu items by category and manage custom item records.'}
+                                                </p>
+                                            </div>
+                                            {activeConfigTab === 'packages' && <button type="button" onClick={() => openPackageDrawer()} className="staff-button-primary">Create package</button>}
+                                            {activeConfigTab === 'eventTypes' && <button type="button" onClick={() => openEventTypeDrawer()} className="staff-button-primary">Create event type</button>}
+                                            {activeConfigTab === 'menuItems' && <button type="button" onClick={openMenuItemModal} className="staff-button-primary">Add menu item</button>}
+                                        </div>
+                                        <div className="staff-catalog-tabs">
                                             <nav className="flex gap-2 overflow-x-auto">
                                                 {[
                                                     ['packages', 'Packages'],
@@ -2693,7 +3211,7 @@ const DashboardAdmin = () => {
                                                     <button
                                                         key={key}
                                                         onClick={() => setActiveConfigTab(key)}
-                                                        className={`whitespace-nowrap rounded-t-lg px-4 py-3 text-sm font-black transition-colors ${activeConfigTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-white/70 hover:text-gray-800'}`}
+                                                        className={`staff-catalog-tab ${activeConfigTab === key ? 'is-active' : ''}`}
                                                     >
                                                         {label}
                                                     </button>
@@ -2703,49 +3221,6 @@ const DashboardAdmin = () => {
 
                                         {activeConfigTab === 'packages' && (
                                             <div>
-                                                <form onSubmit={handlePackageSubmit} className="border-b border-gray-100 p-6">
-                                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                                                        <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
-                                                            {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
-                                                        </select>
-                                                        <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
-                                                            {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                                        </select>
-                                                        <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <button disabled={packageSaving} className="lg:col-span-1 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingPackageId ? 'Save' : 'Create'}</button>
-                                                        <label className="lg:col-span-4 text-xs font-black uppercase tracking-wide text-slate-500">
-                                                            Connected event types
-                                                            <select multiple value={packageForm.event_type_slugs || []} onChange={e => setPackageForm({ ...packageForm, event_type_slugs: Array.from(e.target.selectedOptions).map(option => option.value) })} className="mt-2 min-h-28 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium normal-case outline-none focus:ring-2 focus:ring-indigo-100">
-                                                                {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
-                                                            </select>
-                                                        </label>
-                                                        <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
-                                                            {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                                        </select>
-                                                        <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <div className="lg:col-span-12 grid grid-cols-2 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-4 md:grid-cols-5">
-                                                            {[
-                                                                ['starter', 'Starters'],
-                                                                ['main', 'Main Dish'],
-                                                                ['side', 'Sides'],
-                                                                ['dessert', 'Dessert'],
-                                                                ['drink', 'Refreshments'],
-                                                            ].map(([key, label]) => (
-                                                                <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
-                                                                    {label}
-                                                                    <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold normal-case outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                                </label>
-                                                            ))}
-                                                        </div>
-                                                        {editingPackageId && <button type="button" onClick={resetPackageForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Package Edit</button>}
-                                                    </div>
-                                                </form>
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-sm">
                                                         <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
@@ -2755,7 +3230,7 @@ const DashboardAdmin = () => {
                                                                 <th className="px-6 py-4 text-left">Category</th>
                                                                 <th className="px-6 py-4 text-left">Connected To</th>
                                                                 <th className="px-6 py-4 text-right">Price / Head</th>
-                                                                <th className="px-6 py-4 text-right">Min Pax</th>
+                                                                <th className="px-6 py-4 text-right">Minimum Guests</th>
                                                                 <th className="px-6 py-4 text-left">Description</th>
                                                                 <th className="px-6 py-4 text-right">Actions</th>
                                                             </tr>
@@ -2771,7 +3246,7 @@ const DashboardAdmin = () => {
                                                                     <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
                                                                     <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
                                                                     <td className="px-6 py-4 text-right">
-                                                                        <button type="button" onClick={() => startEditingPackage(pkg)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                                                        <button type="button" onClick={() => openPackageDrawer(pkg)} className="staff-row-action">Edit</button>
                                                                     </td>
                                                                 </tr>
                                                             ))}
@@ -2784,26 +3259,6 @@ const DashboardAdmin = () => {
 
                                         {activeConfigTab === 'eventTypes' && (
                                             <div>
-                                                <form onSubmit={handleEventTypeSubmit} className="border-b border-gray-100 p-6">
-                                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                                                        <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <button disabled={packageSaving} className="lg:col-span-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">{packageSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
-                                                        <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
-                                                            {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                                        </select>
-                                                        <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100">
-                                                            {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                                        </select>
-                                                        <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100" />
-                                                        {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
-                                                    </div>
-                                                </form>
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-sm">
                                                         <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
@@ -2827,8 +3282,8 @@ const DashboardAdmin = () => {
                                                                     <td className="px-6 py-4 text-gray-600">{type.icon}</td>
                                                                     <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
                                                                     <td className="px-6 py-4 text-right">
-                                                                        <button onClick={() => startEditingEventType(type)} className="mr-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
-                                                                        <button onClick={() => handleDeleteEventType(type)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>
+                                                                        <button type="button" onClick={() => openEventTypeDrawer(type)} className="staff-row-action mr-2">Edit</button>
+                                                                        <button type="button" onClick={() => handleDeleteEventType(type)} className="staff-row-action staff-row-action-danger">Delete</button>
                                                                     </td>
                                                                 </tr>
                                                             ))}
@@ -2849,7 +3304,6 @@ const DashboardAdmin = () => {
                                                             </button>
                                                         ))}
                                                     </nav>
-                                                    <button onClick={openMenuItemModal} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">Add Menu Item</button>
                                                 </div>
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-sm">
@@ -3357,7 +3811,7 @@ const DashboardAdmin = () => {
                         )
                     }
                     {activeTab === 'content' && (
-                        <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
+                        <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading content tools" />}>
                             <AnnouncementManager variant="admin" user={user} />
                         </Suspense>
                     )}
@@ -3422,62 +3876,160 @@ const DashboardAdmin = () => {
                     {activeTab === 'availability' && (
                         <div className="animate-fadeIn grid gap-6 lg:grid-cols-[1fr_360px]">
                             <form onSubmit={saveAvailabilityOverride} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                                <div className="mb-6">
                                     <div>
                                         <p className="admin-kicker">Selected date</p>
                                         <h3 className="mt-1 text-xl font-black text-gray-950">Control daily availability</h3>
+                                        <p className="staff-section-copy">Set whether this date can still accept bookings and guests.</p>
                                     </div>
-                                    <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="admin-input max-w-48" />
                                 </div>
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <label className="block">
                                         <span className="text-xs font-black uppercase tracking-widest text-gray-500">Date</span>
                                         <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="admin-input mt-2" />
                                     </label>
-                                    <label className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50/50 px-4 py-3">
-                                        <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} className="h-4 w-4" />
-                                        <span className="text-sm font-black text-red-800">Fully lock this date</span>
+                                    <label className="block">
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Booking status</span>
+                                        <span className="admin-input mt-2 flex items-center gap-3 border-red-100 bg-red-50/50 px-4">
+                                            <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} className="h-4 w-4" />
+                                            <span className="text-sm font-black text-red-800">Stop bookings for this date</span>
+                                        </span>
                                     </label>
                                     <label className="block">
                                         <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining event slots</span>
                                         <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="admin-input mt-2" />
                                     </label>
                                     <label className="block">
-                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining pax</span>
+                                        <span className="text-xs font-black uppercase tracking-widest text-gray-500">Remaining guests</span>
                                         <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="admin-input mt-2" />
                                     </label>
                                 </div>
                                 <label className="mt-4 block">
-                                    <span className="text-xs font-black uppercase tracking-widest text-gray-500">Internal note</span>
-                                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="admin-input mt-2" placeholder="Reason for lock or capacity adjustment" />
+                                    <span className="text-xs font-black uppercase tracking-widest text-gray-500">Staff note</span>
+                                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="admin-input mt-2" placeholder="Reason for closing the date or changing capacity" />
                                 </label>
+                                <div className="mt-5 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-widest text-gray-500">Events on this date</p>
+                                            <p className="mt-1 text-sm font-bold text-gray-600">{formatDate(availabilityDate)}</p>
+                                        </div>
+                                        <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-700">{selectedAvailabilityEvents.length}</span>
+                                    </div>
+                                    {selectedAvailabilityEvents.length === 0 ? (
+                                        <p className="mt-4 text-sm font-bold text-gray-500">No booked events are scheduled for this date.</p>
+                                    ) : (
+                                        <div className="mt-4 space-y-3">
+                                            {selectedAvailabilityEvents.map((event) => {
+                                                const status = normalizeStatus(event.status);
+                                                return (
+                                                    <div key={event.id} className="rounded-lg border border-gray-100 bg-white p-3">
+                                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                                            <div>
+                                                                <p className="text-sm font-black text-gray-950">{event.name}</p>
+                                                                <p className="mt-1 text-xs font-bold text-gray-500">{event.client || 'Client'} / {formatTime(event.time) || 'Time to confirm'}</p>
+                                                            </div>
+                                                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${bookingStatusStyles[status] || 'border-gray-200 bg-gray-100 text-gray-700'}`}>
+                                                                {event.status || 'Scheduled'}
+                                                            </span>
+                                                        </div>
+                                                        <p className="mt-2 text-xs font-semibold text-gray-500">{Number(event.pax || 0).toLocaleString()} guests{event.city ? ` / ${event.city}` : ''}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="mt-6 flex flex-wrap justify-end gap-3">
-                                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-black text-gray-600 hover:bg-gray-50 disabled:opacity-50">Clear Override</button>
-                                    <button type="submit" disabled={availabilitySaving} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-black text-white hover:bg-indigo-700 disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save Availability'}</button>
+                                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving || !availabilityOverrides.some(item => item.date === availabilityDate)} className="admin-button-secondary px-5 py-2.5 text-sm font-black disabled:opacity-50">Clear date change</button>
+                                    <button type="submit" disabled={availabilitySaving} className="admin-button-primary px-5 py-2.5 text-sm font-black disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save date settings'}</button>
                                 </div>
                             </form>
 
                             <aside className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                                <div className="mb-4 flex items-center justify-between">
-                                    <h3 className="text-sm font-black uppercase tracking-widest text-gray-900">Month overrides</h3>
-                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{availabilityOverrides.length}</span>
+                                <div className="mb-4 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h3 className="text-sm font-black uppercase tracking-widest text-gray-900">Date changes</h3>
+                                            <p className="mt-1 text-sm font-bold text-gray-500">{formatMonthLabel(availabilityMonth)}</p>
+                                        </div>
+                                        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{availabilityOverrides.length}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button type="button" onClick={() => moveAvailabilityMonth(-1)} className="admin-button-secondary px-3 py-2 text-xs">Previous month</button>
+                                        <button type="button" onClick={() => moveAvailabilityMonth(1)} className="admin-button-secondary px-3 py-2 text-xs">Next month</button>
+                                    </div>
+                                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-gray-400">
+                                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}
+                                        </div>
+                                        <div className="mt-2 grid grid-cols-7 gap-1">
+                                            {availabilityCalendarDays.map((day) => day.blank ? (
+                                                <span key={day.key} className="aspect-square" />
+                                            ) : (
+                                                <button
+                                                    key={day.key}
+                                                    type="button"
+                                                    onClick={() => selectAvailabilityDate(day.date)}
+                                                    className={`aspect-square rounded-lg border text-xs font-black transition ${availabilityDate === day.date ? 'border-[#720101] bg-[#720101] text-white' : day.eventCount > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-transparent bg-white text-gray-600 hover:border-gray-200'}`}
+                                                >
+                                                    <span>{day.day}</span>
+                                                    {day.eventCount > 0 && (
+                                                        <span className={`mt-0.5 block text-[9px] ${availabilityDate === day.date ? 'text-white' : 'text-emerald-700'}`}>{day.eventCount}</span>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                                 {availabilityLoading ? (
-                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">Loading availability...</p>
-                                ) : availabilityOverrides.length === 0 ? (
-                                    <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">No overrides for this month.</p>
+                                    <StaffSkeleton variant="panel" rows={3} className="p-0" label="Loading date changes" />
                                 ) : (
-                                    <div className="space-y-3">
-                                        {availabilityOverrides.map((item) => (
-                                            <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50 hover:bg-white'}`}>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm font-black text-gray-950">{formatDate(item.date)}</span>
-                                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Locked' : 'Limited'}</span>
+                                    <div className="space-y-5">
+                                        <div>
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <h4 className="text-xs font-black uppercase tracking-widest text-gray-500">Booked events</h4>
+                                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{monthlyAvailabilityEventCount}</span>
+                                            </div>
+                                            {availabilityEvents.length === 0 ? (
+                                                <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">No booked events for this month.</p>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {availabilityEvents.map((event) => (
+                                                        <button key={event.id} type="button" onClick={() => selectAvailabilityDate(event.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === event.date ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 bg-gray-50 hover:bg-white'}`}>
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <span className="text-sm font-black text-gray-950">{formatDate(event.date)}</span>
+                                                                <span className="text-xs font-black text-gray-500">{formatTime(event.time) || 'Time to confirm'}</span>
+                                                            </div>
+                                                            <p className="mt-2 text-xs font-black text-gray-800">{event.name}</p>
+                                                            <p className="mt-1 text-xs font-semibold text-gray-500">{event.client || 'Client'} / {Number(event.pax || 0).toLocaleString()} guests</p>
+                                                        </button>
+                                                    ))}
                                                 </div>
-                                                <p className="mt-2 text-xs font-bold text-gray-500">{item.remainingEvents} slots / {Number(item.remainingPax || 0).toLocaleString()} pax remaining</p>
-                                                {item.note && <p className="mt-2 text-xs font-semibold text-gray-400">{item.note}</p>}
-                                            </button>
-                                        ))}
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <h4 className="text-xs font-black uppercase tracking-widest text-gray-500">Date changes</h4>
+                                                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">{availabilityOverrides.length}</span>
+                                            </div>
+                                            {availabilityOverrides.length === 0 ? (
+                                                <p className="rounded-xl bg-gray-50 p-4 text-sm font-bold text-gray-500">No date changes for this month.</p>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {availabilityOverrides.map((item) => (
+                                                        <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 bg-gray-50 hover:bg-white'}`}>
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-sm font-black text-gray-950">{formatDate(item.date)}</span>
+                                                                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Closed' : 'Limited'}</span>
+                                                            </div>
+                                                            <p className="mt-2 text-xs font-bold text-gray-500">{item.remainingEvents} event slots / {Number(item.remainingPax || 0).toLocaleString()} guests remaining</p>
+                                                            {item.note && <p className="mt-2 text-xs font-semibold text-gray-400">{item.note}</p>}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </aside>
@@ -3497,7 +4049,7 @@ const DashboardAdmin = () => {
                                     <div>
                                         <div className="flex items-center justify-between mb-3">
                                             <div>
-                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Staff Users</h3>
+                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Staff Accounts</h3>
                                                 <p className="text-xs text-gray-500 mt-1">Marketing and Accounting personnel accounts.</p>
                                             </div>
                                             <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1">{employees.length} staff</span>
@@ -3505,7 +4057,7 @@ const DashboardAdmin = () => {
 
                                         <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
                                             {empLoading ? (
-                                                <div className="p-8 text-center text-gray-500">Loading staff accounts...</div>
+                                                <StaffSkeleton rows={6} label="Loading staff accounts" />
                                             ) : employees.length === 0 ? (
                                                 <div className="p-12 text-center text-gray-500">No employee accounts found.</div>
                                             ) : (
@@ -3543,8 +4095,8 @@ const DashboardAdmin = () => {
                                                                     </span>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-                                                                        Active
+                                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${emp.account_status === 'deactivated' ? 'bg-red-50 text-red-700 border-red-100' : emp.must_change_password ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-green-100 text-green-800 border-green-200'}`}>
+                                                                        {emp.account_status === 'deactivated' ? 'Deactivated' : emp.must_change_password ? 'Password change needed' : 'Active'}
                                                                     </span>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -3552,7 +4104,12 @@ const DashboardAdmin = () => {
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                                     <button onClick={() => openEmpModal('edit', emp)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
-                                                                    <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                                                                    <button onClick={() => handleResetEmployeePassword(emp.id)} className="text-amber-700 hover:text-amber-900 mr-4 font-semibold">Reset password</button>
+                                                                    {emp.account_status === 'deactivated' ? (
+                                                                        <button onClick={() => handleReactivateEmployee(emp.id)} className="text-green-700 hover:text-green-900 font-semibold">Reactivate</button>
+                                                                    ) : (
+                                                                        <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 font-semibold">Deactivate</button>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                         ))}
@@ -3568,7 +4125,7 @@ const DashboardAdmin = () => {
                                     <div>
                                         <div className="flex items-center justify-between mb-3">
                                             <div>
-                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Customer Users</h3>
+                                                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Customer Accounts</h3>
                                                 <p className="text-xs text-gray-500 mt-1">Registered client accounts with contact details and booking activity.</p>
                                             </div>
                                             <span className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-100 rounded-full px-3 py-1">{customers.length} customers</span>
@@ -3576,7 +4133,7 @@ const DashboardAdmin = () => {
 
                                         <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
                                             {customerLoading ? (
-                                                <div className="p-8 text-center text-gray-500">Loading customer accounts...</div>
+                                                <StaffSkeleton rows={6} label="Loading customer accounts" />
                                             ) : customers.length === 0 ? (
                                                 <div className="p-12 text-center text-gray-500">No customer accounts found.</div>
                                             ) : (
@@ -3697,7 +4254,7 @@ const DashboardAdmin = () => {
 
                                 <div className="bg-white shadow-sm overflow-hidden sm:rounded-xl border border-gray-200">
                                     {bookingsLoading ? (
-                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading bookings...</div>
+                                        <StaffSkeleton rows={7} label="Loading bookings" />
                                     ) : visibleBookings.length === 0 ? (
                                         <div className="p-12 text-center">
                                             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
@@ -3733,7 +4290,7 @@ const DashboardAdmin = () => {
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <div className="text-sm font-bold text-gray-900">{formatDate(booking.event_date)} / {formatTime(booking.event_time)}</div>
-                                                            <div className="text-xs text-gray-500">{booking.event_type || 'Event'} / {booking.pax} pax</div>
+                                    <div className="text-xs text-gray-500">{booking.event_type || 'Event'} / {booking.pax} guests</div>
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <div className="text-sm font-black text-gray-900">{formatCurrency(getBookingTotal(booking))}</div>
@@ -3788,9 +4345,12 @@ const DashboardAdmin = () => {
                         )
                     }
                     {activeTab === 'preparation' && (
-                        <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading preparation board...</div>}>
+                        <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading preparation board" />}>
                             <PreparationBoard />
                         </Suspense>
+                    )}
+                    {activeTab === 'history' && (
+                        <EventHistoryPanel role="admin" onToast={showToast} />
                     )}
                     {
                         activeTab === 'refunds' && (
@@ -3825,7 +4385,7 @@ const DashboardAdmin = () => {
                                     </div>
 
                                     {refundLoading ? (
-                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading refund queue...</div>
+                                        <StaffSkeleton rows={6} label="Loading refund queue" />
                                     ) : refundQueue.length === 0 ? (
                                         <div className="p-12 text-center">
                                             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
@@ -3894,7 +4454,7 @@ const DashboardAdmin = () => {
                         activeTab === 'audits' && (
                             <div className="animate-fadeIn space-y-5">
                                 <div className="flex justify-end">
-                                    <button onClick={() => { bustAdminCache('/api/admin/audits?per_page=100'); fetchAudits(); }} className="admin-button-secondary px-4 py-2 text-sm font-bold">
+                                    <button onClick={() => { bustAdminCache('/api/admin/audits?per_page=25'); fetchAudits(); }} className="admin-button-secondary px-4 py-2 text-sm font-bold">
                                         Refresh Logs
                                     </button>
                                 </div>
@@ -3905,7 +4465,7 @@ const DashboardAdmin = () => {
                                             <svg className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z" />
                                             </svg>
-                                            <input value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)} placeholder="Search user, action, route, or method..." className="w-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm font-medium outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
+                                            <input value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)} placeholder="Search staff member, activity, or workspace..." className="w-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm font-medium outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
                                         </div>
                                         <select value={auditRoleFilter} onChange={(e) => setAuditRoleFilter(e.target.value)} className="admin-select px-4 py-3 text-sm font-bold outline-none">
                                             <option value="All">All Roles</option>
@@ -3918,7 +4478,7 @@ const DashboardAdmin = () => {
 
                                 <div className="admin-panel overflow-hidden">
                                     {auditLoading ? (
-                                        <div className="p-10 text-center text-sm font-semibold text-gray-500">Loading audit trail...</div>
+                                        <StaffSkeleton rows={7} label="Loading activity log" />
                                     ) : visibleAudits.length === 0 ? (
                                         <div className="p-12 text-center">
                                             <h3 className="text-base font-black text-gray-900">No audit activity yet</h3>
@@ -3930,33 +4490,36 @@ const DashboardAdmin = () => {
                                                 <tr>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Time</th>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Staff</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Route</th>
-                                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Activity</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Workspace</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Result</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100 bg-white">
-                                                {paginatedAudits.items.map((audit) => (
-                                                    <tr key={audit.id}>
-                                                        <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-700">{formatDateTime(audit.created_at)}</td>
-                                                        <td className="px-6 py-4">
-                                                            <div className="font-black text-gray-900">{audit.username || 'Unknown'}</div>
-                                                            <div className="text-xs font-bold text-[#720101]">{audit.role || 'Staff'}</div>
-                                                        </td>
-                                                        <td className="px-6 py-4">
-                                                            <div className="font-bold text-gray-900">{audit.action}</div>
-                                                            <div className="mt-1 text-xs text-gray-500">{audit.method}</div>
-                                                        </td>
-                                                        <td className="px-6 py-4 max-w-sm">
-                                                            <code className="rounded bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">{audit.path}</code>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-right">
-                                                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${Number(audit.status_code) >= 400 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                                                                {audit.status_code || 'OK'}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {paginatedAudits.items.map((audit) => {
+                                                    const result = getAuditResult(audit);
+
+                                                    return (
+                                                        <tr key={audit.id}>
+                                                            <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-700">{formatDateTime(audit.created_at)}</td>
+                                                            <td className="px-6 py-4">
+                                                                <div className="font-black text-gray-900">{audit.username || 'Unknown'}</div>
+                                                                <div className="text-xs font-bold text-[#720101]">{audit.role || 'Staff'}</div>
+                                                            </td>
+                                                            <td className="px-6 py-4">
+                                                                <div className="font-bold text-gray-900">{audit.action || 'Reviewed workspace activity'}</div>
+                                                            </td>
+                                                            <td className="px-6 py-4 max-w-sm">
+                                                                <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{getAuditWorkspace(audit)}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${result.className}`}>
+                                                                    {result.label}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     )}
@@ -3967,8 +4530,7 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
-                </div >
-            </main >
+                </div>
 
             {/* Employee Add/Edit Modal */}
             {
@@ -4004,8 +4566,8 @@ const DashboardAdmin = () => {
                                         </div>
                                     </div>
                                     {empModal.mode === 'add' && empModal.data?.role !== 'Client' && (
-                                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-800">
-                                            Default password: eloquestaff@2026
+                                        <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                                            A temporary password will be generated and the staff member must change it on first sign-in.
                                         </div>
                                     )}
                                     {empModal.mode === 'edit' && (
@@ -4196,10 +4758,10 @@ const DashboardAdmin = () => {
 
                                 {/* Financial Matrix */}
                                 <div>
-                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Matrix</h4>
+                                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Summary</h4>
                                     <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                                         <div>
-                                            <p className="text-xs text-gray-500 font-medium">Headcount (Pax)</p>
+                                            <p className="text-xs text-gray-500 font-medium">Guest count</p>
                                             <p className="text-lg font-bold text-gray-900">{eventDetailsModal.data?.pax}</p>
                                         </div>
                                         <div>
@@ -4298,6 +4860,8 @@ const DashboardAdmin = () => {
                     />
                 </Suspense>
             )}
+
+            {renderCatalogDrawer()}
 
             {/* Add New Menu Item Modal */}
             {menuItemModal.open && (
@@ -4451,7 +5015,7 @@ const DashboardAdmin = () => {
                     </div>
                 )
             }
-        </div >
+        </StaffWorkspaceLayout>
     );
 };
 

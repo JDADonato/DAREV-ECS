@@ -13,7 +13,7 @@ const StaffDrawer = ({ isOpen, title, eyebrow, children, footer, onClose }) => {
                         <h2 className="mt-1 text-xl font-black text-slate-950">{title}</h2>
                     </div>
                     <button type="button" onClick={onClose} className="staff-icon-button" aria-label="Close drawer">
-                        x
+                        X
                     </button>
                 </header>
                 <div className="staff-drawer-body custom-scrollbar">{children}</div>

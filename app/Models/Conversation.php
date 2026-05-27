@@ -12,7 +12,11 @@ class Conversation extends Model
     protected $fillable = [
         'client_id',
         'staff_id',
+        'booking_id',
         'status',
+        'joined_by_admin_at',
+        'internal_notes',
+        'reopened_at',
     ];
 
     // ─── Relationships ───
@@ -31,6 +35,26 @@ class Conversation extends Model
     public function staff()
     {
         return $this->belongsTo(User::class, 'staff_id');
+    }
+
+    public function booking()
+    {
+        return $this->belongsTo(Booking::class);
+    }
+
+    public function participants()
+    {
+        return $this->hasMany(ConversationParticipant::class);
+    }
+
+    public function collaborators()
+    {
+        return $this->participants()->where('role', 'collaborator');
+    }
+
+    public function adminObservers()
+    {
+        return $this->participants()->where('role', 'admin_observer');
     }
 
     /**
@@ -64,7 +88,14 @@ class Conversation extends Model
      */
     public function scopeClaimedBy($query, int $staffId)
     {
-        return $query->where('staff_id', $staffId)->where('status', 'active');
+        return $query->where('status', 'active')
+            ->where(function ($inner) use ($staffId) {
+                $inner->where('staff_id', $staffId)
+                    ->orWhereHas('participants', function ($participant) use ($staffId) {
+                        $participant->where('user_id', $staffId)
+                            ->whereIn('role', ['owner', 'collaborator', 'admin_observer']);
+                    });
+            });
     }
 
     /**

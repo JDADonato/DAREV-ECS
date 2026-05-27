@@ -46,12 +46,26 @@ class BookingSummaryResource extends JsonResource
             'review_status' => $this->review_status ?? 'Submitted',
             'assigned_to' => $this->assigned_to,
             'assigned_name' => $this->assignee?->full_name ?: ($this->assignee->username ?? null),
+            'owner_id' => $this->assigned_to,
+            'owner_name' => $this->assignee?->full_name ?: ($this->assignee->username ?? null),
+            'transfer_requested_to' => $this->transfer_requested_to,
+            'transfer_requested_to_name' => $this->transferRequestedTo?->full_name ?: ($this->transferRequestedTo->username ?? null),
+            'transfer_requested_by' => $this->transfer_requested_by,
+            'transfer_requested_by_name' => $this->transferRequestedBy?->full_name ?: ($this->transferRequestedBy->username ?? null),
+            'transfer_requested_at' => $this->transfer_requested_at,
+            'can_accept_transfer' => $this->canAcceptTransfer($request),
+            'can_claim' => $this->canClaim($request),
+            'can_edit' => $this->canEdit($request),
+            'ownership_label' => $this->ownershipLabel($request),
             'clarification_request' => $this->clarification_request,
             'clarification_response' => $this->clarification_response,
             'clarification_requested_at' => $this->clarification_requested_at,
             'clarification_responded_at' => $this->clarification_responded_at,
             'reviewed_at' => $this->reviewed_at,
             'live_status' => $this->live_status,
+            'post_event_status' => $this->post_event_status,
+            'closed_at' => $this->closed_at,
+            'closed_by' => $this->closed_by,
             'created_at' => $this->created_at,
             'username' => $this->user->username ?? null,
             'user_email' => $this->user->email ?? null,
@@ -79,5 +93,48 @@ class BookingSummaryResource extends JsonResource
                 'completed_at' => $task->completed_at,
             ])->values()),
         ];
+    }
+
+    private function canClaim(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user && in_array($user->role, ['Marketing', 'Admin'], true) && is_null($this->assigned_to);
+    }
+
+    private function canEdit(Request $request): bool
+    {
+        $user = $request->user();
+
+        if (!$user || !in_array($user->role, ['Marketing', 'Admin'], true)) {
+            return false;
+        }
+
+        return $user->role === 'Admin' || (int) $this->assigned_to === (int) $user->id;
+    }
+
+    private function canAcceptTransfer(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user
+            && $user->role === 'Marketing'
+            && !is_null($this->transfer_requested_to)
+            && (int) $this->transfer_requested_to === (int) $user->id;
+    }
+
+    private function ownershipLabel(Request $request): string
+    {
+        $user = $request->user();
+
+        if (is_null($this->assigned_to)) {
+            return 'Unassigned';
+        }
+
+        if ($user && (int) $this->assigned_to === (int) $user->id) {
+            return 'My booking';
+        }
+
+        return 'Owned by another staff member';
     }
 }

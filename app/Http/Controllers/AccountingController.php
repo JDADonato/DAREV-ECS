@@ -113,6 +113,44 @@ class AccountingController extends Controller
         return response()->json($bookings);
     }
 
+    public function summary()
+    {
+        $approvedBookings = fn ($query) => $query->whereNotIn('status', ['Pending', 'Cancelled']);
+
+        $paymentQuery = Payment::query()
+            ->whereHas('booking', $approvedBookings);
+
+        $pending = (clone $paymentQuery)->where('status', 'Pending')->count();
+        $overdue = (clone $paymentQuery)
+            ->where('status', 'Pending')
+            ->whereNotNull('due_date')
+            ->whereDate('due_date', '<', now()->toDateString())
+            ->count();
+        $collected = (float) (clone $paymentQuery)
+            ->whereIn('status', ['Paid', 'Verified'])
+            ->sum('amount');
+        $refunds = Booking::query()
+            ->where('status', 'Cancelled')
+            ->whereHas('payments', fn ($query) => $query->whereIn('status', ['Verified', 'Paid']))
+            ->count();
+        $exceptions = (clone $paymentQuery)
+            ->where(function ($query) {
+                $query->where(fn ($inner) => $inner->whereNotNull('paymongo_checkout_session_id')->whereNotIn('status', ['Paid', 'Verified', 'Refunded']))
+                    ->orWhere(fn ($inner) => $inner->whereNotNull('paymongo_payment_id')->whereNotIn('status', ['Paid', 'Verified', 'Refunded']))
+                    ->orWhere(fn ($inner) => $inner->where('status', 'Pending')->whereNotNull('due_date')->whereDate('due_date', '<', now()->toDateString()));
+            })
+            ->count();
+
+        return response()->json([
+            'bookings' => Booking::query()->whereNotIn('status', ['Pending', 'Cancelled'])->count(),
+            'pending' => $pending,
+            'overdue' => $overdue,
+            'refunds' => $refunds,
+            'exceptions' => $exceptions,
+            'collected' => $collected,
+        ]);
+    }
+
     /**
      * Get pending payments for verification queue.
      * Ported from: accountingController.getPendingPayments()

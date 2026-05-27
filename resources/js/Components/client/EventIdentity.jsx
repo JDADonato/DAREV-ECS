@@ -93,7 +93,13 @@ const EventIdentity = ({ bookingData, updateBooking, onNext, onBack }) => {
                         </div>
                     )}
                     {loading ? (
-                        <div className="booking-empty-state">Loading event types...</div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            {[0, 1, 2, 3].map((item) => (
+                                <div key={item} className="h-28 animate-pulse rounded-2xl border border-[#720101]/10 bg-white">
+                                    <div className="h-full rounded-2xl bg-gradient-to-r from-[#fffaf3] via-white to-[#f1e5dc]" />
+                                </div>
+                            ))}
+                        </div>
                     ) : (
                         <div className="booking-event-grid">
                             {eventTypes.map((eventType) => {

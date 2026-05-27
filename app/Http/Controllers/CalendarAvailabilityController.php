@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Booking;
 use App\Models\CalendarAvailabilityOverride;
 use App\Services\CalendarAvailabilityService;
 use Carbon\Carbon;
@@ -14,11 +15,79 @@ class CalendarAvailabilityController extends Controller
     public function index(Request $request, CalendarAvailabilityService $availability)
     {
         $data = $request->validate([
-            'month' => ['required', 'date_format:Y-m'],
+            'month' => ['nullable', 'date_format:Y-m'],
+            'start' => ['nullable', 'date'],
+            'end' => ['nullable', 'date', 'after_or_equal:start'],
+            'status' => ['nullable', 'string', 'max:80'],
+            'event_type' => ['nullable', 'string', 'max:120'],
+            'city' => ['nullable', 'string', 'max:120'],
+            'owner' => ['nullable', 'integer', 'exists:users,id'],
+            'search' => ['nullable', 'string', 'max:120'],
         ]);
+        if (empty($data['month']) && (empty($data['start']) || empty($data['end']))) {
+            $data['month'] = now()->format('Y-m');
+        }
+
+        $start = !empty($data['start']) && !empty($data['end'])
+            ? Carbon::parse($data['start'])->startOfDay()
+            : Carbon::createFromFormat('Y-m', $data['month'])->startOfMonth();
+        $end = !empty($data['start']) && !empty($data['end'])
+            ? Carbon::parse($data['end'])->endOfDay()
+            : $start->copy()->endOfMonth();
+        $events = Booking::query()
+            ->with(['assignee:id,full_name,username', 'payments:id,booking_id,status', 'preparationTasks:id,booking_id,status'])
+            ->select([
+                'id',
+                'event_date',
+                'event_time',
+                'event_name',
+                'event_type',
+                'client_full_name',
+                'pax',
+                'status',
+                'venue_city',
+                'assigned_to',
+            ])
+            ->whereBetween('event_date', [$start->toDateString(), $end->toDateString()])
+            ->whereNotIn('status', ['Cancelled', 'cancelled'])
+            ->when($data['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($data['event_type'] ?? null, fn ($q, $type) => $q->where('event_type', $type))
+            ->when($data['city'] ?? null, fn ($q, $city) => $q->where('venue_city', $city))
+            ->when($data['owner'] ?? null, fn ($q, $owner) => $q->where('assigned_to', $owner))
+            ->when($data['search'] ?? null, function ($q, $search) {
+                $term = '%' . trim($search) . '%';
+                $q->where(fn ($inner) => $inner
+                    ->where('event_name', 'like', $term)
+                    ->orWhere('event_type', 'like', $term)
+                    ->orWhere('client_full_name', 'like', $term)
+                    ->orWhere('venue_city', 'like', $term));
+            })
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->get()
+            ->map(function (Booking $booking) {
+                $taskCount = $booking->preparationTasks->count();
+                $doneTasks = $booking->preparationTasks->where('status', 'Done')->count();
+
+                return [
+                    'id' => $booking->id,
+                    'date' => optional($booking->event_date)->toDateString(),
+                    'time' => $booking->event_time,
+                    'name' => $booking->event_name ?: $booking->event_type ?: 'Booked event',
+                    'type' => $booking->event_type,
+                    'client' => $booking->client_full_name,
+                    'pax' => $booking->pax,
+                    'status' => $booking->status,
+                    'city' => $booking->venue_city,
+                    'owner' => $booking->assignee?->full_name ?: $booking->assignee?->username,
+                    'payment_state' => $booking->payments->whereIn('status', ['Paid', 'Verified'])->count() . '/' . $booking->payments->count() . ' paid',
+                    'preparation_state' => $taskCount ? "{$doneTasks}/{$taskCount} ready" : 'No tasks yet',
+                ];
+            });
 
         return response()->json([
-            'data' => $availability->monthOverrides($data['month'])->values(),
+            'data' => $availability->monthOverrides($data['month'] ?? $start->format('Y-m'))->values(),
+            'events' => $events->values(),
         ]);
     }
 

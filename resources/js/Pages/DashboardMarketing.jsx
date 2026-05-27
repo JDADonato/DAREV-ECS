@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useEffect, useMemo } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { router } from '@inertiajs/react';
@@ -10,7 +10,9 @@ import StaffPagination from '../Components/staff/StaffPagination';
 import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
+import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
+import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
     formatDate,
@@ -41,9 +43,14 @@ const SECURITY_OPTIONS = [
     { value: 'cash_bond', label: 'Php 1,500 Cash Bond' },
 ];
 
-const MARKETING_BOOKINGS_URL = '/api/marketing/bookings?paginated=1&per_page=100';
+const MARKETING_BOOKINGS_URL = '/api/marketing/bookings';
 const BOOKING_BACKED_TABS = ['calendar', 'intake', 'documents'];
-const ACTIVE_CALENDAR_STATUSES = ['Confirmed', 'Reserved'];
+const ACTIVE_CALENDAR_STATUSES = ['pending', 'confirmed', 'reserved'];
+const REVIEW_QUEUE_VIEWS = [
+    { id: 'claim', label: 'Claim Queue' },
+    { id: 'mine', label: 'My Bookings' },
+    { id: 'all', label: 'All Bookings' },
+];
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -79,13 +86,45 @@ const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => opti
 const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
 const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
 const isActiveCalendarBooking = (booking) => (
-    Boolean(booking?.event_date) && ACTIVE_CALENDAR_STATUSES.includes(booking.status)
+    Boolean(booking?.event_date) && ACTIVE_CALENDAR_STATUSES.includes(String(booking.status || '').toLowerCase())
 );
+const normalizeCalendarEvent = (event) => ({
+    id: event.id,
+    event_date: event.date,
+    event_time: event.time,
+    event_name: event.name,
+    event_type: event.type || event.name,
+    client_full_name: event.client,
+    pax: event.pax,
+    status: event.status,
+    venue_city: event.city,
+    owner: event.owner,
+    payment_state: event.payment_state,
+    preparation_state: event.preparation_state,
+});
+const formatMonthLabel = (value) => {
+    if (!value) return 'Selected month';
+    const [year, month] = value.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+const shiftMonthValue = (value, offset) => {
+    const [year, month] = value.split('-').map(Number);
+    const date = new Date(year, month - 1 + offset, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
 
 const DashboardMarketing = () => {
     const { user, logout } = useAuth();
     const toast = useToast();
     const [bookings, setBookings] = useState([]);
+    const [bookingsScope, setBookingsScope] = useState(null);
+    const [calendarBookings, setCalendarBookings] = useState([]);
+    const [calendarLoading, setCalendarLoading] = useState(false);
+    const [calendarView, setCalendarView] = useState('month');
+    const [calendarFilters, setCalendarFilters] = useState({ search: '', status: '', event_type: '', city: '' });
+    const bookingRequestRef = useRef(0);
+    const calendarRequestRef = useRef(0);
+    const [marketingRemoteSummary, setMarketingRemoteSummary] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('today');
     const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -96,13 +135,14 @@ const DashboardMarketing = () => {
     const [editingEventTypeId, setEditingEventTypeId] = useState(null);
     const [activeMenuCategory, setActiveMenuCategory] = useState('starter');
     const [activeConfigTab, setActiveConfigTab] = useState('packages');
+    const [catalogDrawer, setCatalogDrawer] = useState(null);
     const [packageForm, setPackageForm] = useState(emptyPackageForm());
     const [editingPackageId, setEditingPackageId] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [updatingBookingIds, setUpdatingBookingIds] = useState({});
     const [inquirySearch, setInquirySearch] = useState('');
     const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
-    const [inquiryAssignmentFilter, setInquiryAssignmentFilter] = useState('all');
+    const [bookingReviewView, setBookingReviewView] = useState('claim');
     const [inquirySort, setInquirySort] = useState('eventDateAsc');
     const [inquiryDateFrom, setInquiryDateFrom] = useState('');
     const [inquiryDateTo, setInquiryDateTo] = useState('');
@@ -124,6 +164,9 @@ const DashboardMarketing = () => {
     const [leadFilters, setLeadFilters] = useState({ search: '', status: '', concern_type: '', date_from: '', date_to: '', page: 1, per_page: 15 });
     const [selectedLead, setSelectedLead] = useState(null);
     const [leadSaving, setLeadSaving] = useState(false);
+    const [feedbackSummary, setFeedbackSummary] = useState({ followUps: 0, testimonials: 0, recent: [] });
+    const [bookingTransferStaff, setBookingTransferStaff] = useState([]);
+    const [showBookingTransfer, setShowBookingTransfer] = useState(false);
 
     // PDF Export State
     const [showExportModal, setShowExportModal] = useState(false);
@@ -138,29 +181,37 @@ const DashboardMarketing = () => {
     });
     const [exportDateStart, setExportDateStart] = useState('');
     const [exportDateEnd, setExportDateEnd] = useState('');
-
-    useEffect(() => {
-        fetchBookings();
-    }, []);
+    const selectedMonthKey = useMemo(() => (
+        `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`
+    ), [selectedMonth]);
 
     useEffect(() => {
         setInquiryPage(1);
-    }, [inquirySearch, inquiryStatusFilter, inquiryAssignmentFilter, inquirySort, inquiryDateFrom, inquiryDateTo, inquiryPerPage]);
+    }, [inquirySearch, inquiryStatusFilter, bookingReviewView, inquirySort, inquiryDateFrom, inquiryDateTo, inquiryPerPage]);
 
     useEffect(() => {
         if (activeTab === 'today') {
-            fetchBookings();
+            fetchMarketingSummary();
+            fetchBookings({ scope: 'page' });
             fetchContactLeads({ silent: true });
+            fetchFeedbackSummary();
         } else if (activeTab === 'settings') {
             fetchMarketingSettings();
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides();
         } else if (activeTab === 'leads') {
             fetchContactLeads();
+        } else if (activeTab === 'intake' && bookingsScope !== 'all') {
+            fetchBookings({ scope: 'all' });
         } else if (BOOKING_BACKED_TABS.includes(activeTab) && bookings.length === 0) {
-            fetchBookings();
+            fetchBookings({ scope: 'page' });
         }
-    }, [activeTab, availabilityMonth]);
+    }, [activeTab, availabilityMonth, bookingsScope]);
+
+    useEffect(() => {
+        if (activeTab !== 'calendar') return;
+        fetchCalendarBookings();
+    }, [activeTab, selectedMonthKey, calendarFilters]);
 
     useEffect(() => {
         if (activeTab !== 'leads') return;
@@ -174,33 +225,104 @@ const DashboardMarketing = () => {
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'today') {
-                fetchBookings({ silent });
+                fetchMarketingSummary({ silent });
+                fetchBookings({ silent, scope: 'page' });
+                fetchFeedbackSummary();
             } else if (activeTab === 'settings') {
                 fetchMarketingSettings();
             } else if (activeTab === 'availability') {
                 fetchAvailabilityOverrides({ silent });
+            } else if (activeTab === 'calendar') {
+                fetchCalendarBookings({ silent });
+            } else if (activeTab === 'intake') {
+                fetchBookings({ silent, scope: 'all' });
             } else if (BOOKING_BACKED_TABS.includes(activeTab)) {
-                fetchBookings({ silent });
+                fetchBookings({ silent, scope: 'page' });
             }
         },
     });
 
-    const fetchBookings = async ({ silent = false } = {}) => {
+    const fetchBookings = async ({ silent = false, scope = 'page' } = {}) => {
+        const requestId = bookingRequestRef.current + 1;
+        bookingRequestRef.current = requestId;
         try {
-            // Session auth - no token needed
-            const response = await fetch(MARKETING_BOOKINGS_URL, {
+            const params = scope === 'all' ? '' : '?paginated=1&per_page=25';
+            const response = await fetch(`${MARKETING_BOOKINGS_URL}${params}`, {
                 headers: {
                     'Accept': 'application/json',
                 }
             });
             if (response.ok) {
                 const data = await response.json();
-                setBookings(getListData(data));
+                if (requestId === bookingRequestRef.current) {
+                    setBookings(getListData(data));
+                    setBookingsScope(scope);
+                }
             }
         } catch (error) {
             console.error("Error fetching bookings:", error);
         } finally {
-            if (!silent) setLoading(false);
+            if (requestId === bookingRequestRef.current && !silent) setLoading(false);
+        }
+    };
+
+    const fetchCalendarBookings = async ({ silent = false } = {}) => {
+        const requestId = calendarRequestRef.current + 1;
+        calendarRequestRef.current = requestId;
+        if (!silent) setCalendarLoading(true);
+        try {
+            const params = new URLSearchParams({ month: selectedMonthKey });
+            Object.entries(calendarFilters).forEach(([key, value]) => {
+                if (value) params.set(key, value);
+            });
+            const response = await fetch(`/api/calendar-availability?${params.toString()}`, {
+                headers: { Accept: 'application/json' },
+            });
+
+            if (!response.ok) throw new Error('Calendar bookings load failed');
+            const data = await response.json();
+            if (requestId === calendarRequestRef.current) {
+                setCalendarBookings(Array.isArray(data.events) ? data.events.map(normalizeCalendarEvent) : []);
+            }
+        } catch (error) {
+            console.error('Error fetching calendar bookings:', error);
+            if (!silent) toast.error('Could not load calendar events.');
+        } finally {
+            if (requestId === calendarRequestRef.current) {
+                if (!silent) setCalendarLoading(false);
+                setLoading(false);
+            }
+        }
+    };
+
+    const fetchMarketingSummary = async ({ silent = false } = {}) => {
+        try {
+            const response = await fetch('/api/marketing/summary', {
+                headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) throw new Error('Summary load failed');
+            setMarketingRemoteSummary(await response.json());
+        } catch (error) {
+            console.error('Error fetching marketing summary:', error);
+            if (!silent) toast.error('Could not load today summary.');
+        }
+    };
+
+    const fetchFeedbackSummary = async () => {
+        try {
+            const response = await fetch('/api/marketing/feedback-responses?follow_up_only=1', {
+                headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) return;
+            const rows = await response.json();
+            const list = Array.isArray(rows) ? rows : [];
+            setFeedbackSummary({
+                followUps: list.length,
+                testimonials: list.filter((item) => item.testimonial_status === 'Candidate').length,
+                recent: list.slice(0, 3),
+            });
+        } catch (error) {
+            console.error('Error fetching feedback summary:', error);
         }
     };
 
@@ -270,6 +392,9 @@ const DashboardMarketing = () => {
 
     const selectAvailabilityDate = async (date) => {
         setAvailabilityDate(date);
+        if (date?.slice(0, 7) && date.slice(0, 7) !== availabilityMonth) {
+            setAvailabilityMonth(date.slice(0, 7));
+        }
         const existing = availabilityOverrides.find(item => item.date === date);
         if (existing) {
             setAvailabilityForm({
@@ -354,11 +479,13 @@ const DashboardMarketing = () => {
                 if (data.booking) mergeUpdatedBooking(data.booking);
                 const label = newStatus === 'Confirmed' ? 'approved' : 'declined';
                 toast.success(`Booking #${id} has been ${label} successfully.`);
-                fetchBookings(); // sync with server in background
+                fetchBookings({ scope: activeTab === 'intake' ? 'all' : 'page' }); // sync with server in background
             } else {
+                const data = await response.json().catch(() => ({}));
+                if (data.booking) mergeUpdatedBooking(data.booking);
                 // Revert on failure
                 setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'Pending' } : b));
-                toast.error('Failed to update booking status. Please try again.');
+                toast.error(data.error || 'Failed to update booking status. Please try again.');
             }
         } catch (error) {
             console.error('Error updating status:', error);
@@ -377,17 +504,77 @@ const DashboardMarketing = () => {
 
     const assignBooking = async (id) => {
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/assign`, {
-                method: 'PUT',
+            const response = await fetch(`/api/marketing/bookings/${id}/claim`, {
+                method: 'POST',
                 headers: { 'Accept': 'application/json' },
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Assignment failed');
+            if (!response.ok) throw new Error(data.error || 'Claim failed');
             mergeUpdatedBooking(data.booking);
-            toast.success('Booking is now assigned to you.');
+            toast.success('Booking claimed.');
         } catch (error) {
             console.error(error);
-            toast.error('We could not assign this booking right now.');
+            toast.error(error.message || 'We could not claim this booking right now.');
+        }
+    };
+
+    const fetchBookingTransferStaff = async () => {
+        try {
+            const response = await fetch('/api/chat/staff/available', { headers: { Accept: 'application/json' } });
+            if (response.ok) setBookingTransferStaff(await response.json());
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const transferBooking = async (id, staffId) => {
+        if (!staffId) return;
+        try {
+            const response = await fetch(`/api/marketing/bookings/${id}/transfer`, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_staff_id: staffId }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Transfer failed');
+            mergeUpdatedBooking(data.booking);
+            setShowBookingTransfer(false);
+            toast.success(data.message || 'Transfer request sent.');
+        } catch (error) {
+            console.error(error);
+            toast.error(error.message || 'Could not transfer booking owner.');
+        }
+    };
+
+    const respondToTransfer = async (id, action) => {
+        try {
+            const response = await fetch(`/api/marketing/bookings/${id}/transfer/${action}`, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Transfer response failed');
+            mergeUpdatedBooking(data.booking);
+            toast.success(data.message || (action === 'accept' ? 'Booking transfer accepted.' : 'Booking transfer declined.'));
+        } catch (error) {
+            console.error(error);
+            toast.error(error.message || 'Could not update this transfer request.');
+        }
+    };
+
+    const releaseBooking = async (id) => {
+        try {
+            const response = await fetch(`/api/marketing/bookings/${id}/release`, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Release failed');
+            mergeUpdatedBooking(data.booking);
+            toast.success('Booking released to the unassigned queue.');
+        } catch (error) {
+            console.error(error);
+            toast.error(error.message || 'Could not release booking.');
         }
     };
 
@@ -414,7 +601,7 @@ const DashboardMarketing = () => {
             toast.success('Request sent to the customer dashboard.');
         } catch (error) {
             console.error(error);
-            toast.error('We could not send the request right now.');
+            toast.error(error.message || 'We could not send the request right now.');
         }
     };
 
@@ -434,7 +621,7 @@ const DashboardMarketing = () => {
             mergeUpdatedBooking(data.booking);
         } catch (error) {
             console.error(error);
-            toast.error('We could not update the checklist.');
+            toast.error(error.message || 'We could not update the checklist.');
         }
     };
 
@@ -450,10 +637,15 @@ const DashboardMarketing = () => {
                 body: JSON.stringify({ live_status: newLiveStatus })
             });
 
+            const data = await response.json().catch(() => ({}));
             if (response.ok) {
                 // Update local state to reflect change immediately without closing modal
-                setSelectedBooking({ ...selectedBooking, live_status: newLiveStatus });
-                fetchBookings(); // Refresh background data
+                if (data.booking) mergeUpdatedBooking(data.booking);
+                else setSelectedBooking({ ...selectedBooking, live_status: newLiveStatus });
+                fetchBookings({ scope: activeTab === 'intake' ? 'all' : 'page' }); // Refresh background data
+            } else {
+                if (data.booking) mergeUpdatedBooking(data.booking);
+                toast.error(data.error || 'Could not update live status.');
             }
         } catch (error) {
             console.error("Error updating live status:", error);
@@ -518,6 +710,7 @@ const DashboardMarketing = () => {
             if (response.ok) {
                 setEditingPackageId(null);
                 setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
+                setCatalogDrawer(null);
                 fetchMarketingSettings();
             }
         } catch (error) {
@@ -575,6 +768,7 @@ const DashboardMarketing = () => {
             });
             if (response.ok) {
                 resetEventTypeForm();
+                setCatalogDrawer(null);
                 fetchMarketingSettings();
             }
         } catch (error) {
@@ -639,7 +833,7 @@ const DashboardMarketing = () => {
     );
 
     const getCalendarEventSecondary = (booking) => {
-        const pax = booking.pax ? ` · ${booking.pax} pax` : '';
+        const pax = booking.pax ? ` · ${booking.pax} guests` : '';
         return `${formatTime(booking.event_time)} · ${getCompactClientName(booking)}${pax}`;
     };
 
@@ -647,26 +841,28 @@ const DashboardMarketing = () => {
         const parts = [
             `Booking #${booking.id}`,
             getCalendarEventLabel(booking),
-            booking.pax ? `${booking.pax} pax` : null,
+            booking.pax ? `${booking.pax} guests` : null,
             booking.status ? `Status: ${booking.status}` : null,
         ].filter(Boolean);
         return parts.join('\n');
     };
 
     const [selectedBooking, setSelectedBooking] = useState(null);
+    const canEditBooking = (booking) => Boolean(booking?.can_edit ?? (user?.role === 'Admin' || (booking?.assigned_to && Number(booking.assigned_to) === Number(user?.id))));
+    const canClaimBooking = (booking) => Boolean(booking?.can_claim ?? !booking?.assigned_to);
 
     const marketingBookingIndexes = useMemo(() => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
-        const monthKey = `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`;
         const byDate = new Map();
         const pending = [];
         let confirmed = 0;
         let monthEvents = 0;
         let upcoming = 0;
         let pipeline = 0;
+        const calendarSource = activeTab === 'calendar' ? calendarBookings : bookings;
 
-        bookings.forEach((booking) => {
+        calendarSource.forEach((booking) => {
             const showOnCalendar = isActiveCalendarBooking(booking);
 
             if (booking.event_date) {
@@ -674,10 +870,12 @@ const DashboardMarketing = () => {
                 if (showOnCalendar) {
                     if (!byDate.has(dateKey)) byDate.set(dateKey, []);
                     byDate.get(dateKey).push(booking);
-                    if (booking.event_date.substring(0, 7) === monthKey) monthEvents += 1;
+                    if (booking.event_date.substring(0, 7) === selectedMonthKey) monthEvents += 1;
                 }
             }
+        });
 
+        bookings.forEach((booking) => {
             if (booking.status === 'Pending') {
                 pending.push(booking);
                 pipeline += getBookingValue(booking);
@@ -698,26 +896,33 @@ const DashboardMarketing = () => {
             upcoming,
             pipeline,
         };
-    }, [bookings, selectedMonth]);
+    }, [activeTab, bookings, calendarBookings, selectedMonthKey]);
 
-    const dashboardSummary = marketingBookingIndexes;
+    const dashboardSummary = marketingRemoteSummary ? {
+        ...marketingBookingIndexes,
+        pending: marketingRemoteSummary.pending ?? marketingBookingIndexes.pending,
+        monthEvents: activeTab === 'calendar' ? marketingBookingIndexes.monthEvents : (marketingRemoteSummary.this_month ?? marketingBookingIndexes.monthEvents),
+        upcoming: marketingRemoteSummary.upcoming ?? marketingBookingIndexes.upcoming,
+        pipeline: marketingRemoteSummary.pipeline ?? marketingBookingIndexes.pipeline,
+    } : marketingBookingIndexes;
 
         const tabMeta = {
             today: 'Today',
-            intake: 'Intake',
+            intake: 'Booking Reviews',
             leads: 'Guest Inquiries',
-            calendar: 'Calendar',
-        availability: 'Availability',
-        preparation: 'Preparation',
-        inquiries: 'Booking Review',
+            calendar: 'Event Calendar',
+        availability: 'Date Availability',
+        preparation: 'Event Preparation',
+        inquiries: 'Booking Reviews',
         documents: 'Event Documents',
         content: 'Announcements',
-        settings: 'Menu And Packages',
+        settings: 'Menu & Packages',
         messages: 'Messages',
+        history: 'Event History',
     };
 
         const marketingSummary = useMemo(() => {
-            const pending = bookings.filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status));
+            const pending = bookings.filter(b => !['Completed', 'completed', 'Cancelled', 'cancelled'].includes(b.status) && (b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status)));
             const needsDetails = pending.filter(b => String(b.review_status || '').toLowerCase() === 'needs customer details' || b.clarification_request);
             const upcoming = bookings.filter(b => b.event_date && ['Confirmed', 'Reserved'].includes(b.status));
             const now = new Date();
@@ -730,16 +935,16 @@ const DashboardMarketing = () => {
         });
 
         return {
-            pending: pending.length,
-            needsDetails: needsDetails.length,
-            upcoming: upcoming.length,
-            urgent: urgent.length,
-            pipeline: pending.reduce((sum, b) => sum + getBookingValue(b), 0),
+            pending: marketingRemoteSummary?.pending ?? pending.length,
+            needsDetails: marketingRemoteSummary?.needs_details ?? needsDetails.length,
+            upcoming: marketingRemoteSummary?.upcoming ?? upcoming.length,
+            urgent: marketingRemoteSummary?.urgent ?? urgent.length,
+            pipeline: marketingRemoteSummary?.pipeline ?? pending.reduce((sum, b) => sum + getBookingValue(b), 0),
             pendingRows: pending,
             upcomingRows: upcoming,
             urgentRows: urgent,
         };
-    }, [bookings]);
+    }, [bookings, marketingRemoteSummary]);
 
     const renderToday = () => (
         <div className="staff-today-grid">
@@ -772,6 +977,10 @@ const DashboardMarketing = () => {
                             <div><h3>Customer messages</h3><p>Open the shared inbox to claim, answer, transfer, or resolve customer conversations.</p></div>
                             <StaffStatusBadge tone="muted">Inbox</StaffStatusBadge>
                         </button>
+                        <button type="button" className="staff-priority-item">
+                            <div><h3>Post-event feedback</h3><p>{feedbackSummary.followUps} completed events need feedback follow-up or testimonial review.</p></div>
+                            <StaffStatusBadge tone={feedbackSummary.followUps > 0 ? 'warn' : 'good'}>{feedbackSummary.followUps}</StaffStatusBadge>
+                        </button>
                     </div>
                 </div>
             </section>
@@ -791,7 +1000,7 @@ const DashboardMarketing = () => {
                             <button key={booking.id} type="button" onClick={() => setSelectedBooking(booking)} className="staff-priority-item">
                                 <div>
                                     <h3>{eventDisplayName(booking)}</h3>
-                                    <p>{formatDate(booking.event_date)} / {booking.pax || 0} pax / {booking.client_full_name || booking.username || 'Customer'}</p>
+                                    <p>{formatDate(booking.event_date)} / {booking.pax || 0} guests / {booking.client_full_name || booking.username || 'Customer'}</p>
                                 </div>
                                 <StaffStatusBadge tone="good">{booking.status}</StaffStatusBadge>
                             </button>
@@ -842,11 +1051,55 @@ const DashboardMarketing = () => {
         return days;
     };
 
+    const renderCalendarList = () => (
+        <div className="overflow-hidden rounded-2xl border border-amber-100 bg-white">
+            <table className="min-w-full divide-y divide-amber-100 text-sm">
+                <thead className="bg-[#fffaf3]">
+                    <tr>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Event</th>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Guests</th>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Venue</th>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Owner</th>
+                        <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Readiness</th>
+                        <th className="px-4 py-3 text-right text-xs font-black uppercase tracking-wider text-slate-500">Status</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-50">
+                    {calendarBookings.map((booking) => (
+                        <tr key={booking.id} className="cursor-pointer hover:bg-[#fffaf3]" onClick={() => setSelectedBooking(booking)}>
+                            <td className="px-4 py-3 font-bold text-slate-700">{formatDate(booking.event_date)} {formatTime(booking.event_time)}</td>
+                            <td className="px-4 py-3">
+                                <div className="font-black text-slate-950">{eventDisplayName(booking)}</div>
+                                <div className="text-xs font-bold text-slate-500">{booking.client_full_name || 'Client'}</div>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-slate-600">{booking.pax || 0}</td>
+                            <td className="px-4 py-3 font-bold text-slate-600">{booking.venue_city || 'Venue pending'}</td>
+                            <td className="px-4 py-3 font-bold text-slate-600">{booking.owner || 'Unassigned'}</td>
+                            <td className="px-4 py-3 text-xs font-bold text-slate-500">
+                                <div>{booking.preparation_state || 'No tasks yet'}</div>
+                                <div>{booking.payment_state || 'Payments pending'}</div>
+                            </td>
+                            <td className="px-4 py-3 text-right"><StaffStatusBadge tone={String(booking.status).toLowerCase() === 'confirmed' ? 'good' : 'warn'}>{booking.status}</StaffStatusBadge></td>
+                        </tr>
+                    ))}
+                    {calendarBookings.length === 0 && (
+                        <tr><td colSpan="7" className="px-4 py-10 text-center font-bold text-slate-400">No events match the selected filters.</td></tr>
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+
     const renderBookingModal = () => {
         if (!selectedBooking) return null;
         const selectedDishes = getSelectedDishes(selectedBooking);
         const isApproved = selectedBooking.status === 'Confirmed';
         const reviewStatus = selectedBooking.review_status || (selectedBooking.status === 'Pending' ? 'Submitted' : selectedBooking.status);
+        const canEdit = canEditBooking(selectedBooking);
+        const canClaim = canClaimBooking(selectedBooking);
+        const pendingTransferToMe = Boolean(selectedBooking.can_accept_transfer);
+        const hasPendingTransfer = Boolean(selectedBooking.transfer_requested_to);
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setSelectedBooking(null)}>
@@ -869,18 +1122,64 @@ const DashboardMarketing = () => {
                                     <p className="marketing-kicker">Review workflow</p>
                                     <h4 className="mt-1 text-lg font-black text-slate-950">{reviewStatus}</h4>
                                     <p className="mt-1 text-sm font-semibold text-slate-500">
-                                        Owner: {selectedBooking.assigned_name || 'Unassigned'}
+                                        Owner: {selectedBooking.owner_name || selectedBooking.assigned_name || 'Unassigned'}
                                     </p>
+                                    {hasPendingTransfer && (
+                                        <p className="mt-2 text-xs font-bold text-[#9f6500]">
+                                            Transfer requested to {selectedBooking.transfer_requested_to_name || 'another Marketing staff member'}.
+                                        </p>
+                                    )}
+                                    {!canEdit && (
+                                        <p className="mt-2 text-xs font-bold text-amber-700">
+                                            {pendingTransferToMe ? 'Accept this transfer to become the owner.' : canClaim ? 'Claim this booking to take action.' : 'Owned by another staff member. Actions are locked until ownership is transferred.'}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    {!selectedBooking.assigned_to && (
+                                    {pendingTransferToMe && (
+                                        <>
+                                            <button onClick={() => respondToTransfer(selectedBooking.id, 'accept')} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
+                                                Accept transfer
+                                            </button>
+                                            <button onClick={() => respondToTransfer(selectedBooking.id, 'decline')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">
+                                                Decline
+                                            </button>
+                                        </>
+                                    )}
+                                    {canClaim && (
                                         <button onClick={() => assignBooking(selectedBooking.id)} className="rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5">
                                             Claim booking
                                         </button>
                                     )}
-                                    <button onClick={() => requestClarification(selectedBooking.id)} className="rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-[#fff0cf]">
-                                        Request details
-                                    </button>
+                                    {selectedBooking.assigned_to && (canEdit || user?.role === 'Admin') && (
+                                        <div className="relative">
+                                            <button onClick={() => { setShowBookingTransfer(!showBookingTransfer); if (!showBookingTransfer) fetchBookingTransferStaff(); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                                                Transfer owner
+                                            </button>
+                                            {showBookingTransfer && (
+                                                <div className="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white py-2 shadow-lg">
+                                                    {bookingTransferStaff.length === 0 ? (
+                                                        <p className="px-3 py-2 text-xs font-bold text-slate-400">No Marketing staff available</p>
+                                                    ) : bookingTransferStaff.map(staff => (
+                                                        <button key={staff.id} onClick={() => transferBooking(selectedBooking.id, staff.id)} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">
+                                                            <span>{staff.username}</span>
+                                                            <span className="text-[10px] text-slate-400">{staff.role}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {selectedBooking.assigned_to && canEdit && !['Completed'].includes(selectedBooking.status) && (
+                                        <button onClick={() => releaseBooking(selectedBooking.id)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">
+                                            Unclaim booking
+                                        </button>
+                                    )}
+                                    {canEdit && (
+                                        <button onClick={() => requestClarification(selectedBooking.id)} className="rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-[#fff0cf]">
+                                            Request details
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                             {selectedBooking.clarification_request && (
@@ -898,8 +1197,9 @@ const DashboardMarketing = () => {
                                         {selectedBooking.review_tasks.filter(task => task.task_type === 'review').map(task => (
                                             <button
                                                 key={task.id}
+                                                disabled={!canEdit}
                                                 onClick={() => toggleReviewTask(selectedBooking.id, task)}
-                                                className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${task.status === 'Done' ? 'border-green-200 bg-green-50 text-green-800' : 'border-slate-200 bg-white text-slate-600 hover:border-[#720101]/20'}`}
+                                                className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${task.status === 'Done' ? 'border-green-200 bg-green-50 text-green-800' : 'border-slate-200 bg-white text-slate-600 hover:border-[#720101]/20'} ${!canEdit ? 'cursor-not-allowed opacity-50' : ''}`}
                                             >
                                                 <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${task.status === 'Done' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
                                                     {task.status === 'Done' ? 'OK' : ''}
@@ -989,7 +1289,7 @@ const DashboardMarketing = () => {
                             <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Summary</h4>
                             <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
-                                    <p className="text-xs text-gray-500 font-medium">Headcount (Pax)</p>
+                                    <p className="text-xs text-gray-500 font-medium">Guest count</p>
                                     <p className="text-lg font-bold text-gray-900">{selectedBooking.pax}</p>
                                 </div>
                                 <div>
@@ -1033,8 +1333,9 @@ const DashboardMarketing = () => {
                                         return (
                                             <button
                                                 key={status}
+                                                disabled={!canEdit}
                                                 onClick={() => updateLiveStatus(selectedBooking.id, status)}
-                                                className={`px-4 py-2 text-xs font-bold rounded-full border transition-colors ${isActive ? 'bg-primary-600 text-white border-primary-600 shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                                                className={`px-4 py-2 text-xs font-bold rounded-full border transition-colors ${isActive ? 'bg-primary-600 text-white border-primary-600 shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'} ${!canEdit ? 'cursor-not-allowed opacity-50' : ''}`}
                                             >
                                                 {status}
                                             </button>
@@ -1076,6 +1377,11 @@ const DashboardMarketing = () => {
             toast.warning('Please select a valid date range.');
             return;
         }
+
+        const params = new URLSearchParams({ start, end });
+        window.location.href = `/documents/calendar.pdf?${params.toString()}`;
+        setShowExportModal(false);
+        return;
 
         const filteredBookings = bookings.filter(b => {
             const dateKey = getDateKey(b.event_date);
@@ -1129,7 +1435,7 @@ const DashboardMarketing = () => {
                         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayCount).padStart(2, '0')}`;
                         const dayEvents = grouped[dateStr] || [];
                         const eventsHTML = dayEvents.map(ev =>
-                            `<div class="event ${ev.status === 'Confirmed' ? 'confirmed' : ev.status === 'Pending' ? 'pending' : 'other'}">${ev.client_full_name || ev.username} (${ev.pax} pax)</div>`
+                            `<div class="event ${ev.status === 'Confirmed' ? 'confirmed' : ev.status === 'Pending' ? 'pending' : 'other'}">${ev.client_full_name || ev.username} (${ev.pax} guests)</div>`
                         ).join('');
                         calendarHTML += `<td><div class="day-num">${dayCount}</div>${eventsHTML}</td>`;
                         dayCount++;
@@ -1154,7 +1460,7 @@ const DashboardMarketing = () => {
                                 <th>Date</th>
                                 <th>Time</th>
                                 <th>Client</th>
-                                <th>Pax</th>
+                                <th>Guests</th>
                                 <th>Venue</th>
                                 <th>Contact</th>
                                 <th>Status</th>
@@ -1174,7 +1480,7 @@ const DashboardMarketing = () => {
                             `).join('')}
                         </tbody>
                     </table>
-                    <p class="total-line">Total Events: ${filteredBookings.length} | Total Pax: ${filteredBookings.reduce((s, b) => s + (b.pax || 0), 0)}</p>
+                    <p class="total-line">Total Events: ${filteredBookings.length} | Total Guests: ${filteredBookings.reduce((s, b) => s + (b.pax || 0), 0)}</p>
                 </div>
             `;
         } else {
@@ -1334,66 +1640,91 @@ const DashboardMarketing = () => {
         );
     };
 
-    const renderAvailability = () => (
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-            <form onSubmit={saveAvailabilityOverride} className="marketing-panel p-6">
-                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
-                    <input type="month" value={availabilityMonth} onChange={(event) => setAvailabilityMonth(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Date</span>
-                        <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                    </label>
-                    <label className="flex items-center gap-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
-                        <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} />
-                        <span className="text-sm font-black text-red-800">Fully lock this date</span>
-                    </label>
-                    <label className="block">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining event slots</span>
-                        <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                    </label>
-                    <label className="block">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining pax</span>
-                        <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
-                    </label>
-                </div>
-                <label className="mt-4 block">
-                    <span className="text-xs font-black uppercase tracking-widest text-slate-500">Internal note</span>
-                    <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" placeholder="Reason for lock or capacity adjustment" />
-                </label>
-                <div className="mt-6 flex flex-wrap justify-end gap-3">
-                    <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-50">Clear Override</button>
-                    <button type="submit" disabled={availabilitySaving} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{availabilitySaving ? 'Saving...' : 'Save Availability'}</button>
-                </div>
-            </form>
+    const renderAvailability = () => {
+        const selectedDateSetting = availabilityOverrides.find(item => item.date === availabilityDate);
+        const moveAvailabilityMonth = (offset) => {
+            const nextMonth = shiftMonthValue(availabilityMonth, offset);
+            setAvailabilityMonth(nextMonth);
+            selectAvailabilityDate(`${nextMonth}-01`);
+        };
 
-            <aside className="marketing-panel p-5">
-                <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900">Month overrides</h3>
-                    <span className="rounded-md bg-primary-50 px-3 py-1 text-xs font-black text-primary-700">{availabilityOverrides.length}</span>
-                </div>
-                {availabilityLoading ? (
-                    <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Loading availability...</p>
-                ) : availabilityOverrides.length === 0 ? (
-                    <p className="rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-500">No overrides for this month.</p>
-                ) : (
-                    <div className="space-y-3">
-                        {availabilityOverrides.map((item) => (
-                            <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-primary-300 bg-primary-50' : 'border-slate-100 bg-slate-50 hover:bg-white'}`}>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm font-black text-slate-950">{formatDate(item.date)}</span>
-                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Locked' : 'Limited'}</span>
-                                </div>
-                                <p className="mt-2 text-xs font-bold text-slate-500">{item.remainingEvents} slots / {Number(item.remainingPax || 0).toLocaleString()} pax remaining</p>
-                                {item.note && <p className="mt-2 text-xs font-semibold text-slate-400">{item.note}</p>}
-                            </button>
-                        ))}
+        return (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+                <form onSubmit={saveAvailabilityOverride} className="staff-work-surface p-6">
+                    <div className="mb-6">
+                        <div>
+                            <p className="marketing-kicker">Selected date</p>
+                            <h3 className="mt-1 text-xl font-black text-slate-950">Control daily availability</h3>
+                            <p className="staff-section-copy">Set whether this date can still accept bookings and guests.</p>
+                        </div>
                     </div>
-                )}
-            </aside>
-        </div>
-    );
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="block">
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Date</span>
+                            <input type="date" value={availabilityDate} onChange={(event) => selectAvailabilityDate(event.target.value)} className="staff-control mt-2" />
+                        </label>
+                        <label className="block">
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Booking status</span>
+                            <span className="staff-control mt-2 flex items-center gap-3 border-red-100 bg-red-50/60 px-4">
+                                <input type="checkbox" checked={availabilityForm.is_locked} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, is_locked: event.target.checked }))} className="h-4 w-4" />
+                                <span className="text-sm font-black text-red-800">Stop bookings for this date</span>
+                            </span>
+                        </label>
+                        <label className="block">
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining event slots</span>
+                            <input type="number" min="0" value={availabilityForm.remaining_events} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_events: event.target.value }))} className="staff-control mt-2" />
+                        </label>
+                        <label className="block">
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Remaining guests</span>
+                            <input type="number" min="0" value={availabilityForm.remaining_pax} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, remaining_pax: event.target.value }))} className="staff-control mt-2" />
+                        </label>
+                    </div>
+                    <label className="mt-4 block">
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Staff note</span>
+                        <textarea rows={4} value={availabilityForm.note} onChange={(event) => setAvailabilityForm(prev => ({ ...prev, note: event.target.value }))} className="staff-control mt-2 min-h-32" placeholder="Reason for closing the date or changing capacity" />
+                    </label>
+                    <div className="mt-6 flex flex-wrap justify-end gap-3">
+                        <button type="button" onClick={clearAvailabilityOverride} disabled={availabilitySaving || !selectedDateSetting} className="staff-button-secondary">Clear date change</button>
+                        <button type="submit" disabled={availabilitySaving} className="staff-button-primary">{availabilitySaving ? 'Saving...' : 'Save date settings'}</button>
+                    </div>
+                </form>
+
+                <aside className="staff-work-surface p-5">
+                    <div className="mb-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-sm font-black uppercase tracking-widest text-slate-900">Date changes</h3>
+                                <p className="mt-1 text-sm font-bold text-slate-500">{formatMonthLabel(availabilityMonth)}</p>
+                            </div>
+                            <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black text-primary-700">{availabilityOverrides.length}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => moveAvailabilityMonth(-1)} className="staff-button-secondary px-3 py-2 text-xs">Previous month</button>
+                            <button type="button" onClick={() => moveAvailabilityMonth(1)} className="staff-button-secondary px-3 py-2 text-xs">Next month</button>
+                        </div>
+                    </div>
+                    {availabilityLoading ? (
+                        <StaffSkeleton variant="panel" rows={3} className="p-0" label="Loading date changes" />
+                    ) : availabilityOverrides.length === 0 ? (
+                        <p className="rounded-xl bg-[#fbf8f2] p-4 text-sm font-bold text-slate-500">No date changes for this month.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {availabilityOverrides.map((item) => (
+                                <button key={item.id} type="button" onClick={() => selectAvailabilityDate(item.date)} className={`w-full rounded-xl border p-4 text-left transition ${availabilityDate === item.date ? 'border-primary-300 bg-primary-50' : 'border-slate-100 bg-[#fbf8f2] hover:bg-white'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm font-black text-slate-950">{formatDate(item.date)}</span>
+                                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.is_locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.is_locked ? 'Closed' : 'Limited'}</span>
+                                    </div>
+                                    <p className="mt-2 text-xs font-bold text-slate-500">{item.remainingEvents} event slots / {Number(item.remainingPax || 0).toLocaleString()} guests remaining</p>
+                                    {item.note && <p className="mt-2 text-xs font-semibold text-slate-400">{item.note}</p>}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </aside>
+            </div>
+        );
+    };
 
     const concernLabels = {
         general: 'General',
@@ -1435,7 +1766,7 @@ const DashboardMarketing = () => {
                         </thead>
                          <tbody className="divide-y divide-amber-100/70">
                              {leadLoading ? (
-                                <tr><td colSpan="5" className="px-5 py-10 text-center font-bold text-slate-500">Loading guest inquiries...</td></tr>
+                                <tr><td colSpan="5"><StaffSkeleton rows={5} label="Loading guest inquiries" /></td></tr>
                             ) : leadData.data.length === 0 ? (
                                 <tr><td colSpan="5" className="px-5 py-10"><StaffEmptyState title="No guest inquiries found" message="Questions from the Contact page will appear here." /></td></tr>
                              ) : leadData.data.map((lead) => (
@@ -1448,7 +1779,7 @@ const DashboardMarketing = () => {
                                     <td className="px-5 py-4"><StaffStatusBadge tone="muted">{concernLabels[lead.concern_type] || 'General'}</StaffStatusBadge></td>
                                     <td className="px-5 py-4 text-sm font-bold text-slate-600">
                                         <p>{lead.event_type || 'Not specified'}</p>
-                                        <p className="mt-1 text-xs text-slate-400">{lead.event_date ? formatDate(lead.event_date) : 'No date'}{lead.pax ? ` / ${lead.pax} pax` : ''}</p>
+                                        <p className="mt-1 text-xs text-slate-400">{lead.event_date ? formatDate(lead.event_date) : 'No date'}{lead.pax ? ` / ${lead.pax} guests` : ''}</p>
                                     </td>
                                     <td className="px-5 py-4"><StaffStatusBadge tone={lead.status === 'Resolved' || lead.status === 'Closed' ? 'good' : lead.status === 'New' ? 'warn' : 'muted'}>{lead.status}</StaffStatusBadge></td>
                                     <td className="px-5 py-4 text-right">
@@ -1483,10 +1814,10 @@ const DashboardMarketing = () => {
                             <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">{concernLabels[selectedLead.concern_type] || 'General'} / {selectedLead.event_type || 'No event type'}</p>
                             <h4 className="mt-2 text-lg font-black text-slate-950">{selectedLead.subject}</h4>
                             <p className="mt-3 whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">{selectedLead.message}</p>
-                            <p className="mt-4 text-xs font-bold text-slate-400">{selectedLead.event_date ? formatDate(selectedLead.event_date) : 'No event date'}{selectedLead.pax ? ` / ${selectedLead.pax} pax` : ''}</p>
+                            <p className="mt-4 text-xs font-bold text-slate-400">{selectedLead.event_date ? formatDate(selectedLead.event_date) : 'No event date'}{selectedLead.pax ? ` / ${selectedLead.pax} guests` : ''}</p>
                         </div>
                         <label className="mt-6 block">
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Internal notes</span>
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Staff notes</span>
                             <textarea rows={6} value={selectedLead.staff_notes || ''} onChange={(event) => setSelectedLead((current) => ({ ...current, staff_notes: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold" />
                         </label>
                         <div className="mt-4 flex justify-end gap-3">
@@ -1500,19 +1831,33 @@ const DashboardMarketing = () => {
     );
 
     const renderInquiries = () => {
-        const pendingBookings = bookings
-            .filter(b => b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status))
+        const reviewableBookings = bookings.filter(b => (
+            !['Completed', 'completed', 'Cancelled', 'cancelled'].includes(b.status)
+            && (b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status))
+        ));
+        const reviewCounts = reviewableBookings.reduce((counts, booking) => {
+            const ownedByMe = Number(booking.owner_id ?? booking.assigned_to) === Number(user?.id);
+            if (!booking.assigned_to) counts.claim += 1;
+            if (ownedByMe) counts.mine += 1;
+            counts.all += 1;
+            return counts;
+        }, { claim: 0, mine: 0, all: 0 });
+        const pendingTransferBookings = reviewableBookings.filter(booking => booking.can_accept_transfer);
+        const viewBookings = reviewableBookings.filter((booking) => {
+            const ownedByMe = Number(booking.owner_id ?? booking.assigned_to) === Number(user?.id);
+            if (bookingReviewView === 'claim') return !booking.assigned_to;
+            if (bookingReviewView === 'mine') return ownedByMe;
+            return true;
+        });
+        const pendingBookings = viewBookings
             .filter((booking) => {
                 const query = inquirySearch.trim().toLowerCase();
                 const reviewStatus = String(booking.review_status || booking.status || '').toLowerCase();
-                const assigned = Boolean(booking.assigned_to);
                 const eventTime = booking.event_date ? new Date(booking.event_date).getTime() : 0;
                 const fromTime = inquiryDateFrom ? new Date(inquiryDateFrom).getTime() : null;
                 const toTime = inquiryDateTo ? new Date(inquiryDateTo).getTime() : null;
 
                 if (inquiryStatusFilter !== 'all' && reviewStatus !== inquiryStatusFilter) return false;
-                if (inquiryAssignmentFilter === 'assigned' && !assigned) return false;
-                if (inquiryAssignmentFilter === 'unassigned' && assigned) return false;
                 if (fromTime !== null && eventTime < fromTime) return false;
                 if (toTime !== null && eventTime > toTime) return false;
                 if (!query) return true;
@@ -1543,6 +1888,46 @@ const DashboardMarketing = () => {
         const pagedPendingBookings = pendingBookings.slice((inquiryPage - 1) * inquiryPerPage, inquiryPage * inquiryPerPage);
         return (
             <div className="space-y-4">
+                <div className="marketing-panel flex flex-wrap gap-2 p-2">
+                    {REVIEW_QUEUE_VIEWS.map(option => (
+                        <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setBookingReviewView(option.id)}
+                            className={`rounded-lg px-4 py-2 text-sm font-black transition-colors ${bookingReviewView === option.id ? 'bg-[#8b0000] text-white' : 'bg-white text-slate-600 hover:bg-[#fffaf3]'}`}
+                        >
+                            {option.label}
+                            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${bookingReviewView === option.id ? 'bg-white/20 text-white' : 'bg-[#fff7e8] text-[#9f6500]'}`}>
+                                {reviewCounts[option.id]}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+                {pendingTransferBookings.length > 0 && (
+                    <div className="marketing-panel border border-[#f0aa0b]/30 bg-[#fff7e8] p-4">
+                        <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Transfer request</p>
+                        <div className="mt-3 grid gap-3">
+                            {pendingTransferBookings.map(booking => (
+                                <div key={booking.id} className="flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="font-black text-slate-950">Booking #{booking.id} - {eventDisplayName(booking)}</p>
+                                        <p className="mt-1 text-sm font-semibold text-slate-500">
+                                            {booking.transfer_requested_by_name || booking.owner_name || 'A Marketing staff member'} wants to transfer this booking to you.
+                                        </p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button type="button" onClick={() => respondToTransfer(booking.id, 'accept')} className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100">
+                                            Accept
+                                        </button>
+                                        <button type="button" onClick={() => respondToTransfer(booking.id, 'decline')} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-black text-rose-700 hover:bg-rose-100">
+                                            Decline
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 <div className="marketing-panel staff-filter-bar">
                     <input value={inquirySearch} onChange={(event) => setInquirySearch(event.target.value)} placeholder="Search booking, customer, phone, or city" className="staff-control" />
                     <select value={inquiryStatusFilter} onChange={(event) => setInquiryStatusFilter(event.target.value)} className="staff-control">
@@ -1551,11 +1936,6 @@ const DashboardMarketing = () => {
                         <option value="under review">Under Review</option>
                         <option value="needs customer details">Needs Customer Details</option>
                         <option value="clarification received">Clarification Received</option>
-                    </select>
-                    <select value={inquiryAssignmentFilter} onChange={(event) => setInquiryAssignmentFilter(event.target.value)} className="staff-control">
-                        <option value="all">All owners</option>
-                        <option value="assigned">Assigned</option>
-                        <option value="unassigned">Unassigned</option>
                     </select>
                     <select value={inquirySort} onChange={(event) => setInquirySort(event.target.value)} className="staff-control">
                         <option value="eventDateAsc">Event date ascending</option>
@@ -1572,8 +1952,14 @@ const DashboardMarketing = () => {
                 {(
                     <div className="marketing-panel overflow-hidden">
                         <ul className="divide-y divide-amber-100/70">
-                            {pendingBookings.length === 0 ? <li className="p-8 text-gray-500 text-center">No pending inquiries.</li> : null}
-                            {pagedPendingBookings.map(booking => (
+                            {pendingBookings.length === 0 ? <li className="p-8 text-gray-500 text-center">No bookings match this view.</li> : null}
+                            {pagedPendingBookings.map(booking => {
+                                const canEdit = canEditBooking(booking);
+                                const canClaim = canClaimBooking(booking);
+                                const pendingTransferToMe = Boolean(booking.can_accept_transfer);
+                                const hasPendingTransfer = Boolean(booking.transfer_requested_to);
+                                const isClaimQueue = bookingReviewView === 'claim';
+                                return (
                                 <li key={booking.id} onClick={() => setSelectedBooking(booking)} className="block cursor-pointer transition-colors hover:bg-[#fffaf3]">
                                     <div className="px-6 py-5">
                                         <div className="flex items-center justify-between">
@@ -1587,7 +1973,9 @@ const DashboardMarketing = () => {
                                             </div>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
-                                            <span>Owner: {booking.assigned_name || 'Unassigned'}</span>
+                                            <span>Owner: {booking.owner_name || booking.assigned_name || 'Unassigned'}</span>
+                                            {hasPendingTransfer && <span className="text-[#9f6500]">Transfer requested to {booking.transfer_requested_to_name || 'Marketing staff'}</span>}
+                                            {!canEdit && <span className="text-amber-700">{pendingTransferToMe ? 'Accept this transfer to take ownership' : canClaim ? 'Claim this booking to take action' : 'Owned by another staff member'}</span>}
                                             {booking.clarification_request && (
                                                 <span className="text-[#9f6500]">
                                                     {booking.clarification_response ? 'Customer responded' : 'Waiting for customer details'}
@@ -1602,7 +1990,7 @@ const DashboardMarketing = () => {
                                                 </p>
                                                 <p className="flex items-center text-sm text-gray-600">
                                                     <svg className="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                                    {booking.pax} pax
+                                                    {booking.pax} guests
                                                 </p>
                                                 <p className="flex items-center text-sm text-gray-600">
                                                     <svg className="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -1610,49 +1998,77 @@ const DashboardMarketing = () => {
                                                 </p>
                                             </div>
                                             <div className="mt-4 flex items-center text-sm sm:mt-0 space-x-3">
-                                                {!booking.assigned_to && (
+                                                {canClaim && (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
                                                         className="inline-flex items-center gap-1.5 rounded-lg border border-[#720101]/15 bg-white px-4 py-1.5 font-bold text-[#720101] transition-colors hover:bg-[#720101]/5"
                                                     >
-                                                        Claim
+                                                        Claim booking
                                                     </button>
                                                 )}
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); requestClarification(booking.id); }}
-                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-4 py-1.5 font-bold text-[#9f6500] transition-colors hover:bg-[#fff0cf]"
-                                                >
-                                                    Ask details
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Confirmed'); }}
-                                                    disabled={!!updatingBookingIds[booking.id]}
-                                                    className={`inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-1.5 font-bold text-emerald-700 transition-colors hover:bg-emerald-100${updatingBookingIds[booking.id] ? ' opacity-60 cursor-not-allowed' : ''}`}
-                                                >
-                                                    {updatingBookingIds[booking.id] === 'Confirmed' ? (
-                                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                                                    ) : (
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                    )}
-                                                    Approve
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Cancelled'); }}
-                                                    disabled={!!updatingBookingIds[booking.id]}
-                                                    className={`inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-1.5 font-bold text-rose-700 transition-colors hover:bg-rose-100${updatingBookingIds[booking.id] ? ' opacity-60 cursor-not-allowed' : ''}`}
-                                                >
-                                                    {updatingBookingIds[booking.id] === 'Cancelled' ? (
-                                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                                                    ) : (
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                                    )}
-                                                    Reject
-                                                </button>
+                                                {pendingTransferToMe && (
+                                                    <>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); respondToTransfer(booking.id, 'accept'); }}
+                                                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-1.5 font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
+                                                        >
+                                                            Accept transfer
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); respondToTransfer(booking.id, 'decline'); }}
+                                                            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-1.5 font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                                                        >
+                                                            Decline
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {canEdit && booking.assigned_to && !['Completed'].includes(booking.status) && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); releaseBooking(booking.id); }}
+                                                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-1.5 font-bold text-slate-600 transition-colors hover:bg-slate-50"
+                                                    >
+                                                        Unclaim
+                                                    </button>
+                                                )}
+                                                {canEdit && !isClaimQueue && (
+                                                    <>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); requestClarification(booking.id); }}
+                                                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-4 py-1.5 font-bold text-[#9f6500] transition-colors hover:bg-[#fff0cf]"
+                                                        >
+                                                            {user?.role === 'Admin' && !booking.assigned_to ? 'Override details' : 'Ask details'}
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Confirmed'); }}
+                                                            disabled={!!updatingBookingIds[booking.id]}
+                                                            className={`inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-1.5 font-bold text-emerald-700 transition-colors hover:bg-emerald-100${updatingBookingIds[booking.id] ? ' opacity-60 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            {updatingBookingIds[booking.id] === 'Confirmed' ? (
+                                                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                                                            ) : (
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            {user?.role === 'Admin' && !booking.assigned_to ? 'Override approve' : 'Approve'}
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Cancelled'); }}
+                                                            disabled={!!updatingBookingIds[booking.id]}
+                                                            className={`inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-1.5 font-bold text-rose-700 transition-colors hover:bg-rose-100${updatingBookingIds[booking.id] ? ' opacity-60 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            {updatingBookingIds[booking.id] === 'Cancelled' ? (
+                                                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                                                            ) : (
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            )}
+                                                            {user?.role === 'Admin' && !booking.assigned_to ? 'Override reject' : 'Reject'}
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
                                 </li>
-                            ))}
+                            );})}
                         </ul>
                         <StaffPagination page={inquiryPage} perPage={inquiryPerPage} total={pendingBookings.length} onPageChange={setInquiryPage} onPerPageChange={setInquiryPerPage} />
                     </div>
@@ -1662,6 +2078,11 @@ const DashboardMarketing = () => {
     };
 
     const generatePDF = (booking, type) => {
+        if (type === 'Kitchen Prep List') {
+            window.location.href = `/documents/bookings/${booking.id}/preparation.pdf`;
+            return;
+        }
+
         let menuHTML = '';
         if (type === 'Kitchen Prep List' && booking.selected_menu) {
             try {
@@ -1715,7 +2136,7 @@ const DashboardMarketing = () => {
                         <p><strong>Client:</strong> ${booking.client_full_name || booking.username}</p>
                         <p><strong>Email:</strong> ${booking.client_email || 'N/A'}</p>
                         <p><strong>Phone:</strong> ${booking.client_phone || 'N/A'}</p>
-                        <p><strong>Pax:</strong> ${booking.pax}</p>
+                        <p><strong>Guests:</strong> ${booking.pax}</p>
                         <p><strong>Venue:</strong> ${[booking.venue_address_line, booking.venue_street, booking.venue_city, booking.venue_province, booking.venue_zip_code].filter(Boolean).join(', ') || 'N/A'}</p>
                         ${booking.special_instructions ? `<p><strong>Special Notes:</strong> ${booking.special_instructions}</p>` : ''}
                         
@@ -1794,11 +2215,71 @@ const DashboardMarketing = () => {
     const renderSettings = () => {
         const categories = ['starter', 'main', 'side', 'dessert', 'drink'];
         const visibleItems = menuItems.filter(item => item.category === activeMenuCategory);
+        const catalogMeta = {
+            packages: {
+                title: 'Packages',
+                text: 'Manage package presets, pricing, connected event types, and customer-facing details.',
+                action: editingPackageId ? 'Edit package' : 'Create package',
+            },
+            eventTypes: {
+                title: 'Event Types',
+                text: 'Manage the event categories used by booking flows and package presets.',
+                action: editingEventTypeId ? 'Edit event type' : 'Create event type',
+            },
+            menuItems: {
+                title: 'Menu Items',
+                text: 'Review menu items by category and update pricing values quickly.',
+                action: null,
+            },
+        };
+        const activeCatalogMeta = catalogMeta[activeConfigTab] || catalogMeta.packages;
+        const openPackageDrawer = (pkg = null) => {
+            if (pkg) {
+                startEditingPackage(pkg);
+            } else {
+                resetPackageForm();
+            }
+            setCatalogDrawer('package');
+        };
+        const openEventTypeDrawer = (eventType = null) => {
+            if (eventType) {
+                startEditingEventType(eventType);
+            } else {
+                resetEventTypeForm();
+            }
+            setCatalogDrawer('eventType');
+        };
+        const closeCatalogDrawer = () => {
+            if (catalogDrawer === 'package') resetPackageForm();
+            if (catalogDrawer === 'eventType') resetEventTypeForm();
+            setCatalogDrawer(null);
+        };
+        const togglePackageEventType = (slug) => {
+            const current = packageForm.event_type_slugs || [];
+            const next = current.includes(slug) ? current.filter(item => item !== slug) : [...current, slug];
+            setPackageForm({ ...packageForm, event_type_slugs: next });
+        };
 
         return (
             <>
             <div className="marketing-panel overflow-hidden">
-                <div className="border-b border-amber-100/80 bg-[#fffaf3] px-6 pt-2">
+                <div className="staff-catalog-head">
+                    <div>
+                        <p className="marketing-kicker">Catalog setup</p>
+                        <h3 className="staff-section-title">{activeCatalogMeta.title}</h3>
+                        <p className="staff-section-copy">{activeCatalogMeta.text}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <a href={activeConfigTab === 'packages' ? '/preview/packages' : '/preview/menu'} target="_blank" rel="noreferrer" className="staff-button-secondary">Preview as customer</a>
+                        {activeConfigTab === 'packages' && (
+                            <button type="button" onClick={() => openPackageDrawer()} className="staff-button-primary">Create package</button>
+                        )}
+                        {activeConfigTab === 'eventTypes' && (
+                            <button type="button" onClick={() => openEventTypeDrawer()} className="staff-button-primary">Create event type</button>
+                        )}
+                    </div>
+                </div>
+                <div className="staff-catalog-tabs">
                     <nav className="flex gap-2 overflow-x-auto">
                         {[
                             ['packages', 'Packages'],
@@ -1808,7 +2289,7 @@ const DashboardMarketing = () => {
                             <button
                                 key={key}
                                 onClick={() => setActiveConfigTab(key)}
-                                className={`whitespace-nowrap rounded-t-lg px-4 py-3 text-sm font-black transition-colors ${activeConfigTab === key ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-500 hover:bg-white/70 hover:text-gray-800'}`}
+                                className={`staff-catalog-tab ${activeConfigTab === key ? 'is-active' : ''}`}
                             >
                                 {label}
                             </button>
@@ -1818,49 +2299,6 @@ const DashboardMarketing = () => {
 
                 {activeConfigTab === 'packages' && (
                     <div>
-                        <form onSubmit={handlePackageSubmit} className="border-b border-gray-100 p-6">
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                                <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
-                                    {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
-                                </select>
-                                <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
-                                    {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
-                                <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Min pax" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <button disabled={settingsSaving} className="lg:col-span-1 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : editingPackageId ? 'Save' : 'Create'}</button>
-                                <label className="lg:col-span-4 text-xs font-black uppercase tracking-wide text-slate-500">
-                                    Connected event types
-                                    <select multiple value={packageForm.event_type_slugs || []} onChange={e => setPackageForm({ ...packageForm, event_type_slugs: Array.from(e.target.selectedOptions).map(option => option.value) })} className="mt-2 min-h-28 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium normal-case outline-none focus:ring-2 focus:ring-primary-100">
-                                        {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
-                                    </select>
-                                </label>
-                                <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
-                                    {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
-                                <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <div className="lg:col-span-12 grid grid-cols-2 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-4 md:grid-cols-5">
-                                    {[
-                                        ['starter', 'Starters'],
-                                        ['main', 'Main Dish'],
-                                        ['side', 'Sides'],
-                                        ['dessert', 'Dessert'],
-                                        ['drink', 'Refreshments'],
-                                    ].map(([key, label]) => (
-                                        <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
-                                            {label}
-                                            <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold normal-case outline-none focus:ring-2 focus:ring-primary-100" />
-                                        </label>
-                                    ))}
-                                </div>
-                                {editingPackageId && <button type="button" onClick={resetPackageForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Package Edit</button>}
-                            </div>
-                        </form>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
@@ -1870,7 +2308,7 @@ const DashboardMarketing = () => {
                                         <th className="px-6 py-4 text-left">Category</th>
                                         <th className="px-6 py-4 text-left">Connected To</th>
                                         <th className="px-6 py-4 text-right">Price / Head</th>
-                                        <th className="px-6 py-4 text-right">Min Pax</th>
+                                        <th className="px-6 py-4 text-right">Minimum Guests</th>
                                         <th className="px-6 py-4 text-left">Description</th>
                                         <th className="px-6 py-4 text-right">Actions</th>
                                     </tr>
@@ -1886,7 +2324,7 @@ const DashboardMarketing = () => {
                                             <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
                                             <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
                                             <td className="px-6 py-4 text-right">
-                                                <button type="button" onClick={() => startEditingPackage(pkg)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
+                                                <button type="button" onClick={() => openPackageDrawer(pkg)} className="staff-row-action">Edit</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -1898,26 +2336,6 @@ const DashboardMarketing = () => {
 
                 {activeConfigTab === 'eventTypes' && (
                     <div>
-                        <form onSubmit={handleEventTypeSubmit} className="border-b border-gray-100 p-6">
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                                <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name (optional)" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <button disabled={settingsSaving} className="lg:col-span-2 rounded-lg bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 disabled:opacity-60">{settingsSaving ? 'Saving...' : editingEventTypeId ? 'Save Type' : 'Create Type'}</button>
-                                <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
-                                    {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
-                                <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="lg:col-span-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100">
-                                    {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
-                                <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" className="lg:col-span-4 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-100" />
-                                {editingEventTypeId && <button type="button" onClick={resetEventTypeForm} className="lg:col-span-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel Edit</button>}
-                            </div>
-                        </form>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
@@ -1941,8 +2359,8 @@ const DashboardMarketing = () => {
                                             <td className="px-6 py-4 text-gray-600">{type.icon}</td>
                                             <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
                                             <td className="px-6 py-4 text-right">
-                                                <button onClick={() => startEditingEventType(type)} className="mr-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50">Edit</button>
-                                                <button onClick={() => handleDeleteEventType(type)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>
+                                                <button type="button" onClick={() => openEventTypeDrawer(type)} className="staff-row-action mr-2">Edit</button>
+                                                <button type="button" onClick={() => handleDeleteEventType(type)} className="staff-row-action staff-row-action-danger">Delete</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -1994,6 +2412,124 @@ const DashboardMarketing = () => {
                     </div>
                 )}
             </div>
+
+            {catalogDrawer && (
+                <div className="staff-drawer-backdrop" role="dialog" aria-modal="true">
+                    <form onSubmit={catalogDrawer === 'package' ? handlePackageSubmit : handleEventTypeSubmit} className="staff-catalog-drawer">
+                        <header className="staff-drawer-header">
+                            <div>
+                                <p className="marketing-kicker">{catalogDrawer === 'package' ? 'Package editor' : 'Event type editor'}</p>
+                                <h3 className="staff-section-title">{catalogDrawer === 'package' ? (editingPackageId ? 'Edit package' : 'Create package') : (editingEventTypeId ? 'Edit event type' : 'Create event type')}</h3>
+                            </div>
+                            <button type="button" onClick={closeCatalogDrawer} className="staff-icon-button" aria-label="Close editor">X</button>
+                        </header>
+                        <div className="staff-drawer-body custom-scrollbar">
+                            {catalogDrawer === 'package' ? (
+                                <>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Basics</p>
+                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                            <input required value={packageForm.name} onChange={e => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Package name" className="staff-control" />
+                                            <select required value={packageForm.type} onChange={e => setPackageForm({ ...packageForm, type: e.target.value, event_type_slugs: packageForm.event_type_slugs?.includes(e.target.value) ? packageForm.event_type_slugs : [...(packageForm.event_type_slugs || []), e.target.value] })} className="staff-control">
+                                                {eventTypes.map(type => <option key={type.id} value={type.slug}>{type.label}</option>)}
+                                            </select>
+                                            <select value={packageForm.package_category} onChange={e => setPackageForm({ ...packageForm, package_category: e.target.value })} className="staff-control">
+                                                {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                            </select>
+                                            <input required type="number" min="0" value={packageForm.base_price_per_head} onChange={e => setPackageForm({ ...packageForm, base_price_per_head: e.target.value })} placeholder="Price / head" className="staff-control" />
+                                            <input required type="number" min="1" value={packageForm.minimum_pax} onChange={e => setPackageForm({ ...packageForm, minimum_pax: e.target.value })} placeholder="Minimum guests" className="staff-control sm:col-span-2" />
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Connected event types</p>
+                                        <div className="staff-checkbox-grid mt-4">
+                                            {eventTypes.map(type => (
+                                                <label key={type.id} className="staff-checkbox-chip">
+                                                    <input type="checkbox" checked={(packageForm.event_type_slugs || []).includes(type.slug)} onChange={() => togglePackageEventType(type.slug)} />
+                                                    <span>{type.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Customer-facing details</p>
+                                        <div className="mt-4 grid gap-3">
+                                            <textarea value={packageForm.description} onChange={e => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" rows={3} className="staff-control" />
+                                            <textarea value={packageForm.inclusions} onChange={e => setPackageForm({ ...packageForm, inclusions: e.target.value })} placeholder="Inclusions, one per line" rows={3} className="staff-control" />
+                                            <textarea value={packageForm.amenities} onChange={e => setPackageForm({ ...packageForm, amenities: e.target.value })} placeholder="Amenities, one per line" rows={3} className="staff-control" />
+                                            <textarea value={packageForm.applicable_setups} onChange={e => setPackageForm({ ...packageForm, applicable_setups: e.target.value })} placeholder="Applicable setup notes, one per line" rows={3} className="staff-control" />
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Menu structure</p>
+                                        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                                            {[
+                                                ['starter', 'Starters'],
+                                                ['main', 'Main'],
+                                                ['side', 'Sides'],
+                                                ['dessert', 'Dessert'],
+                                                ['drink', 'Drinks'],
+                                            ].map(([key, label]) => (
+                                                <label key={key} className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                                    {label}
+                                                    <input type="number" min="0" value={packageForm.menu_structure?.[key] ?? 0} onChange={e => setPackageForm({ ...packageForm, menu_structure: { ...(packageForm.menu_structure || {}), [key]: Number(e.target.value || 0) } })} className="staff-control mt-2" />
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Security term</p>
+                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                            <select value={packageForm.security_type} onChange={e => setPackageForm({ ...packageForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="staff-control">
+                                                {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                            </select>
+                                            <input value={packageForm.security_label} onChange={e => setPackageForm({ ...packageForm, security_label: e.target.value })} placeholder="Security label" className="staff-control" />
+                                        </div>
+                                    </section>
+                                </>
+                            ) : (
+                                <>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Basics</p>
+                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                            <input required value={eventTypeForm.label} onChange={e => setEventTypeForm({ ...eventTypeForm, label: e.target.value })} placeholder="Event type name" className="staff-control" />
+                                            <input value={eventTypeForm.slug} onChange={e => setEventTypeForm({ ...eventTypeForm, slug: e.target.value })} placeholder="Short name" className="staff-control" />
+                                            <select value={eventTypeForm.package_category} onChange={e => setEventTypeForm({ ...eventTypeForm, package_category: e.target.value })} className="staff-control sm:col-span-2">
+                                                {PACKAGE_CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                            </select>
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Display</p>
+                                        <div className="mt-4 grid gap-3">
+                                            <input value={eventTypeForm.icon} onChange={e => setEventTypeForm({ ...eventTypeForm, icon: e.target.value })} placeholder="Icon name" className="staff-control" />
+                                            <input value={eventTypeForm.image} onChange={e => setEventTypeForm({ ...eventTypeForm, image: e.target.value })} placeholder="Image link" className="staff-control" />
+                                            <textarea value={eventTypeForm.description} onChange={e => setEventTypeForm({ ...eventTypeForm, description: e.target.value })} placeholder="Description" rows={3} className="staff-control" />
+                                        </div>
+                                    </section>
+                                    <section className="staff-drawer-section">
+                                        <p className="staff-section-title">Security and notes</p>
+                                        <div className="mt-4 grid gap-3">
+                                            <select value={eventTypeForm.security_type} onChange={e => setEventTypeForm({ ...eventTypeForm, security_type: e.target.value, security_label: e.target.value === 'contingency' ? '10% Contingency' : 'Php 1,500 Cash Bond' })} className="staff-control">
+                                                {SECURITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                            </select>
+                                            <input value={eventTypeForm.security_label} onChange={e => setEventTypeForm({ ...eventTypeForm, security_label: e.target.value })} placeholder="Security label" className="staff-control" />
+                                            <textarea value={eventTypeForm.applicable_setups} onChange={e => setEventTypeForm({ ...eventTypeForm, applicable_setups: e.target.value })} placeholder="Applicable setups, one per line" rows={3} className="staff-control" />
+                                            <textarea value={eventTypeForm.security_description} onChange={e => setEventTypeForm({ ...eventTypeForm, security_description: e.target.value })} placeholder="Security term explanation" rows={3} className="staff-control" />
+                                        </div>
+                                    </section>
+                                </>
+                            )}
+                        </div>
+                        <footer className="staff-drawer-footer flex justify-end gap-2">
+                            <button type="button" onClick={closeCatalogDrawer} className="staff-button-secondary">Cancel</button>
+                            <button type="submit" disabled={settingsSaving} className="staff-button-primary">
+                                {settingsSaving ? 'Saving...' : catalogDrawer === 'package' ? (editingPackageId ? 'Save package' : 'Create package') : (editingEventTypeId ? 'Save event type' : 'Create event type')}
+                            </button>
+                        </footer>
+                    </form>
+                </div>
+            )}
 
             {false && <>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -2087,14 +2623,15 @@ const DashboardMarketing = () => {
     };
 
     if (loading) return (
-        <div className="marketing-page flex min-h-screen items-center justify-center p-6">
-            <div className="marketing-panel w-full max-w-md p-8 text-center">
-                <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-amber-100 border-t-primary-700"></div>
-                <p className="marketing-kicker">Marketing Workspace</p>
-                <h1 className="mt-2 text-2xl font-bold text-slate-950">Loading marketing workspace</h1>
-                <p className="mt-2 text-sm font-medium text-slate-500">Pulling event schedules, lead queues, and catalog controls.</p>
-            </div>
-        </div>
+        <StaffWorkspaceSkeleton
+            title="Marketing Workspace"
+            roleLabel="Marketing team"
+            label="Preparing marketing workspace"
+            navGroups={[
+                { label: 'Daily work', items: ['Today', 'Booking Reviews', 'Guest Inquiries', 'Event Calendar', 'Event Preparation', 'Messages'] },
+                { label: 'Operations', items: ['Date Availability', 'Event Documents', 'Announcements', 'Menu & Packages', 'Event History'] },
+            ]}
+        />
     );
 
     return (
@@ -2110,20 +2647,21 @@ const DashboardMarketing = () => {
                     label: 'Daily work',
                      items: [
                          { id: 'today', label: 'Today', count: marketingSummary.pending + marketingSummary.needsDetails },
-                         { id: 'intake', label: 'Intake', count: dashboardSummary.pending },
+                         { id: 'intake', label: 'Booking Reviews', count: dashboardSummary.pending },
                         { id: 'leads', label: 'Guest Inquiries', count: leadData.summary?.open || 0 },
-                         { id: 'calendar', label: 'Calendar', count: dashboardSummary.monthEvents },
-                        { id: 'preparation', label: 'Preparation', count: marketingSummary.upcoming },
+                         { id: 'calendar', label: 'Event Calendar', count: dashboardSummary.monthEvents },
+                        { id: 'preparation', label: 'Event Preparation', count: marketingSummary.upcoming },
                         { id: 'messages', label: 'Messages' },
                     ],
                 },
                 {
                     label: 'Operations',
                     items: [
-                        { id: 'availability', label: 'Availability' },
-                        { id: 'documents', label: 'Documents' },
+                        { id: 'availability', label: 'Date Availability' },
+                        { id: 'documents', label: 'Event Documents' },
                         { id: 'content', label: 'Announcements' },
-                        { id: 'settings', label: 'Menu Setup' },
+                        { id: 'settings', label: 'Menu & Packages' },
+                        { id: 'history', label: 'Event History' },
                     ],
                 },
             ]}
@@ -2150,6 +2688,13 @@ const DashboardMarketing = () => {
                                 </h2>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
+                                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                                    {['month', 'list'].map((view) => (
+                                        <button key={view} type="button" onClick={() => setCalendarView(view)} className={`rounded-md px-3 py-1.5 text-xs font-black uppercase tracking-widest ${calendarView === view ? 'bg-[#720101] text-white' : 'text-slate-500 hover:text-slate-900'}`}>
+                                            {view}
+                                        </button>
+                                    ))}
+                                </div>
                                 <button
                                     onClick={() => setShowExportModal(true)}
                                     className="marketing-primary-btn flex items-center px-4 py-2 text-sm"
@@ -2171,14 +2716,33 @@ const DashboardMarketing = () => {
                                 </button>
                             </div>
                         </div>
-                        <div className="grid grid-cols-7 overflow-hidden rounded-2xl border border-amber-100 bg-amber-100/70">
-                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                                <div key={day} className="bg-[#fffaf3] py-3 text-center text-xs font-black uppercase tracking-wide text-slate-500">
-                                    {day}
-                                </div>
-                            ))}
-                            {renderCalendar()}
+                        <div className="mb-4 grid gap-3 lg:grid-cols-4">
+                            <input value={calendarFilters.search} onChange={(event) => setCalendarFilters(prev => ({ ...prev, search: event.target.value }))} placeholder="Search client, event, or city" className="staff-control" />
+                            <select value={calendarFilters.status} onChange={(event) => setCalendarFilters(prev => ({ ...prev, status: event.target.value }))} className="staff-control">
+                                <option value="">All statuses</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Confirmed">Confirmed</option>
+                                <option value="Reserved">Reserved</option>
+                                <option value="Completed">Completed</option>
+                            </select>
+                            <input value={calendarFilters.event_type} onChange={(event) => setCalendarFilters(prev => ({ ...prev, event_type: event.target.value }))} placeholder="Event type" className="staff-control" />
+                            <input value={calendarFilters.city} onChange={(event) => setCalendarFilters(prev => ({ ...prev, city: event.target.value }))} placeholder="City / venue" className="staff-control" />
                         </div>
+                        {calendarView === 'month' ? (
+                            <div className="grid grid-cols-7 overflow-hidden rounded-2xl border border-amber-100 bg-amber-100/70">
+                                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                                    <div key={day} className="bg-[#fffaf3] py-3 text-center text-xs font-black uppercase tracking-wide text-slate-500">
+                                        {day}
+                                    </div>
+                                ))}
+                                {renderCalendar()}
+                            </div>
+                        ) : renderCalendarList()}
+                        {calendarLoading ? (
+                            <p className="mt-4 rounded-xl bg-[#fffaf3] p-4 text-sm font-bold text-slate-500">Loading calendar events...</p>
+                        ) : dashboardSummary.monthEvents === 0 ? (
+                            <p className="mt-4 rounded-xl bg-[#fffaf3] p-4 text-sm font-bold text-slate-500">No scheduled marketing events for this month.</p>
+                        ) : null}
                     </div>
                 )}
 
@@ -2186,19 +2750,22 @@ const DashboardMarketing = () => {
                 {activeTab === 'leads' && renderPublicLeads()}
                 {activeTab === 'availability' && renderAvailability()}
                 {activeTab === 'preparation' && (
-                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading preparation board...</div>}>
+                    <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading preparation board" />}>
                         <PreparationBoard />
                     </Suspense>
                 )}
                 {activeTab === 'documents' && renderDocuments()}
                 {activeTab === 'content' && (
-                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading content tools...</div>}>
+                    <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading content tools" />}>
                         <AnnouncementManager user={user} />
                     </Suspense>
                 )}
                 {activeTab === 'settings' && renderSettings()}
+                {activeTab === 'history' && (
+                    <EventHistoryPanel role="marketing" onToast={(message, type) => type === 'error' ? toast.error(message) : toast.success(message)} />
+                )}
                 {activeTab === 'messages' && (
-                    <Suspense fallback={<div className="rounded-2xl border border-[#ead8cc] bg-white p-6 text-sm font-bold text-slate-500">Loading messages...</div>}>
+                    <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading messages" />}>
                         <StaffMessaging />
                     </Suspense>
                 )}

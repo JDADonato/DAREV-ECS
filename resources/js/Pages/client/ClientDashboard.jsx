@@ -836,11 +836,87 @@ const ClientDashboard = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#faf7f2]">
-                <div className="text-center">
-                    <div className="animate-spin w-10 h-10 border-4 border-[#720101] border-t-transparent rounded-full mx-auto mb-4"></div>
-                    <p className="text-gray-500 font-medium tracking-wide">Loading your dashboard...</p>
-                </div>
+            <div className="min-h-screen bg-[#f7f4ee] font-sans">
+                <ClientNavbar user={user} logout={logout} />
+
+                <main className="relative mx-auto max-w-7xl px-5 py-8 sm:px-8" style={{ paddingTop: 100 }}>
+                    <div className="mb-8 rounded-3xl bg-[#1a1a1a] p-6 text-white shadow-xl shadow-black/10 sm:p-8">
+                        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                            <div className="min-w-0 flex-1">
+                                <div className="h-3 w-32 animate-pulse rounded-full bg-[#f0aa0b]/35" />
+                                <div className="mt-4 h-10 w-full max-w-xl animate-pulse rounded-full bg-white/14" />
+                                <div className="mt-4 h-4 w-full max-w-2xl animate-pulse rounded-full bg-white/10" />
+                                <div className="mt-2 h-4 w-3/5 animate-pulse rounded-full bg-white/10" />
+                            </div>
+                            <div className="grid min-w-full gap-3 sm:grid-cols-3 lg:min-w-[520px]">
+                                {[0, 1, 2].map((item) => (
+                                    <div key={item} className="rounded-2xl bg-white/10 p-4">
+                                        <div className="h-3 w-16 animate-pulse rounded-full bg-white/20" />
+                                        <div className="mt-3 h-7 w-24 animate-pulse rounded-full bg-white/18" />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-8 lg:flex-row">
+                        <aside className="w-full flex-shrink-0 space-y-6 lg:w-64">
+                            <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                                {[0, 1, 2, 3, 4].map((item) => (
+                                    <div key={item} className={`flex items-center gap-3 border-l-4 px-5 py-4 ${item === 0 ? 'border-[#720101] bg-[#720101]/5' : 'border-transparent'}`}>
+                                        <span className="h-5 w-5 animate-pulse rounded-md bg-[#ead8cc]" />
+                                        <span className={`h-4 animate-pulse rounded-full bg-[#eee7df] ${item === 2 ? 'w-28' : 'w-24'}`} />
+                                        {item === 0 && <span className="ml-auto h-2.5 w-2.5 rounded-full bg-[#f0aa0b]/70" />}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="space-y-3 border-t border-gray-200 pt-4">
+                                <div className="h-12 animate-pulse rounded-xl border border-gray-200 bg-white" />
+                                <div className="h-12 animate-pulse rounded-xl bg-red-50" />
+                            </div>
+                        </aside>
+
+                        <section className="min-w-0 flex-1 space-y-6">
+                            <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
+                                <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="h-9 w-full max-w-md animate-pulse rounded-full bg-[#eee7df]" />
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            <div className="h-5 w-36 animate-pulse rounded-full bg-[#f1e5dc]" />
+                                            <div className="h-5 w-24 animate-pulse rounded-full bg-[#f1e5dc]" />
+                                            <div className="h-5 w-20 animate-pulse rounded-full bg-[#f1e5dc]" />
+                                        </div>
+                                    </div>
+                                    <div className="text-left sm:text-right">
+                                        <div className="h-3 w-20 animate-pulse rounded-full bg-[#ead8cc] sm:ml-auto" />
+                                        <div className="mt-3 h-9 w-36 animate-pulse rounded-full bg-[#eee7df]" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm sm:p-7">
+                                <div className="flex flex-col gap-4 border-b border-gray-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <div className="h-3 w-28 animate-pulse rounded-full bg-[#ead8cc]" />
+                                        <div className="mt-3 h-8 w-52 animate-pulse rounded-full bg-[#eee7df]" />
+                                    </div>
+                                    <div className="h-11 w-32 animate-pulse rounded-xl bg-[#720101]/12" />
+                                </div>
+
+                                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                                    {[0, 1, 2, 3].map((item) => (
+                                        <div key={item} className="rounded-2xl border border-gray-100 bg-[#faf7f2]/40 p-5">
+                                            <div className="h-3 w-24 animate-pulse rounded-full bg-[#ead8cc]" />
+                                            <div className="mt-4 h-6 w-44 animate-pulse rounded-full bg-[#eee7df]" />
+                                            <div className="mt-4 h-3 w-full animate-pulse rounded-full bg-[#f1e5dc]" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </main>
             </div>
         );
     }

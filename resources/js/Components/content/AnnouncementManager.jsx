@@ -12,6 +12,7 @@ import {
     Trash2,
     X,
 } from 'lucide-react';
+import StaffSkeleton from '../staff/StaffSkeleton';
 
 const emptyForm = {
     title: '',
@@ -631,7 +632,9 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                     </div>
 
                     {loading ? (
-                        <div className="p-8 text-center text-sm font-bold text-slate-400">Loading announcements...</div>
+                        <div className="p-5">
+                            <StaffSkeleton rows={5} label="Loading announcements" />
+                        </div>
                     ) : filteredItems.length === 0 ? (
                         <div className="p-8 text-center text-sm font-bold text-slate-400">No announcements match this view.</div>
                     ) : (

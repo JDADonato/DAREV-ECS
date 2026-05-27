@@ -12,9 +12,7 @@ class BookingConfirmedNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(
-        public Booking $booking
-    ) {}
+    public function __construct(public Booking $booking) {}
 
     public function via(object $notifiable): array
     {
@@ -23,23 +21,27 @@ class BookingConfirmedNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $eventDate = $this->booking->event_date;
-        $pax = $this->booking->pax;
+        $eventDate = \Carbon\Carbon::parse($this->booking->event_date)->format('F j, Y');
+        $reference = str_pad($this->booking->id, 5, '0', STR_PAD_LEFT);
 
         return (new MailMessage)
             ->subject('Booking Confirmed - Eloquente Catering')
-            ->greeting("Hello {$notifiable->username}!")
-            ->line("Your catering booking has been confirmed!")
-            ->line("Event Date: " . \Carbon\Carbon::parse($eventDate)->format('F j, Y'))
-            ->line("Number of Guests: {$pax}")
-            ->line("Booking Reference: #" . str_pad($this->booking->id, 5, '0', STR_PAD_LEFT))
-            ->line("Total Amount: ₱" . number_format($this->booking->total_cost, 2))
-            ->action('View Booking Details', route('dashboard.client'))
-            ->line("\nPayment Schedule:")
-            ->line("• Reservation (10%): Due Immediately")
-            ->line("• Down Payment (70%): Due 1 month before event")
-            ->line("• Final Payment (20%): Due 10 days before event")
-            ->line('Thank you for choosing Eloquente Catering!');
+            ->view('emails.generic', [
+                'emailTitle' => 'Booking confirmed',
+                'headline' => 'Your booking is confirmed',
+                'preheader' => 'Your Eloquente Catering booking has been confirmed.',
+                'greeting' => "Hello {$notifiable->username},",
+                'lines' => ['Your catering booking has been confirmed. Your payment schedule is now available from your dashboard.'],
+                'details' => [
+                    'Event date' => $eventDate,
+                    'Guests' => $this->booking->pax,
+                    'Booking reference' => "#{$reference}",
+                    'Total amount' => 'PHP ' . number_format((float) $this->booking->total_cost, 2),
+                ],
+                'ctaLabel' => 'View booking',
+                'ctaUrl' => route('dashboard.client'),
+                'note' => 'Thank you for choosing Eloquente Catering.',
+            ]);
     }
 
     public function toDatabase(object $notifiable): array

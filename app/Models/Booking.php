@@ -37,6 +37,9 @@ class Booking extends Model
         'status',
         'review_status',
         'assigned_to',
+        'transfer_requested_to',
+        'transfer_requested_by',
+        'transfer_requested_at',
         'clarification_request',
         'clarification_response',
         'clarification_requested_at',
@@ -47,6 +50,9 @@ class Booking extends Model
         'special_instructions',
         'selected_menu',
         'live_status',
+        'post_event_status',
+        'closed_at',
+        'closed_by',
         'transport_fee',
         'labor_surcharge',
         'discount_value',
@@ -66,6 +72,8 @@ class Booking extends Model
             'clarification_requested_at' => 'datetime',
             'clarification_responded_at' => 'datetime',
             'reviewed_at' => 'datetime',
+            'transfer_requested_at' => 'datetime',
+            'closed_at' => 'datetime',
             'total_cost' => 'decimal:2',
             'transport_fee' => 'decimal:2',
             'labor_surcharge' => 'decimal:2',
@@ -114,6 +122,16 @@ class Booking extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    public function transferRequestedTo()
+    {
+        return $this->belongsTo(User::class, 'transfer_requested_to');
+    }
+
+    public function transferRequestedBy()
+    {
+        return $this->belongsTo(User::class, 'transfer_requested_by');
+    }
+
     public function reviewTasks()
     {
         return $this->hasMany(BookingReviewTask::class);
@@ -137,6 +155,21 @@ class Booking extends Model
     public function feedbackRequest()
     {
         return $this->hasOne(FeedbackRequest::class);
+    }
+
+    public function feedbackResponses()
+    {
+        return $this->hasMany(FeedbackResponse::class);
+    }
+
+    public function historyNotes()
+    {
+        return $this->hasMany(BookingHistoryNote::class);
+    }
+
+    public function closedBy()
+    {
+        return $this->belongsTo(User::class, 'closed_by');
     }
 
     // ─── Helpers ───

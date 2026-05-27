@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Booking;
+use App\Models\Conversation;
 use App\Models\MenuItem;
+use App\Models\Message;
 use App\Models\Payment;
 use App\Models\User;
+use App\Http\Resources\BookingSummaryResource;
 use App\Mail\BookingContinuationReminder;
 use App\Notifications\NewBookingNotification;
 use App\Services\BookingValidationService;
@@ -369,6 +372,10 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking not found.'], 404);
         }
 
+        if (in_array($booking->status, ['Cancelled', 'cancelled', 'Completed', 'completed'], true)) {
+            return response()->json(['error' => 'This booking can no longer be edited.'], 400);
+        }
+
         $themeUploads = $request->theme_uploads;
         if (is_array($themeUploads)) {
             $themeUploads = json_encode($themeUploads);
@@ -386,6 +393,22 @@ class BookingController extends Controller
                 ? $this->normalizeJsonPayload($request->selected_menu)
                 : $booking->selected_menu,
         ]);
+
+        $conversation = Conversation::where('booking_id', $booking->id)
+            ->where('client_id', $userId)
+            ->where('status', 'active')
+            ->first();
+
+        if ($conversation) {
+            Message::create([
+                'conversation_id' => $conversation->id,
+                'sender_id' => $userId,
+                'receiver_id' => $conversation->staff_id ?: $userId,
+                'message' => 'Booking details were updated.',
+                'message_type' => 'system',
+                'metadata' => ['booking_id' => $booking->id, 'event' => 'booking_details_updated'],
+            ]);
+        }
 
         return response()->json(['message' => 'Event details updated successfully!']);
     }
@@ -564,8 +587,8 @@ class BookingController extends Controller
             return response()->json(['error' => 'Booking not found.'], 404);
         }
 
-        if ($booking->status === 'Cancelled') {
-            return response()->json(['error' => 'Cannot edit a cancelled booking.'], 400);
+        if (in_array($booking->status, ['Cancelled', 'cancelled', 'Completed', 'completed'], true)) {
+            return response()->json(['error' => 'This booking can no longer be edited.'], 400);
         }
 
         // Check 7-day rule and 48-hour grace period
@@ -662,6 +685,16 @@ class BookingController extends Controller
         return response()->json([
             'error' => 'Manual payment confirmation is retired. Please use Secure Checkout from your dashboard or contact Accounting so a staff member can review any manual payment proof.',
         ], 410);
+    }
+
+    public function preview(Booking $booking)
+    {
+        $booking->load(['user', 'assignee', 'payments', 'reviewTasks', 'preparationTasks']);
+
+        return response()->json([
+            'preview' => true,
+            'booking' => (new BookingSummaryResource($booking))->resolve(),
+        ]);
     }
 
     private function normalizeJsonPayload(mixed $value): mixed

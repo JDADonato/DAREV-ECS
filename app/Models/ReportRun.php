@@ -19,4 +19,9 @@ class ReportRun extends Model
         'parameters_json' => 'array',
         'result_snapshot_json' => 'array',
     ];
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }

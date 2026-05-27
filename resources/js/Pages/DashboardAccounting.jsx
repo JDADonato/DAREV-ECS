@@ -4,13 +4,17 @@ import { router } from '@inertiajs/react';
 import ReceiptModal from '../Components/common/ReceiptModal';
 import ConfirmModal from '../Components/common/ConfirmModal';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
+import useDebouncedValue from '../hooks/useDebouncedValue';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import { getListData, getPaginationMeta } from '../utils/apiResponses';
 import StaffPagination from '../Components/staff/StaffPagination';
 import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
+import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
+import StaffDrawer from '../Components/staff/StaffDrawer';
+import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import { staffPaymentStatus } from '../utils/statusLabels';
 
 const PAYMENT_TYPE_LABELS = {
@@ -23,6 +27,7 @@ const DashboardAccounting = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('today');
     const [bookings, setBookings] = useState([]);
+    const [accountingSummary, setAccountingSummary] = useState(null);
     const [ledgerPayments, setLedgerPayments] = useState([]);
     const [reconciliationItems, setReconciliationItems] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -33,6 +38,7 @@ const DashboardAccounting = () => {
     const [refundConfirm, setRefundConfirm] = useState({ isOpen: false, bookingId: null, refundAmount: 0 });
     const [refundProcessing, setRefundProcessing] = useState(false);
     const [remindingPaymentId, setRemindingPaymentId] = useState(null);
+    const [selectedFinanceBooking, setSelectedFinanceBooking] = useState(null);
 
     // Refund Management State
     const [refundQueue, setRefundQueue] = useState([]);
@@ -52,13 +58,12 @@ const DashboardAccounting = () => {
     const [bookingPaymentFilter, setBookingPaymentFilter] = useState('all');
     const [bookingPage, setBookingPage] = useState(1);
     const [bookingPagination, setBookingPagination] = useState(null);
+    const debouncedBookingSearchQuery = useDebouncedValue(bookingSearchQuery, 250);
 
     useEffect(() => {
         if (activeTab === 'today') {
-            fetchBookings();
-            fetchLedger({ silent: true });
+            fetchAccountingSummary();
             fetchReconciliation({ silent: true });
-            fetchRefundQueue({ silent: true });
         } else if (activeTab === 'bookings') {
             fetchBookings();
         } else if (activeTab === 'ledger') {
@@ -68,11 +73,11 @@ const DashboardAccounting = () => {
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
         }
-    }, [activeTab, ledgerFilter, bookingPage, bookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
+    }, [activeTab, ledgerFilter, bookingPage, debouncedBookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
 
     useEffect(() => {
         setBookingPage(1);
-    }, [bookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
+    }, [debouncedBookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
 
     useEffect(() => {
         setLedgerPage(1);
@@ -101,10 +106,8 @@ const DashboardAccounting = () => {
             if (activeTab === 'bookings') {
                 fetchBookings({ silent });
             } else if (activeTab === 'today') {
-                fetchBookings({ silent });
-                fetchLedger({ silent: true });
+                fetchAccountingSummary({ silent });
                 fetchReconciliation({ silent: true });
-                fetchRefundQueue({ silent: true });
             } else if (activeTab === 'ledger') {
                 fetchLedger({ silent });
             } else if (activeTab === 'reconciliation') {
@@ -122,7 +125,7 @@ const DashboardAccounting = () => {
             const query = new URLSearchParams({
                 page: bookingPage,
                 per_page: 25,
-                search: bookingSearchQuery,
+                search: debouncedBookingSearchQuery,
                 sort: bookingSortOrder,
                 payment_status: bookingPaymentFilter,
             }).toString();
@@ -211,6 +214,21 @@ const DashboardAccounting = () => {
         };
 
         return { cls: classes[displayStatus.tone] || classes.neutral, text: displayStatus.label };
+    };
+
+    const fetchAccountingSummary = async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
+        try {
+            const res = await fetch('/api/accounting/summary', {
+                headers: { Accept: 'application/json' },
+            });
+            if (!res.ok) throw new Error('Summary load failed');
+            setAccountingSummary(await res.json());
+        } catch (error) {
+            console.error('Error fetching accounting summary:', error);
+        } finally {
+            if (!silent) setLoading(false);
+        }
     };
 
     // Count both manually-verified and PayMongo-auto-paid payments as "paid"
@@ -322,7 +340,7 @@ const DashboardAccounting = () => {
             .reduce((sum, payment) => sum + toMoneyNumber(payment.amount), 0);
         const overdue = pendingPayments.filter((payment) => payment.due_date && new Date(payment.due_date) < new Date());
 
-        return {
+        const localSummary = {
             bookings: bookings.length,
             pending: pendingPayments.length,
             overdue: overdue.length,
@@ -330,22 +348,25 @@ const DashboardAccounting = () => {
             exceptions: reconciliationItems.length,
             collected,
         };
-    }, [bookings, ledgerPayments, refundQueue, reconciliationItems]);
+
+        return accountingSummary ? { ...localSummary, ...accountingSummary } : localSummary;
+    }, [bookings, ledgerPayments, refundQueue, reconciliationItems, accountingSummary]);
 
     const tabMeta = {
         today: 'Today',
-        bookings: 'Payment Verification',
-        ledger: 'Ledger',
-        reconciliation: 'Reconciliation',
-        refunds: 'Refunds',
+        bookings: 'Payment Review',
+        ledger: 'Payment Ledger',
+        reconciliation: 'Payment Issues',
+        refunds: 'Refund Queue',
+        history: 'Event History',
     };
 
     const exceptionLabels = {
-        checkout_started_unpaid: 'Checkout Started, Unpaid',
-        provider_paid_not_local: 'Provider Paid, Not Local',
-        pending_past_due: 'Pending Past Due',
-        missing_paymongo_payment_id_for_refund: 'Missing Refund Reference',
-        webhook_mismatch: 'Webhook Mismatch',
+        checkout_started_unpaid: 'Customer started checkout but did not pay',
+        provider_paid_not_local: 'Online payment needs staff review',
+        pending_past_due: 'Payment is past due',
+        missing_paymongo_payment_id_for_refund: 'Refund needs original payment reference',
+        webhook_mismatch: 'Online payment details do not match',
     };
 
     const getReconciliationAction = (item) => {
@@ -354,7 +375,7 @@ const DashboardAccounting = () => {
         if (exceptions.includes('provider_paid_not_local')) {
             return {
                 label: 'Verify payment',
-                detail: 'Provider payment exists. Confirm it, then mark the local record paid.',
+                detail: 'Online payment exists. Confirm it, then mark the record paid.',
                 tone: 'primary',
                 onClick: () => handleVerify(item.id, 'Verify'),
             };
@@ -373,7 +394,7 @@ const DashboardAccounting = () => {
         if (exceptions.includes('missing_paymongo_payment_id_for_refund')) {
             return {
                 label: 'Open refunds',
-                detail: 'Automatic refund needs the original provider payment ID.',
+                detail: 'Refund processing needs the original payment reference.',
                 tone: 'danger',
                 onClick: () => setActiveTab('refunds'),
             };
@@ -381,7 +402,7 @@ const DashboardAccounting = () => {
 
         return {
             label: 'Review ledger',
-            detail: 'Compare local state against provider references and events.',
+            detail: 'Compare the payment record against online payment details.',
             tone: 'muted',
             onClick: () => setActiveTab('ledger'),
         };
@@ -435,6 +456,237 @@ const DashboardAccounting = () => {
         return paginate(filteredRefundQueue, refundPage, refundPerPage);
     }, [filteredRefundQueue, refundPage, refundPerPage]);
 
+    const renderPaymentActions = (payment, booking) => {
+        const statusInfo = staffPaymentStatus(payment.status, payment.due_date);
+        const isPending = payment.status === 'Pending';
+
+        if (isPending) {
+            return (
+                <div className="flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => handleVerify(payment.id, 'Verify')} className="staff-button-primary px-3 py-2 text-xs">Verify</button>
+                    <button type="button" onClick={() => handleVerify(payment.id, 'Reject')} className="staff-button-danger px-3 py-2 text-xs">Reject</button>
+                    <button
+                        type="button"
+                        onClick={() => handleSendReminder(payment.id)}
+                        disabled={remindingPaymentId === payment.id}
+                        className="staff-button-secondary px-3 py-2 text-xs"
+                    >
+                        {remindingPaymentId === payment.id ? 'Sending...' : 'Remind'}
+                    </button>
+                </div>
+            );
+        }
+
+        if (isPaidStatus(payment.status)) {
+            return (
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                    <StaffStatusBadge tone={statusInfo.tone === 'success' ? 'good' : 'muted'}>{statusInfo.label}</StaffStatusBadge>
+                    <button type="button" onClick={() => setReceiptModal({ isOpen: true, payment, booking })} className="staff-row-action">Receipt</button>
+                </div>
+            );
+        }
+
+        return <span className="text-xs font-bold text-slate-400">No action</span>;
+    };
+
+    const renderVerificationDrawer = () => {
+        if (!selectedFinanceBooking) return null;
+
+        const booking = selectedFinanceBooking;
+        const totalCost = toMoneyNumber(booking.totalCost);
+        const paidAmount = (booking.payments || [])
+            .filter((payment) => isPaidStatus(payment.status))
+            .reduce((sum, payment) => sum + toMoneyNumber(payment.amount), 0);
+        const remainingBalance = Math.max(totalCost - paidAmount, 0);
+
+        return (
+            <StaffDrawer
+                isOpen={Boolean(selectedFinanceBooking)}
+                eyebrow="Payment review"
+                title={`Booking #${booking.id}`}
+                onClose={() => setSelectedFinanceBooking(null)}
+                footer={(
+                    <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setEditPaymentModal({ isOpen: true, payment: booking.payments?.[0] || null, booking })}
+                            className="staff-button-secondary"
+                        >
+                            Edit payment terms
+                        </button>
+                        <button type="button" onClick={() => setSelectedFinanceBooking(null)} className="staff-button-primary">Done</button>
+                    </div>
+                )}
+            >
+                <div className="staff-detail-grid">
+                    <section className="staff-detail-card">
+                        <p className="staff-detail-label">Client</p>
+                        <p className="staff-detail-value">{booking.client_full_name || booking.username || 'Customer'}</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-500">{formatAccountingDate(booking.event_date)} / {booking.pax || 0} guests</p>
+                    </section>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                        <section className="staff-detail-card">
+                            <p className="staff-detail-label">Total</p>
+                            <p className="staff-detail-value">{'P' + totalCost.toLocaleString()}</p>
+                        </section>
+                        <section className="staff-detail-card">
+                            <p className="staff-detail-label">Paid</p>
+                            <p className="staff-detail-value text-emerald-700">{'P' + paidAmount.toLocaleString()}</p>
+                        </section>
+                        <section className="staff-detail-card">
+                            <p className="staff-detail-label">Balance</p>
+                            <p className={`staff-detail-value ${remainingBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{'P' + remainingBalance.toLocaleString()}</p>
+                        </section>
+                    </div>
+                    <section className="staff-detail-card">
+                        <div className="mb-3 flex items-center justify-between">
+                            <div>
+                                <p className="staff-detail-label">Payment schedule</p>
+                                <p className="staff-section-copy">Verify submitted payments, send reminders, or inspect receipts.</p>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="staff-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tier</th>
+                                        <th className="text-right">Amount</th>
+                                        <th>Due</th>
+                                        <th>Status</th>
+                                        <th className="text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(booking.payments || []).map((payment) => {
+                                        const typeInfo = PAYMENT_TYPE_LABELS[payment.payment_type] || { label: payment.payment_type, pct: '', icon: '-' };
+                                        const statusInfo = staffPaymentStatus(payment.status, payment.due_date);
+                                        return (
+                                            <tr key={payment.id}>
+                                                <td>
+                                                    <p className="font-black text-slate-950">{typeInfo.label}</p>
+                                                    <p className="text-xs font-bold text-slate-400">{typeInfo.pct} of total</p>
+                                                </td>
+                                                <td className="text-right font-black text-slate-950">{'P' + toMoneyNumber(payment.amount).toLocaleString()}</td>
+                                                <td>{formatAccountingDate(payment.due_date, '-')}</td>
+                                                <td><StaffStatusBadge tone={statusInfo.tone === 'success' ? 'good' : statusInfo.tone === 'danger' ? 'danger' : 'warn'}>{statusInfo.label}</StaffStatusBadge></td>
+                                                <td className="text-right">{renderPaymentActions(payment, booking)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+            </StaffDrawer>
+        );
+    };
+
+    const renderVerificationQueue = () => (
+        <div className="staff-work-surface">
+            <div className="staff-surface-head">
+                <div>
+                    <p className="marketing-kicker">Payment review queue</p>
+                    <h3 className="mt-1 text-lg font-black text-slate-950">Customer payment records</h3>
+                    <p className="staff-section-copy">Open a booking to verify, reject, remind, or inspect receipts without expanding the whole page.</p>
+                </div>
+                {loading && <StaffStatusBadge tone="muted">Loading</StaffStatusBadge>}
+            </div>
+            <div className="staff-filter-bar">
+                <input
+                    type="text"
+                    placeholder="Search client or booking number"
+                    value={bookingSearchQuery}
+                    onChange={(e) => setBookingSearchQuery(e.target.value)}
+                    className="staff-control"
+                />
+                <select value={bookingSortOrder} onChange={(e) => setBookingSortOrder(e.target.value)} className="staff-control">
+                    <option value="eventDateSoonest">Event date soonest</option>
+                    <option value="eventDateLatest">Event date latest</option>
+                    <option value="bookingNewest">Booking newest</option>
+                    <option value="bookingOldest">Booking oldest</option>
+                    <option value="clientAZ">Client A-Z</option>
+                    <option value="clientZA">Client Z-A</option>
+                </select>
+                <select value={bookingPaymentFilter} onChange={(e) => setBookingPaymentFilter(e.target.value)} className="staff-control">
+                    <option value="all">All payments</option>
+                    <option value="pending">Pending</option>
+                    <option value="complete">Complete</option>
+                </select>
+            </div>
+            {loading && bookings.length === 0 ? (
+                <StaffSkeleton rows={6} />
+            ) : bookings.length === 0 ? (
+                <StaffEmptyState title="No payment records found" message="Try clearing filters or check back when approved bookings have payment schedules." />
+            ) : (
+                <div className="staff-table-wrap">
+                    <table className="staff-table">
+                        <thead>
+                            <tr>
+                                <th>Booking</th>
+                                <th>Client</th>
+                                <th>Event</th>
+                                <th className="text-right">Total</th>
+                                <th className="text-right">Paid</th>
+                                <th>Status</th>
+                                <th className="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {bookings.map((booking) => {
+                                const progress = getBookingProgress(booking.payments);
+                                const totalCost = toMoneyNumber(booking.totalCost);
+                                const paidAmount = (booking.payments || [])
+                                    .filter((payment) => isPaidStatus(payment.status))
+                                    .reduce((sum, payment) => sum + toMoneyNumber(payment.amount), 0);
+                                const hasPending = (booking.payments || []).some((payment) => payment.status === 'Pending');
+                                return (
+                                    <tr key={booking.id}>
+                                        <td className="font-black text-[#720101]">#{booking.id}</td>
+                                        <td>
+                                            <p className="font-black text-slate-950">{booking.client_full_name || booking.username || 'Customer'}</p>
+                                            <p className="text-xs font-bold text-slate-400">{booking.client_email || booking.client_phone || 'No contact info'}</p>
+                                        </td>
+                                        <td>{formatAccountingDate(booking.event_date)} / {booking.pax || 0} guests</td>
+                                        <td className="text-right font-black text-slate-950">{'P' + totalCost.toLocaleString()}</td>
+                                        <td className="text-right font-black text-emerald-700">{'P' + paidAmount.toLocaleString()}</td>
+                                        <td><StaffStatusBadge tone={hasPending ? 'warn' : 'good'}>{progress.verified}/{progress.total} verified</StaffStatusBadge></td>
+                                        <td className="text-right">
+                                            <button type="button" onClick={() => setSelectedFinanceBooking(booking)} className="staff-row-action">Open</button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {bookingPagination && bookingPagination.lastPage > 1 && (
+                <StaffPagination
+                    page={bookingPagination.currentPage}
+                    perPage={25}
+                    total={bookingPagination.total}
+                    onPageChange={setBookingPage}
+                />
+            )}
+            {renderVerificationDrawer()}
+        </div>
+    );
+
+    if (loading && activeTab === 'today' && !accountingSummary) {
+        return (
+            <StaffWorkspaceSkeleton
+                title="Accounting Workspace"
+                roleLabel="Finance team"
+                label="Preparing accounting workspace"
+                navGroups={[
+                    { label: 'Daily work', items: ['Today', 'Payment Review', 'Payment Ledger', 'Payment Issues', 'Refund Queue', 'Event History'] },
+                ]}
+                rows={5}
+            />
+        );
+    }
+
     return (
         <StaffWorkspaceLayout
             title="Accounting Workspace"
@@ -448,10 +700,11 @@ const DashboardAccounting = () => {
                     label: 'Daily work',
                     items: [
                         { id: 'today', label: 'Today', count: dashboardSummary.pending + dashboardSummary.overdue + dashboardSummary.exceptions + dashboardSummary.refunds },
-                        { id: 'bookings', label: 'Verification', count: dashboardSummary.pending },
-                        { id: 'ledger', label: 'Ledger' },
-                        { id: 'reconciliation', label: 'Exceptions', count: dashboardSummary.exceptions },
-                        { id: 'refunds', label: 'Refunds', count: dashboardSummary.refunds },
+                        { id: 'bookings', label: 'Payment Review', count: dashboardSummary.pending },
+                        { id: 'ledger', label: 'Payment Ledger' },
+                        { id: 'reconciliation', label: 'Payment Issues', count: dashboardSummary.exceptions },
+                        { id: 'refunds', label: 'Refund Queue', count: dashboardSummary.refunds },
+                        { id: 'history', label: 'Event History' },
                     ],
                 },
             ]}
@@ -463,7 +716,7 @@ const DashboardAccounting = () => {
                         { label: 'Bookings', value: dashboardSummary.bookings },
                         { label: 'Pending', value: dashboardSummary.pending },
                         { label: 'Overdue', value: dashboardSummary.overdue },
-                        { label: 'Exceptions', value: dashboardSummary.exceptions },
+                        { label: 'Issues', value: dashboardSummary.exceptions },
                         { label: 'Refunds', value: dashboardSummary.refunds },
                     ]}
                 />
@@ -481,7 +734,7 @@ const DashboardAccounting = () => {
                                 <div className="staff-priority-list">
                                     <button type="button" onClick={() => setActiveTab('bookings')} className="staff-priority-item">
                                         <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Verification</span>
+                                            <span className="staff-item-kicker">Payment Review</span>
                                             <h3>Review customer payments</h3>
                                             <p>{dashboardSummary.pending > 0 ? `${dashboardSummary.pending} payment records need review.` : 'No payments waiting for review.'}</p>
                                         </div>
@@ -503,9 +756,9 @@ const DashboardAccounting = () => {
                                     </button>
                                     <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-priority-item">
                                         <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Exceptions</span>
-                                            <h3>Resolve provider mismatches</h3>
-                                            <p>{dashboardSummary.exceptions > 0 ? `${dashboardSummary.exceptions} PayMongo/local records need attention.` : 'Provider and local payment state are aligned.'}</p>
+                                            <span className="staff-item-kicker">Payment Issues</span>
+                                            <h3>Resolve payment mismatches</h3>
+                                            <p>{dashboardSummary.exceptions > 0 ? `${dashboardSummary.exceptions} payment records need attention.` : 'Online and staff payment records are aligned.'}</p>
                                         </div>
                                         <div className="staff-priority-meta">
                                             <StaffStatusBadge tone={dashboardSummary.exceptions > 0 ? 'danger' : 'good'}>{dashboardSummary.exceptions}</StaffStatusBadge>
@@ -529,8 +782,8 @@ const DashboardAccounting = () => {
                         <section className="staff-work-surface">
                             <div className="staff-surface-head">
                                 <div>
-                                    <p className="marketing-kicker">Recent provider state</p>
-                                    <h3 className="mt-1 text-lg font-black text-slate-950">Exceptions preview</h3>
+                                    <p className="marketing-kicker">Recent payment checks</p>
+                                    <h3 className="mt-1 text-lg font-black text-slate-950">Payment issues preview</h3>
                                 </div>
                                 {reconciliationItems.length > 0 && (
                                     <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-row-action">
@@ -539,7 +792,7 @@ const DashboardAccounting = () => {
                                 )}
                             </div>
                             {reconciliationItems.length === 0 ? (
-                                <StaffEmptyState title="No provider exceptions" message="PayMongo checkout and local payment records are aligned." />
+                                <StaffEmptyState title="No payment issues" message="Online checkout and staff payment records are aligned." />
                             ) : (
                                 <div className="staff-provider-list">
                                     {reconciliationItems.slice(0, 5).map((item) => (
@@ -563,10 +816,12 @@ const DashboardAccounting = () => {
                     </div>
                 )}
 
-                {activeTab === 'bookings' && (
+                {activeTab === 'bookings' && renderVerificationQueue()}
+
+                {false && activeTab === 'bookings' && (
                     <div className="marketing-panel p-5 lg:p-6">
                         {loading ? (
-                            <div className="p-6 text-center text-slate-500">Loading bookings...</div>
+                            <StaffSkeleton rows={6} label="Loading payment records" />
                         ) : bookings.length === 0 ? (
                             <div className="p-6 text-center text-slate-500">No bookings found.</div>
                         ) : (
@@ -641,7 +896,7 @@ const DashboardAccounting = () => {
                                                                     {booking.client_full_name || booking.username}
                                                                 </h3>
                                                                 <p className="text-sm text-slate-500">
-                                                                    {formatAccountingDate(booking.event_date)} / {booking.pax || 0} pax
+                                                                    {formatAccountingDate(booking.event_date)} / {booking.pax || 0} guests
                                                                 </p>
                                                             </div>
                                                         </div>
@@ -920,7 +1175,7 @@ const DashboardAccounting = () => {
 
                         <div className="marketing-panel overflow-hidden p-5">
                             {loading ? (
-                                <div className="p-6 text-center text-slate-500">Loading transactions...</div>
+                                <StaffSkeleton rows={6} label="Loading transactions" />
                             ) : (() => {
                                 const filteredLedgerPayments = ledgerPayments.filter(p => {
                                     if (ledgerFilter.clientSearch && !((p.client_full_name || p.username || '').toLowerCase().includes(ledgerFilter.clientSearch.toLowerCase()))) return false;
@@ -1027,22 +1282,22 @@ const DashboardAccounting = () => {
                                 value={reconciliationSearch}
                                 onChange={(event) => setReconciliationSearch(event.target.value)}
                                 className="staff-control"
-                                placeholder="Search booking, customer, or provider reference"
+                                placeholder="Search booking, customer, or payment reference"
                             />
                             <select value={reconciliationTypeFilter} onChange={(event) => setReconciliationTypeFilter(event.target.value)} className="staff-control">
-                                <option value="all">All exception types</option>
+                                <option value="all">All issue types</option>
                                 {Object.entries(exceptionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                             </select>
                         </div>
                         {loading ? (
-                            <div className="p-6 text-center text-slate-500">Loading reconciliation...</div>
+                            <StaffSkeleton variant="panel" rows={3} label="Loading payment issues" />
                         ) : filteredReconciliationItems.length === 0 ? (
                             <div className="p-12 text-center flex flex-col items-center">
                                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 mb-4">
                                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                 </div>
-                                <h3 className="text-lg font-bold text-slate-950">No payment exceptions</h3>
-                                <p className="text-slate-500 mt-1 max-w-sm">Online checkout and local payment records are currently aligned.</p>
+                                <h3 className="text-lg font-bold text-slate-950">No payment issues</h3>
+                                <p className="text-slate-500 mt-1 max-w-sm">Online checkout and staff payment records are currently aligned.</p>
                             </div>
                         ) : (
                             <>
@@ -1052,9 +1307,9 @@ const DashboardAccounting = () => {
                                         <tr>
                                             <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Payment</th>
                                             <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Customer</th>
-                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Provider References</th>
-                                            <th className="px-6 py-4 text-center font-bold text-slate-500 uppercase tracking-wider text-xs">Webhook</th>
-                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Exception</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Payment References</th>
+                                            <th className="px-6 py-4 text-center font-bold text-slate-500 uppercase tracking-wider text-xs">Online Update</th>
+                                            <th className="px-6 py-4 text-left font-bold text-slate-500 uppercase tracking-wider text-xs">Issue</th>
                                             <th className="px-6 py-4 text-right font-bold text-slate-500 uppercase tracking-wider text-xs">Next Action</th>
                                         </tr>
                                     </thead>
@@ -1074,14 +1329,14 @@ const DashboardAccounting = () => {
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <div className="space-y-1 text-xs font-semibold text-slate-500">
-                                                        <div>Checkout: <span className="font-mono text-slate-800">{item.paymongo_checkout_session_id || '-'}</span></div>
-                                                        <div>Payment: <span className="font-mono text-slate-800">{item.paymongo_payment_id || '-'}</span></div>
-                                                        <div>Reference: <span className="font-mono text-slate-800">{item.paymongo_reference_number || '-'}</span></div>
+                                                        <div>Checkout ref: <span className="font-mono text-slate-800">{item.paymongo_checkout_session_id || '-'}</span></div>
+                                                        <div>Payment ref: <span className="font-mono text-slate-800">{item.paymongo_payment_id || '-'}</span></div>
+                                                        <div>Customer ref: <span className="font-mono text-slate-800">{item.paymongo_reference_number || '-'}</span></div>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <span className={`staff-status ${item.webhook_received ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                                                        {item.webhook_received ? 'Received' : 'Not Received'}
+                                                        {item.webhook_received ? 'Received' : 'Waiting'}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -1129,7 +1384,7 @@ const DashboardAccounting = () => {
                             />
                         </div>
                         {loading ? (
-                            <div className="p-6 text-center text-slate-500">Loading refund queue...</div>
+                            <StaffSkeleton rows={5} label="Loading refund queue" />
                         ) : filteredRefundQueue.length === 0 ? (
                             <div className="p-12 text-center flex flex-col items-center">
                                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 mb-4">
@@ -1192,6 +1447,9 @@ const DashboardAccounting = () => {
                         )}
                     </div>
                 )}
+                {activeTab === 'history' && (
+                    <EventHistoryPanel role="accounting" onToast={(message, type) => setToast({ message, type })} />
+                )}
             {/* Receipt Modal */}
             <ReceiptModal
                 isOpen={receiptModal.isOpen}
@@ -1216,7 +1474,7 @@ const DashboardAccounting = () => {
             <ConfirmModal
                 isOpen={refundConfirm.isOpen}
                 title={`Process refund for booking #${refundConfirm.bookingId || ''}?`}
-                message={`Accounting will create a refund case, retain the non-refundable reservation fee, and refund ${'P' + Number(refundConfirm.refundAmount || 0).toLocaleString()} where provider references are available.`}
+                message={`Accounting will create a refund case, retain the non-refundable reservation fee, and refund ${'P' + Number(refundConfirm.refundAmount || 0).toLocaleString()} where payment references are available.`}
                 confirmText="Process Refund"
                 tone="danger"
                 busy={refundProcessing}

@@ -19,6 +19,8 @@ class FeedbackResponse extends Model
         'comments',
         'testimonial_permission',
         'follow_up_required',
+        'assigned_to',
+        'follow_up_due_at',
         'review_status',
         'testimonial_status',
         'retention_notes',
@@ -29,6 +31,7 @@ class FeedbackResponse extends Model
     protected $casts = [
         'testimonial_permission' => 'boolean',
         'follow_up_required' => 'boolean',
+        'follow_up_due_at' => 'datetime',
         'reviewed_at' => 'datetime',
     ];
 
@@ -40,5 +43,10 @@ class FeedbackResponse extends Model
     public function booking(): BelongsTo
     {
         return $this->belongsTo(Booking::class);
+    }
+
+    public function assignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
     }
 }

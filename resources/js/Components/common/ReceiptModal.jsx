@@ -8,6 +8,10 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
         window.print();
     };
 
+    const handleDownload = () => {
+        window.location.href = `/documents/payments/${payment.id}/receipt.pdf`;
+    };
+
     const formatMoney = (value) => {
         return Number(value || 0).toLocaleString('en-PH', {
             minimumFractionDigits: 2,
@@ -118,7 +122,7 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
                                 </div>
                                 <div className="text-right">
                                     <p className="text-xs font-medium text-gray-500">Method</p>
-                                    <p className="font-bold text-gray-900">{payment.payment_method}</p>
+                                    <p className="font-bold text-gray-900">{payment.payment_method_label || payment.payment_method}</p>
                                 </div>
                             </div>
                             
@@ -152,10 +156,17 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
                     </button>
                     <button
                         onClick={handlePrint}
-                        className="px-6 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-lg shadow-primary-600/20"
+                        className="px-6 py-2.5 text-sm font-bold text-primary-700 bg-white border border-primary-200 rounded-xl hover:bg-primary-50 transition-colors flex items-center gap-2"
                     >
                         <Printer className="w-4 h-4" />
-                        Print / Save PDF
+                        Print
+                    </button>
+                    <button
+                        onClick={handleDownload}
+                        className="px-6 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-lg shadow-primary-600/20"
+                    >
+                        <Download className="w-4 h-4" />
+                        Download PDF
                     </button>
                 </div>
             </div>

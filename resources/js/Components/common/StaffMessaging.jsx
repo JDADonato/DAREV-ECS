@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
 import ConfirmModal from './ConfirmModal';
 import ErrorModal from './ErrorModal';
+import StaffSkeleton from '../staff/StaffSkeleton';
 
 /**
  * Phase 2: Staff Messaging — WebSocket-powered Ticket/Claiming System.
@@ -184,7 +185,7 @@ const StaffMessaging = () => {
             });
             if (res.ok) {
                 const d = await res.json();
-                setSelectedConv({ ...selectedConv, staff_id: d.conversation.staff_id, staff_name: d.conversation.staff_name });
+                setSelectedConv({ ...selectedConv, ...d.conversation });
                 setSidebarTab('my-chats');
                 fetchConversations();
             } else {
@@ -234,7 +235,7 @@ const StaffMessaging = () => {
         if (!selectedConv || transferring) return;
         setTransferring(true);
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/transfer`, {
+            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/transfer-owner`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ new_staff_id: staffId })
@@ -253,6 +254,43 @@ const StaffMessaging = () => {
             setErrorModal({ isOpen: true, message: 'Failed to transfer.' });
         }
         finally { setTransferring(false); }
+    };
+
+    const handleInvite = async (staffId) => {
+        if (!selectedConv || transferring) return;
+        setTransferring(true);
+        try {
+            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/collaborators`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ user_id: staffId })
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(payload.error || 'Failed to invite staff.');
+            setShowTransfer(false);
+            setSelectedConv(payload.conversation || selectedConv);
+            fetchConversations();
+        } catch (e) {
+            setErrorModal({ isOpen: true, message: e.message || 'Failed to invite staff.' });
+        }
+        finally { setTransferring(false); }
+    };
+
+    const handleLeave = async () => {
+        if (!selectedConv || !user?.id) return;
+        try {
+            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/collaborators/${user.id}`, {
+                method: 'DELETE',
+                headers: { 'Accept': 'application/json' },
+            });
+            if (res.ok) {
+                setSelectedConv(null);
+                setMessages([]);
+                fetchConversations();
+            }
+        } catch (e) {
+            setErrorModal({ isOpen: true, message: 'Failed to leave chat.' });
+        }
     };
 
     const handleSend = async (e) => {
@@ -299,7 +337,12 @@ const StaffMessaging = () => {
 
     const currentList = sidebarTab === 'unassigned' ? unassigned : myChats;
     const totalUnread = [...unassigned, ...myChats].reduce((sum, c) => sum + (c.unread_count || 0), 0);
-    const isClaimedByMe = selectedConv && selectedConv.staff_id != null;
+    const canReply = Boolean(selectedConv?.can_reply);
+    const canTransfer = Boolean(selectedConv?.can_transfer);
+    const canResolve = Boolean(selectedConv?.can_resolve);
+    const canInvite = Boolean(selectedConv?.can_invite);
+    const isCollaborator = Boolean(selectedConv?.collaborators?.some((member) => member.id === user?.id));
+    const isClaimedByMe = canReply;
 
     // ─── Render ───
 
@@ -342,9 +385,8 @@ const StaffMessaging = () => {
                     {/* Conversation List */}
                     <div className="flex-1 overflow-y-auto">
                         {loading ? (
-                            <div className="p-8 text-center">
-                                <div className="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                                <p className="text-xs text-gray-400">Loading conversations...</p>
+                            <div className="p-4">
+                                <StaffSkeleton rows={5} label="Loading conversations" />
                             </div>
                         ) : currentList.length === 0 ? (
                             <div className="p-8 text-center">
@@ -410,34 +452,43 @@ const StaffMessaging = () => {
                                 {/* Actions (only when claimed) */}
                                 {isClaimedByMe && (
                                     <div className="flex items-center gap-2">
-                                        <div className="relative">
+                                        {(canTransfer || canInvite) && <div className="relative">
                                             <button onClick={() => { setShowTransfer(!showTransfer); if (!showTransfer) fetchAvailableStaff(); }}
                                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg border border-gray-200 hover:border-primary-200 transition-colors">
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                                                Transfer
+                                                Staff
                                             </button>
                                             {showTransfer && (
-                                                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1">
+                                                <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1">
                                                     <div className="px-3 py-2 border-b border-gray-100"><p className="text-xs font-bold text-gray-500">Select Staff</p></div>
                                                     {availableStaff.length === 0 ? (
                                                         <div className="px-3 py-2 text-xs text-gray-400">No staff available</div>
                                                     ) : (
                                                         availableStaff.map(staff => (
-                                                            <button key={staff.id} onClick={() => handleTransfer(staff.id)} disabled={transferring}
-                                                                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between">
-                                                                <span>{staff.username}</span>
-                                                                <span className="text-[10px] text-gray-400">{staff.role}</span>
-                                                            </button>
+                                                            <div key={staff.id} className="px-3 py-2">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="text-sm font-bold text-gray-700">{staff.username}</span>
+                                                                    <span className="text-[10px] text-gray-400">{staff.role}</span>
+                                                                </div>
+                                                                <div className="mt-2 flex gap-2">
+                                                                    {canInvite && <button type="button" onClick={() => handleInvite(staff.id)} disabled={transferring} className="flex-1 rounded-md bg-primary-50 px-2 py-1 text-[11px] font-bold text-primary-700 hover:bg-primary-100">Invite</button>}
+                                                                    {canTransfer && <button type="button" onClick={() => handleTransfer(staff.id)} disabled={transferring} className="flex-1 rounded-md bg-gray-50 px-2 py-1 text-[11px] font-bold text-gray-700 hover:bg-gray-100">Transfer</button>}
+                                                                </div>
+                                                            </div>
                                                         ))
                                                     )}
                                                 </div>
                                             )}
-                                        </div>
-                                        <button onClick={handleResolve}
+                                        </div>}
+                                        {isCollaborator && <button onClick={handleLeave}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg border border-gray-200 hover:border-amber-200 transition-colors">
+                                            Leave chat
+                                        </button>}
+                                        {canResolve && <button onClick={handleResolve}
                                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg border border-gray-200 hover:border-red-200 transition-colors">
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                             Resolve
-                                        </button>
+                                        </button>}
                                     </div>
                                 )}
                             </div>

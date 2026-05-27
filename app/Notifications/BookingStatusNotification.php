@@ -7,17 +7,11 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-/**
- * Sent to the client when their booking status changes (Confirmed, Cancelled, etc.).
- */
 class BookingStatusNotification extends Notification
 {
     use Queueable;
 
-    public function __construct(
-        public Booking $booking,
-        public string $newStatus
-    ) {}
+    public function __construct(public Booking $booking, public string $newStatus) {}
 
     public function via(object $notifiable): array
     {
@@ -34,14 +28,21 @@ class BookingStatusNotification extends Notification
 
         return (new MailMessage)
             ->subject('Booking Approved - Eloquente Catering')
-            ->greeting("Hello {$notifiable->username}!")
-            ->line('Great news! Your catering booking has been approved.')
-            ->line("Event Date: {$eventDate}")
-            ->line("Number of Guests: {$this->booking->pax}")
-            ->line("Booking Reference: #{$reference}")
-            ->line('Total Amount: PHP ' . number_format($total, 2))
-            ->action('View Booking Details', route('dashboard.client'))
-            ->line('You can now proceed with the required payment steps from your dashboard.');
+            ->view('emails.generic', [
+                'emailTitle' => 'Booking approved',
+                'headline' => 'Your booking is approved',
+                'preheader' => 'Your Eloquente booking is ready for payment steps.',
+                'greeting' => "Hello {$notifiable->username},",
+                'lines' => ['Great news. Your catering booking has been approved, and you can now continue with the payment steps from your dashboard.'],
+                'details' => [
+                    'Event date' => $eventDate,
+                    'Guests' => $this->booking->pax,
+                    'Booking reference' => "#{$reference}",
+                    'Total amount' => 'PHP ' . number_format($total, 2),
+                ],
+                'ctaLabel' => 'View booking',
+                'ctaUrl' => route('dashboard.client'),
+            ]);
     }
 
     public function toDatabase(object $notifiable): array

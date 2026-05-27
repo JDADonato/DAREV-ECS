@@ -4,8 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\FeedbackRequest;
 use App\Models\FeedbackResponse;
+use App\Models\User;
+use App\Notifications\StaffOperationalNotification;
+use App\Services\PostEventLifecycleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 
 class FeedbackController extends Controller
 {
@@ -89,6 +93,17 @@ class FeedbackController extends Controller
             'completed_at' => now(),
         ]);
 
+        if ((int) $response->rating <= 3 || $response->testimonial_status === 'Candidate') {
+            $subject = (int) $response->rating <= 3 ? 'Low feedback rating needs follow-up' : 'New testimonial candidate';
+            $body = (int) $response->rating <= 3
+                ? 'A completed event received a low rating and needs staff follow-up.'
+                : 'A customer gave permission for a high-rating testimonial candidate.';
+            $staff = User::whereIn('role', ['Admin', 'Marketing'])
+                ->where(fn ($query) => $query->whereNull('account_status')->orWhere('account_status', 'active'))
+                ->get();
+            Notification::send($staff, new StaffOperationalNotification($subject, $subject, $body, url('/dashboard/marketing')));
+        }
+
         return response()->json([
             'message' => 'Thank you for your feedback.',
             'response' => $response,
@@ -101,11 +116,12 @@ class FeedbackController extends Controller
             ->with([
                 'booking:id,event_date,event_name,event_type,client_full_name,client_email,user_id',
                 'booking.user:id,full_name,username,email',
+                'assignee:id,full_name,username',
             ])
             ->latest();
 
         if ($request->boolean('follow_up_only')) {
-            $query->where('follow_up_required', true)
+            $query->whereRaw('follow_up_required is true')
                 ->whereNotIn('review_status', ['Resolved', 'Closed']);
         }
 
@@ -129,6 +145,9 @@ class FeedbackController extends Controller
             'comments' => $response->comments,
             'testimonial_permission' => $response->testimonial_permission,
             'follow_up_required' => $response->follow_up_required,
+            'assigned_to' => $response->assigned_to,
+            'assigned_name' => $response->assignee?->full_name ?: $response->assignee?->username,
+            'follow_up_due_at' => $response->follow_up_due_at,
             'review_status' => $response->review_status,
             'testimonial_status' => $response->testimonial_status,
             'retention_notes' => $response->retention_notes,
@@ -143,6 +162,8 @@ class FeedbackController extends Controller
             'review_status' => ['nullable', 'in:Open,Needs Follow Up,In Progress,Resolved,Closed'],
             'testimonial_status' => ['nullable', 'in:Not Requested,Candidate,Approved,Rejected'],
             'retention_notes' => ['nullable', 'string', 'max:3000'],
+            'assigned_to' => ['nullable', 'exists:users,id'],
+            'follow_up_due_at' => ['nullable', 'date'],
         ]);
 
         if (($data['testimonial_status'] ?? null) === 'Approved' && (!$response->testimonial_permission || (int) $response->rating < 4)) {
@@ -155,6 +176,8 @@ class FeedbackController extends Controller
             'review_status' => $data['review_status'] ?? $response->review_status,
             'testimonial_status' => $data['testimonial_status'] ?? $response->testimonial_status,
             'retention_notes' => array_key_exists('retention_notes', $data) ? $data['retention_notes'] : $response->retention_notes,
+            'assigned_to' => array_key_exists('assigned_to', $data) ? $data['assigned_to'] : $response->assigned_to,
+            'follow_up_due_at' => array_key_exists('follow_up_due_at', $data) ? $data['follow_up_due_at'] : $response->follow_up_due_at,
             'reviewed_by' => Auth::id(),
             'reviewed_at' => now(),
         ]);
@@ -164,6 +187,10 @@ class FeedbackController extends Controller
         }
 
         $response->save();
+
+        if ($response->booking) {
+            PostEventLifecycleService::refresh($response->booking);
+        }
 
         return response()->json([
             'message' => 'Feedback review updated.',

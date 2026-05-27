@@ -12,10 +12,7 @@ class BookingRejectedNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(
-        public Booking $booking,
-        public ?string $reason = null
-    ) {}
+    public function __construct(public Booking $booking, public ?string $reason = null) {}
 
     public function via(object $notifiable): array
     {
@@ -24,20 +21,28 @@ class BookingRejectedNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $eventDate = $this->booking->event_date;
+        $eventDate = \Carbon\Carbon::parse($this->booking->event_date)->format('F j, Y');
+        $reference = str_pad($this->booking->id, 5, '0', STR_PAD_LEFT);
 
         return (new MailMessage)
             ->subject('Booking Status Update - Eloquente Catering')
-            ->greeting("Hello {$notifiable->username}!")
-            ->line("Unfortunately, your booking request could not be confirmed.")
-            ->line("Event Date: " . \Carbon\Carbon::parse($eventDate)->format('F j, Y'))
-            ->line("Booking Reference: #" . str_pad($this->booking->id, 5, '0', STR_PAD_LEFT))
-            ->when($this->reason, function ($mail) {
-                return $mail->line("Reason: {$this->reason}");
-            })
-            ->action('Browse Available Dates', route('booking.wizard'))
-            ->line('Please contact us at 02-XXXX-XXXX for more information.')
-            ->line('Thank you for your interest in Eloquente Catering!');
+            ->view('emails.generic', [
+                'emailTitle' => 'Booking status update',
+                'headline' => 'We could not confirm this date',
+                'preheader' => 'An update about your Eloquente booking request.',
+                'greeting' => "Hello {$notifiable->username},",
+                'lines' => array_filter([
+                    'Unfortunately, your booking request could not be confirmed for the selected date.',
+                    $this->reason ? "Reason: {$this->reason}" : null,
+                ]),
+                'details' => [
+                    'Event date' => $eventDate,
+                    'Booking reference' => "#{$reference}",
+                ],
+                'ctaLabel' => 'Browse available dates',
+                'ctaUrl' => route('booking.wizard'),
+                'note' => 'You may choose a new date or contact our team for assistance.',
+            ]);
     }
 
     public function toDatabase(object $notifiable): array

@@ -25,6 +25,8 @@ const ChatBubble = ({ user, openOnMount = false }) => {
     const [sending, setSending] = useState(false);
     const [unreadTotal, setUnreadTotal] = useState(0);
     const [bookings, setBookings] = useState([]);
+    const [chatTopic, setChatTopic] = useState(null);
+    const [topicWarning, setTopicWarning] = useState('');
     const [showBookingPicker, setShowBookingPicker] = useState(false);
     const [staffTyping, setStaffTyping] = useState(false);
     const [loadingConv, setLoadingConv] = useState(false);
@@ -136,6 +138,9 @@ const ChatBubble = ({ user, openOnMount = false }) => {
             if (res.ok) {
                 const data = await res.json();
                 setBookings(data);
+                if (data.length <= 1 && chatTopic === null) {
+                    setChatTopic(data.length === 1 ? String(data[0].id) : 'general');
+                }
                 lastBookingsLoadedAtRef.current = Date.now();
                 return data;
             }
@@ -272,17 +277,27 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                     setNewMessage('');
                 }
             } else {
+                const latestBookings = bookings.length ? bookings : await fetchBookings({ force: true });
+                if (latestBookings.length > 1 && chatTopic === null) {
+                    setTopicWarning('Choose a booking or General inquiry before sending.');
+                    setSending(false);
+                    return;
+                }
                 // Start new conversation
                 const res = await fetch('/api/chat/conversations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ message: newMessage.trim() }),
+                    body: JSON.stringify({
+                        message: newMessage.trim(),
+                        ...(chatTopic && chatTopic !== 'general' ? { booking_id: Number(chatTopic) } : {}),
+                    }),
                 });
                 if (res.ok) {
                     const d = await res.json();
                     setConversation(d.conversation);
                     setMessages([d.message]);
                     setNewMessage('');
+                    setTopicWarning('');
                 }
             }
         } catch (e) { console.error('Send failed'); }
@@ -412,6 +427,22 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                                             </div>
                                             <p className="text-sm font-black text-slate-800">How can we help?</p>
                                             <p className="mt-1 text-xs font-semibold text-slate-500">Send a message and our team will respond shortly.</p>
+                                        </div>
+                                    )}
+
+                                    {!conversation && bookings.length > 1 && (
+                                        <div className="rounded-2xl border border-amber-200 bg-white p-3 text-left">
+                                            <label className="text-[10px] font-black uppercase tracking-widest text-[#9f6500]">Message topic</label>
+                                            <select value={chatTopic ?? ''} onChange={(event) => { setChatTopic(event.target.value || null); setTopicWarning(''); }} className="mt-2 w-full rounded-xl border border-amber-100 bg-[#fffaf3] px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-[#720101]">
+                                                <option value="">Choose a booking or General inquiry</option>
+                                                <option value="general">General inquiry</option>
+                                                {bookings.map((booking) => (
+                                                    <option key={booking.id} value={booking.id}>
+                                                        #{booking.id} - {booking.event_name || booking.event_type || 'Booking'} ({booking.event_date})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {topicWarning && <p className="mt-2 text-xs font-bold text-amber-700">{topicWarning}</p>}
                                         </div>
                                     )}
 

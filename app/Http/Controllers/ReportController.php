@@ -7,6 +7,7 @@ use App\Http\Resources\ReportTemplateResource;
 use App\Models\ReportRun;
 use App\Models\ReportTemplate;
 use App\Services\AdminReportService;
+use App\Services\BrandedPdfService;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -95,12 +96,12 @@ class ReportController extends Controller
         return response()->json((new ReportRunResource($run))->resolve(), 201);
     }
 
-    public function export(Request $request, ReportRun $run)
+    public function export(Request $request, ReportRun $run, BrandedPdfService $pdf)
     {
         $format = strtolower((string) $request->query('format', 'csv'));
         if ($format === 'pdf') {
             $filename = 'eloquente-report-' . $run->id . '.pdf';
-            return response($this->buildPdf($run), 200, [
+            return response($pdf->report($run->loadMissing('creator'), $this->reportSections($run)), 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="' . $filename . '"',
             ]);
@@ -125,6 +126,23 @@ class ReportController extends Controller
 
             fclose($handle);
         }, $filename, ['Content-Type' => 'text/csv']);
+    }
+
+    private function reportSections(ReportRun $run): array
+    {
+        $widgetNames = collect($this->reports->widgetDefinitions())->pluck('name', 'id');
+        $lines = [];
+
+        foreach ($run->result_snapshot_json ?? [] as $widget) {
+            $title = $widgetNames[$widget['id'] ?? ''] ?? $this->humanLabel($widget['id'] ?? 'Report Section');
+            $lines[] = strtoupper($title);
+            foreach ($this->flattenWidgetRows($widget['data'] ?? []) as $row) {
+                $detail = $row['detail'] ? ' - ' . $row['detail'] : '';
+                $lines[] = $row['item'] . $detail . ': ' . $row['value'];
+            }
+        }
+
+        return $lines;
     }
 
     private function validateTemplate(Request $request): array

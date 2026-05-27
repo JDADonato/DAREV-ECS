@@ -13,6 +13,43 @@ use Illuminate\Validation\Rule;
 
 class ProfileController extends Controller
 {
+    public function deleteAccount(Request $request)
+    {
+        $user = $request->user();
+
+        abort_unless($user && $user->role === 'Client', 403);
+
+        $request->validate([
+            'password' => ['required', 'string'],
+            'confirmation' => ['required', 'in:DELETE'],
+            'reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        if (!$user->email_verified_at) {
+            return back()->withErrors(['confirmation' => 'Please verify your email before deleting your account.']);
+        }
+
+        if (!Hash::check($request->password, $user->password)) {
+            return back()->withErrors(['password' => 'The provided password does not match your current password.']);
+        }
+
+        $user->forceFill([
+            'account_status' => 'deactivated',
+            'deactivated_at' => now(),
+            'deactivated_by' => $user->id,
+            'deactivation_reason' => $request->input('reason') ?: 'Client requested account deletion.',
+            'remember_token' => null,
+        ])->save();
+
+        $this->recordProfileAudit($request, ['account_deactivation']);
+
+        auth()->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect('/')->with('message', 'Your account has been deactivated. Eloquente will retain booking and payment records for business records.');
+    }
+
     public function update(Request $request)
     {
         $user = $request->user();
@@ -97,6 +134,10 @@ class ProfileController extends Controller
         $user->username = $request->username;
         
         if ($user->email !== $request->email) {
+            if (!$user->email_verified_at) {
+                return back()->withErrors(['email' => 'Please verify your current email before changing it.']);
+            }
+
             $user->email = $request->email;
             $user->email_verified_at = null; // Unverify so they have to get a new OTP
             $changedFields[] = 'email';

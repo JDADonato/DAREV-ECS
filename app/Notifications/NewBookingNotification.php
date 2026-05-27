@@ -12,9 +12,7 @@ class NewBookingNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(
-        public Booking $booking
-    ) {}
+    public function __construct(public Booking $booking) {}
 
     public function via(object $notifiable): array
     {
@@ -24,20 +22,28 @@ class NewBookingNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         $booking = $this->booking;
-        $eventDate = \Carbon\Carbon::parse($booking->event_date);
+        $eventDate = \Carbon\Carbon::parse($booking->event_date)->format('F j, Y');
 
         return (new MailMessage)
             ->subject('New Booking Received - Eloquente Catering')
-            ->greeting("Hello {$notifiable->username}!")
-            ->line("A new booking has been submitted and requires review.")
-            ->line("Client: {$booking->client_full_name}")
-            ->line("Event Date: " . $eventDate->format('F j, Y'))
-            ->line("Number of Guests: {$booking->pax}")
-            ->line("Venue: {$booking->venue_address_line}, {$booking->venue_city}")
-            ->line("Total Cost: ₱" . number_format($booking->total_cost, 2))
-            ->line("Status: {$booking->status}")
-            ->action('Review Booking', route('dashboard.marketing'))
-            ->line('Please review this booking and update its status accordingly.');
+            ->view('emails.generic', [
+                'emailTitle' => 'New booking received',
+                'headline' => 'A booking needs review',
+                'preheader' => 'A new Eloquente booking was submitted.',
+                'greeting' => "Hello {$notifiable->username},",
+                'lines' => ['A new booking has been submitted and needs staff review.'],
+                'details' => [
+                    'Client' => $booking->client_full_name,
+                    'Event date' => $eventDate,
+                    'Guests' => $booking->pax,
+                    'Venue' => trim("{$booking->venue_address_line}, {$booking->venue_city}", ', '),
+                    'Total cost' => 'PHP ' . number_format((float) $booking->total_cost, 2),
+                    'Status' => $booking->status,
+                ],
+                'ctaLabel' => 'Review booking',
+                'ctaUrl' => route('dashboard.marketing'),
+                'note' => 'Please review this booking and update its status when ready.',
+            ]);
     }
 
     public function toDatabase(object $notifiable): array

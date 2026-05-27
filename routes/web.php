@@ -7,6 +7,7 @@ use App\Http\Controllers\BookingController;
 use App\Http\Controllers\CalendarAvailabilityController;
 use App\Http\Controllers\ClientDashboardController;
 use App\Http\Controllers\ContactInquiryController;
+use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EventTypeController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\AccountingController;
@@ -24,9 +25,11 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\StaffEventHistoryController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use App\Models\Announcement;
 
 /*
 |--------------------------------------------------------------------------
@@ -51,21 +54,33 @@ Route::post('/webhook/paymongo', PayMongoWebhookController::class)->name('webhoo
 Route::middleware('guest')->group(function () {
     Route::get('/login', fn () => Inertia::render('Login'))->name('login');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+    Route::get('/forgot-password', [AuthController::class, 'showForgotPassword'])->name('password.request');
+    Route::post('/forgot-password', [AuthController::class, 'sendPasswordReset'])->middleware('throttle:5,1')->name('password.email');
+    Route::get('/reset-password/{token}', [AuthController::class, 'showResetPassword'])->name('password.reset');
+    Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:5,1')->name('password.update');
     Route::get('/register', fn () => Inertia::render('Register'))->name('register');
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
 });
 
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/password/change-required', [AuthController::class, 'showChangeRequired'])->name('password.change-required');
+    Route::post('/password/change-required', [AuthController::class, 'changeRequiredPassword'])->middleware('throttle:5,1')->name('password.change-required.update');
     Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:6,1')->name('verify.otp');
     Route::post('/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:3,1')->name('resend.otp');
 
     // Profile Routes
     Route::get('/profile', fn () => Inertia::render('Profile/Edit'))->name('profile.edit');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile/account', [ProfileController::class, 'deleteAccount'])->middleware('throttle:3,1')->name('profile.account.delete');
     Route::get('/profile/avatar', [ProfileController::class, 'avatar'])->name('profile.avatar');
     Route::post('/profile/password-code', [ProfileController::class, 'sendPasswordCode'])->middleware('throttle:5,1')->name('profile.password-code');
     Route::get('/api/profile/activity', [ProfileController::class, 'activity'])->name('profile.activity');
+    Route::get('/api/staff/event-history', [StaffEventHistoryController::class, 'index']);
+    Route::post('/api/staff/event-history/{booking}/notes', [StaffEventHistoryController::class, 'storeNote']);
+    Route::get('/documents/payments/{payment}/receipt.pdf', [DocumentController::class, 'receipt'])->name('documents.receipt');
+    Route::get('/documents/bookings/{booking}/preparation.pdf', [DocumentController::class, 'preparationList'])->name('documents.preparation');
+    Route::get('/documents/calendar.pdf', [DocumentController::class, 'calendar'])->name('documents.calendar');
 
     // ─── Notification Routes ───
     Route::get('/api/notifications', [NotificationController::class, 'index']);
@@ -91,8 +106,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/chat/my-bookings', [ChatController::class, 'myBookings']);
     Route::get('/api/chat/conversations/{conversation}/messages', [ChatController::class, 'messages']);
     Route::post('/api/chat/conversations/{conversation}/messages', [ChatController::class, 'sendMessage']);
+    Route::patch('/api/chat/messages/{message}', [ChatController::class, 'updateMessage']);
+    Route::delete('/api/chat/messages/{message}', [ChatController::class, 'deleteMessage']);
     Route::post('/api/chat/conversations/{conversation}/claim', [ChatController::class, 'claim']);
     Route::post('/api/chat/conversations/{conversation}/resolve', [ChatController::class, 'resolve']);
+    Route::post('/api/chat/conversations/{conversation}/reopen', [ChatController::class, 'reopen']);
+    Route::post('/api/chat/conversations/{conversation}/join', [ChatController::class, 'adminJoin']);
+    Route::post('/api/chat/conversations/{conversation}/internal-notes', [ChatController::class, 'internalNotes']);
+    Route::post('/api/chat/conversations/{conversation}/collaborators', [ChatController::class, 'addCollaborator']);
+    Route::delete('/api/chat/conversations/{conversation}/collaborators/{user}', [ChatController::class, 'removeCollaborator']);
+    Route::post('/api/chat/conversations/{conversation}/transfer-owner', [ChatController::class, 'transferOwner']);
     Route::post('/api/chat/conversations/{conversation}/transfer', [ChatController::class, 'transfer']);
     Route::get('/api/chat/staff/available', [ChatController::class, 'availableStaff']);
 });
@@ -186,12 +209,26 @@ Route::middleware(['auth', 'role:Client'])->group(function () {
 // ─── Marketing Routes (Marketing + Admin) ───
 
 Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
+    Route::get('/preview/menu', fn () => Inertia::render('client/MenuGallery', ['previewMode' => true]))->name('preview.menu');
+    Route::get('/preview/packages', fn () => Inertia::render('client/MenuGallery', ['previewMode' => true, 'previewPanel' => 'packages']))->name('preview.packages');
+    Route::get('/preview/book', fn () => Inertia::render('client/BookingWizard', ['previewMode' => true]))->name('preview.booking');
+    Route::get('/preview/customer-booking/{booking}', [BookingController::class, 'preview'])->name('preview.customer-booking');
+    Route::get('/preview/announcements/{announcement}', fn (Announcement $announcement) => response()->json([
+        'preview' => true,
+        'announcement' => $announcement,
+    ]))->name('preview.announcement');
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
+    Route::get('/api/marketing/summary', [MarketingController::class, 'summary']);
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
     Route::get('/api/marketing/contact-inquiries', [ContactInquiryController::class, 'index']);
     Route::patch('/api/marketing/contact-inquiries/{inquiry}', [ContactInquiryController::class, 'update']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);
     Route::put('/api/marketing/bookings/{id}/assign', [MarketingController::class, 'assign']);
+    Route::post('/api/marketing/bookings/{id}/claim', [MarketingController::class, 'claim']);
+    Route::post('/api/marketing/bookings/{id}/transfer', [MarketingController::class, 'transfer']);
+    Route::post('/api/marketing/bookings/{id}/transfer/accept', [MarketingController::class, 'acceptTransfer']);
+    Route::post('/api/marketing/bookings/{id}/transfer/decline', [MarketingController::class, 'declineTransfer']);
+    Route::post('/api/marketing/bookings/{id}/release', [MarketingController::class, 'release']);
     Route::put('/api/marketing/bookings/{id}/review-status', [MarketingController::class, 'updateReviewStatus']);
     Route::post('/api/marketing/bookings/{id}/clarification', [MarketingController::class, 'requestClarification']);
     Route::patch('/api/marketing/bookings/{bookingId}/review-tasks/{taskId}', [MarketingController::class, 'updateReviewTask']);
@@ -202,6 +239,7 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/api/marketing/feedback-responses', [FeedbackController::class, 'staffIndex']);
     Route::patch('/api/marketing/feedback-responses/{response}', [FeedbackController::class, 'staffUpdate']);
     Route::get('/api/operations/preparation-board', [OperationsController::class, 'preparationBoard']);
+    Route::get('/api/operations/preparation-board/summary', [OperationsController::class, 'preparationBoardSummary']);
     Route::patch('/api/operations/preparation-tasks/{task}', [OperationsController::class, 'updatePreparationTask']);
     Route::get('/api/calendar-availability', [CalendarAvailabilityController::class, 'index']);
     Route::put('/api/calendar-availability/{date}', [CalendarAvailabilityController::class, 'upsert']);
@@ -226,6 +264,7 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
 
 Route::middleware(['auth', 'role:Accounting,Admin'])->group(function () {
     Route::get('/dashboard/accounting', fn () => Inertia::render('DashboardAccounting'))->name('dashboard.accounting');
+    Route::get('/api/accounting/summary', [AccountingController::class, 'summary']);
     Route::get('/api/accounting/bookings', [AccountingController::class, 'getBookingsWithPayments']);
     Route::get('/api/accounting/payments/pending', [AccountingController::class, 'getPendingPayments']);
     Route::put('/api/accounting/payments/{id}/verify', [AccountingController::class, 'verifyPayment']);
@@ -246,10 +285,16 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::post('/api/admin/employees', [AdminController::class, 'createEmployee']);
     Route::put('/api/admin/employees/{id}', [AdminController::class, 'updateEmployee']);
     Route::delete('/api/admin/employees/{id}', [AdminController::class, 'deleteEmployee']);
+    Route::post('/api/admin/employees/{id}/reset-password', [AdminController::class, 'resetEmployeePassword']);
+    Route::post('/api/admin/employees/{id}/force-password-change', [AdminController::class, 'forceEmployeePasswordChange']);
+    Route::post('/api/admin/employees/{id}/reactivate', [AdminController::class, 'reactivateEmployee']);
     Route::get('/api/admin/customers', [AdminController::class, 'getCustomers']);
     Route::put('/api/admin/customers/{id}', [AdminController::class, 'updateCustomer']);
     Route::delete('/api/admin/customers/{id}', [AdminController::class, 'deleteCustomer']);
+    Route::post('/api/admin/customers/{id}/reactivate', [AdminController::class, 'reactivateCustomer']);
     Route::post('/api/admin/pricing', [AdminController::class, 'updatePricingOverride']);
+    Route::get('/api/admin/settings', [SettingsController::class, 'businessSettings']);
+    Route::put('/api/admin/settings', [SettingsController::class, 'updateBusinessSettings']);
     Route::get('/api/admin/bookings', [AdminController::class, 'getBookings']);
     Route::put('/api/admin/bookings/{id}/status', [AdminController::class, 'updateBookingStatus']);
     Route::post('/api/admin/bookings/{id}/discount', [AdminController::class, 'applyDiscount']);

@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import StaffDrawer from '../staff/StaffDrawer';
 import StaffPagination from '../staff/StaffPagination';
+import StaffSkeleton from '../staff/StaffSkeleton';
+import { getListData, getPaginationMeta } from '../../utils/apiResponses';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 const readinessLabels = {
     payment: 'Payment',
@@ -40,63 +43,57 @@ const PreparationBoard = () => {
     const [departmentFilter, setDepartmentFilter] = useState('all');
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(10);
+    const [pagination, setPagination] = useState(null);
+    const [summary, setSummary] = useState(null);
     const [selectedBookingId, setSelectedBookingId] = useState(null);
+    const debouncedQuery = useDebouncedValue(query, 250);
+    const boardRequestRef = useRef(null);
 
     const fetchBoard = async ({ silent = false } = {}) => {
         if (!silent) setLoading(true);
+        let controller = null;
         try {
-            const response = await fetch('/api/operations/preparation-board', {
-                headers: { Accept: 'application/json' },
+            boardRequestRef.current?.abort();
+            controller = new AbortController();
+            boardRequestRef.current = controller;
+            const params = new URLSearchParams({
+                paginated: '1',
+                page: String(page),
+                per_page: String(perPage),
+                search: debouncedQuery.trim(),
+                attention: attentionFilter,
+                department: departmentFilter,
             });
-            const data = await response.json().catch(() => []);
+
+            const response = await fetch(`/api/operations/preparation-board?${params.toString()}`, {
+                headers: { Accept: 'application/json' },
+                signal: controller.signal,
+            });
+            const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Could not load preparation board.');
-            setRows(Array.isArray(data) ? data : []);
+            setRows(getListData(data));
+            setPagination(getPaginationMeta(data));
+            setSummary(data?.meta?.summary || null);
             setError('');
         } catch (err) {
+            if (err.name === 'AbortError') return;
             console.error(err);
             setError(err.message || 'Could not load preparation board.');
         } finally {
-            if (!silent) setLoading(false);
+            if (controller && boardRequestRef.current === controller) {
+                boardRequestRef.current = null;
+                if (!silent) setLoading(false);
+            }
         }
     };
 
     useEffect(() => {
         fetchBoard();
-    }, []);
+    }, [page, perPage, debouncedQuery, attentionFilter, departmentFilter]);
 
     useEffect(() => {
         setPage(1);
-    }, [query, attentionFilter, departmentFilter, perPage]);
-
-    const filteredRows = useMemo(() => {
-        const needle = query.trim().toLowerCase();
-
-        return rows.filter((row) => {
-            const booking = row.booking || {};
-            const flags = row.attention_flags || [];
-            const tasks = row.tasks || [];
-            const haystack = [
-                booking.id,
-                booking.event_name,
-                booking.event_type,
-                booking.client_full_name,
-                booking.client_email,
-                booking.status,
-            ].join(' ').toLowerCase();
-
-            if (needle && !haystack.includes(needle)) return false;
-            if (attentionFilter === 'needs_attention' && flags.length === 0) return false;
-            if (attentionFilter !== 'all' && attentionFilter !== 'needs_attention' && row.readiness?.[attentionFilter] !== false) return false;
-            if (departmentFilter !== 'all' && !tasks.some((task) => task.department === departmentFilter)) return false;
-
-            return true;
-        });
-    }, [rows, query, attentionFilter, departmentFilter]);
-
-    const pagedRows = useMemo(() => {
-        const start = (page - 1) * perPage;
-        return filteredRows.slice(start, start + perPage);
-    }, [filteredRows, page, perPage]);
+    }, [debouncedQuery, attentionFilter, departmentFilter, perPage]);
 
     const selectedRow = useMemo(() => {
         return rows.find((row) => row.booking?.id === selectedBookingId) || null;
@@ -133,6 +130,22 @@ const PreparationBoard = () => {
             )}
 
             <div className="staff-work-surface">
+                {summary && (
+                    <div className="mb-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                        {[
+                            ['Upcoming', summary.upcoming],
+                            ['Needs attention', summary.needs_attention],
+                            ['Payment not clear', summary.payment_not_clear],
+                            ['Menu missing', summary.menu_missing],
+                            ['Venue missing', summary.venue_missing],
+                        ].map(([label, value]) => (
+                            <div key={label} className="rounded-xl border border-[#ead8cc] bg-[#fbf8f2] px-4 py-3">
+                                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">{label}</p>
+                                <strong className="mt-1 block text-2xl font-black text-slate-950">{Number(value || 0)}</strong>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <div className="staff-filter-bar">
                     <input
                         value={query}
@@ -155,12 +168,13 @@ const PreparationBoard = () => {
                     <button type="button" onClick={() => fetchBoard()} className="staff-row-action">Refresh</button>
                 </div>
 
-                {loading ? (
-                    <div className="staff-empty-compact">Loading preparation board...</div>
-                ) : filteredRows.length === 0 ? (
+                {loading && rows.length === 0 ? (
+                    <StaffSkeleton rows={7} label="Loading preparation board" />
+                ) : rows.length === 0 ? (
                     <div className="staff-empty-compact">No approved event handoffs match the current filters.</div>
                 ) : (
                     <>
+                        {loading && <div className="mb-3"><StaffSkeleton rows={1} label="Refreshing preparation board" /></div>}
                         <div className="staff-table-wrap custom-scrollbar">
                             <table className="staff-table">
                                 <thead>
@@ -174,7 +188,7 @@ const PreparationBoard = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {pagedRows.map((row) => {
+                                    {rows.map((row) => {
                                         const readiness = summarizeReadiness(row.readiness);
 
                                         return (
@@ -228,7 +242,7 @@ const PreparationBoard = () => {
                         <StaffPagination
                             page={page}
                             perPage={perPage}
-                            total={filteredRows.length}
+                            total={pagination?.total || rows.length}
                             onPageChange={setPage}
                             onPerPageChange={setPerPage}
                             perPageOptions={[10, 25, 50]}

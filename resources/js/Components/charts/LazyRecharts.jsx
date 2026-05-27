@@ -5,8 +5,12 @@ const loadRechartsComponent = (name) => lazy(() => (
 ));
 
 const chartFallback = (
-    <div className="flex h-full min-h-[220px] items-center justify-center rounded-xl border border-slate-100 bg-slate-50 text-xs font-bold uppercase tracking-widest text-slate-400">
-        Loading chart...
+    <div className="staff-skeleton staff-skeleton-panel flex h-full min-h-[220px] items-center justify-center rounded-xl border border-slate-100 bg-slate-50" aria-label="Loading chart">
+        <div className="staff-skeleton-panel-lines w-full max-w-sm">
+            <span />
+            <span />
+            <span />
+        </div>
     </div>
 );
 

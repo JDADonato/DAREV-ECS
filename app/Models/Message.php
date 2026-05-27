@@ -14,13 +14,22 @@ class Message extends Model
         'sender_id',
         'receiver_id',
         'message',
+        'message_type',
         'read_at',
+        'edited_at',
+        'deleted_at',
+        'deleted_by',
+        'delete_reason',
+        'metadata',
     ];
 
     protected function casts(): array
     {
         return [
             'read_at' => 'datetime',
+            'edited_at' => 'datetime',
+            'deleted_at' => 'datetime',
+            'metadata' => 'array',
         ];
     }
 
@@ -48,5 +57,10 @@ class Message extends Model
     public function receiver()
     {
         return $this->belongsTo(User::class, 'receiver_id');
+    }
+
+    public function deletedBy()
+    {
+        return $this->belongsTo(User::class, 'deleted_by');
     }
 }

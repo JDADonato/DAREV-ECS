@@ -27,6 +27,16 @@ class User extends Authenticatable
         'email_verified_at',
         'otp_code',
         'otp_expires_at',
+        'otp_resend_available_at',
+        'otp_resend_attempts',
+        'account_status',
+        'deactivated_at',
+        'deactivated_by',
+        'deactivation_reason',
+        'must_change_password',
+        'password_changed_at',
+        'temporary_password_expires_at',
+        'last_login_at',
     ];
 
     /**
@@ -47,6 +57,13 @@ class User extends Authenticatable
             'password' => 'hashed',
             'email_verified_at' => 'datetime',
             'otp_expires_at' => 'datetime',
+            'otp_resend_available_at' => 'datetime',
+            'otp_resend_attempts' => 'integer',
+            'deactivated_at' => 'datetime',
+            'must_change_password' => 'boolean',
+            'password_changed_at' => 'datetime',
+            'temporary_password_expires_at' => 'datetime',
+            'last_login_at' => 'datetime',
             'notification_preferences' => 'array',
             'profile_preferences' => 'array',
         ];
@@ -90,6 +107,11 @@ class User extends Authenticatable
         return $this->hasMany(Conversation::class, 'staff_id');
     }
 
+    public function conversationParticipations()
+    {
+        return $this->hasMany(ConversationParticipant::class);
+    }
+
     // ─── Role Helpers ───
 
     public function isAdmin(): bool
@@ -110,5 +132,10 @@ class User extends Authenticatable
     public function isClient(): bool
     {
         return $this->role === 'Client';
+    }
+
+    public function isActive(): bool
+    {
+        return ($this->account_status ?? 'active') === 'active';
     }
 }

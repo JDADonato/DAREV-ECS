@@ -26,6 +26,10 @@ class PaymentController extends Controller
 
     public function initializeCheckout(Request $request, PayMongoService $payMongo, PaymentCalculationService $paymentCalculation)
     {
+        if (!$request->user()?->email_verified_at) {
+            return back()->with('error', 'Please verify your email before making a payment.');
+        }
+
         $validated = $request->validate([
             'booking_id' => ['required', 'integer', 'exists:bookings,id'],
             'payment_id' => ['required', 'integer', 'exists:payments,id'],

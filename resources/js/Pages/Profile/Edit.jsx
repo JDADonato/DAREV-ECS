@@ -13,6 +13,12 @@ const notificationLabels = {
     payment_reminders: 'Payment reminders',
     message_alerts: 'Message alerts',
     announcements: 'Announcements',
+    sound_enabled: 'Notification sounds',
+    message_sounds: 'Message sounds',
+    booking_update_sounds: 'Booking update sounds',
+    payment_update_sounds: 'Payment update sounds',
+    staff_update_sounds: 'Staff update sounds',
+    quiet_mode: 'Quiet mode',
 };
 
 const contactLabels = {
@@ -119,6 +125,9 @@ const ProfileEdit = () => {
     const [passwordCodeExpiresAt, setPasswordCodeExpiresAt] = useState(null);
     const [passwordCodeSecondsRemaining, setPasswordCodeSecondsRemaining] = useState(0);
     const [pendingNotificationToggle, setPendingNotificationToggle] = useState(null);
+    const [deleteForm, setDeleteForm] = useState({ password: '', confirmation: '', reason: '' });
+    const [deletingAccount, setDeletingAccount] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
 
     const displayName = user.full_name || user.username || 'Profile';
     const initial = displayName.charAt(0).toUpperCase();
@@ -126,6 +135,18 @@ const ProfileEdit = () => {
     const verified = Boolean(user.email_verified_at);
     const notificationPrefs = user.notification_preferences || {};
     const profilePrefs = user.profile_preferences || {};
+    const activeNotificationLabels = isClient ? notificationLabels : {
+        booking_updates: 'Booking assignments',
+        payment_reminders: 'Payment and refund updates',
+        message_alerts: 'Customer messages',
+        announcements: 'Staff announcements',
+        sound_enabled: 'Notification sounds',
+        message_sounds: 'Message sounds',
+        booking_update_sounds: 'Booking update sounds',
+        payment_update_sounds: 'Payment update sounds',
+        staff_update_sounds: 'Staff update sounds',
+        quiet_mode: 'Quiet mode',
+    };
 
     const { data, setData, post, processing, errors, reset, isDirty, transform } = useForm({
         _method: 'PUT',
@@ -139,6 +160,12 @@ const ProfileEdit = () => {
             payment_reminders: notificationPrefs.payment_reminders ?? true,
             message_alerts: notificationPrefs.message_alerts ?? true,
             announcements: notificationPrefs.announcements ?? true,
+            sound_enabled: notificationPrefs.sound_enabled ?? false,
+            message_sounds: notificationPrefs.message_sounds ?? false,
+            booking_update_sounds: notificationPrefs.booking_update_sounds ?? false,
+            payment_update_sounds: notificationPrefs.payment_update_sounds ?? false,
+            staff_update_sounds: notificationPrefs.staff_update_sounds ?? false,
+            quiet_mode: notificationPrefs.quiet_mode ?? false,
         },
         profile_preferences: {
             default_event_city: profilePrefs.default_event_city || '',
@@ -194,7 +221,6 @@ const ProfileEdit = () => {
             : user.role === 'Accounting'
                 ? '/dashboard/accounting'
                 : '/dashboard/admin';
-
     const readinessItems = useMemo(() => {
         const items = [
             { key: 'full_name', label: 'Full name', detail: 'Used on contracts, receipts, and staff follow-ups.', complete: Boolean(data.full_name) },
@@ -221,14 +247,15 @@ const ProfileEdit = () => {
     const passwordCodeExpired = Boolean(passwordCodeExpiresAt) && passwordCodeSecondsRemaining === 0;
     const passwordCodeCountdown = `${Math.floor(passwordCodeSecondsRemaining / 60)}:${String(passwordCodeSecondsRemaining % 60).padStart(2, '0')}`;
 
-    const avatarPreview = data.avatar ? URL.createObjectURL(data.avatar) : (data.remove_avatar ? null : user.avatar_url);
-    const selectedAvatarLabel = data.avatar
-        ? data.avatar.name
-        : data.remove_avatar
-            ? 'Photo will be removed'
-            : user.avatar_url
-                ? 'Current profile photo'
-                : 'No photo uploaded';
+    const selectedAvatarUrl = useMemo(() => data.avatar ? URL.createObjectURL(data.avatar) : null, [data.avatar]);
+    const persistedAvatarUrl = user.avatar_url || null;
+    const avatarPreview = selectedAvatarUrl || (data.remove_avatar ? null : persistedAvatarUrl);
+
+    useEffect(() => () => {
+        if (selectedAvatarUrl) {
+            URL.revokeObjectURL(selectedAvatarUrl);
+        }
+    }, [selectedAvatarUrl]);
 
     const resetPhotoEditor = () => {
         setPhotoZoom(1);
@@ -256,7 +283,7 @@ const ProfileEdit = () => {
 
     const clearAvatar = () => {
         setData('avatar', null);
-        setData('remove_avatar', Boolean(user.avatar_url));
+        setData('remove_avatar', Boolean(persistedAvatarUrl));
         if (fileInputRef.current) fileInputRef.current.value = '';
         setPhotoModalOpen(false);
         setPhotoDraftUrl(null);
@@ -431,6 +458,40 @@ const ProfileEdit = () => {
         });
     };
 
+    const deleteAccount = async () => {
+        if (!isClient || deletingAccount) return;
+        setDeletingAccount(true);
+        setDeleteError('');
+
+        try {
+            const response = await fetch('/profile/account', {
+                method: 'DELETE',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify(deleteForm),
+            });
+
+            if (response.redirected) {
+                window.location.href = response.url;
+                return;
+            }
+
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(Object.values(payload.errors || {})?.[0]?.[0] || payload.message || 'Could not delete account.');
+            }
+
+            window.location.href = '/';
+        } catch (error) {
+            setDeleteError(error.message || 'Could not delete account.');
+        } finally {
+            setDeletingAccount(false);
+        }
+    };
+
     const cancelEdit = () => {
         setEditing(null);
         reset();
@@ -519,12 +580,13 @@ const ProfileEdit = () => {
             />
             <div className="py-6">
                 {editing === 'personal' ? (
-                    <div className="grid gap-6 xl:grid-cols-[260px_1fr]">
-                        <div>
+                    <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
+                        <div className="flex w-full max-w-[200px] justify-self-center self-start">
+                            <div className="w-full text-center">
                             <button
                                 type="button"
-                                onClick={chooseAvatar}
-                                className="group relative h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md"
+                                onClick={openPhotoModal}
+                                className="group relative mx-auto h-32 w-32 overflow-hidden rounded-[1.75rem] bg-[#720101] text-white shadow-md"
                                 aria-label="Choose a new profile photo"
                             >
                                 {avatarPreview ? <img src={avatarPreview} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-black">{initial}</div>}
@@ -532,88 +594,69 @@ const ProfileEdit = () => {
                                     Change photo
                                 </span>
                             </button>
-                            <div className="mt-4 rounded-2xl border border-[#ead8cc] bg-white p-4 shadow-sm">
+                            <div className="mt-4 text-center">
                                 <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Profile photo</p>
-                                <p className="mt-1 max-w-full truncate text-sm font-bold text-slate-500">{selectedAvatarLabel}</p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={openPhotoModal}
-                                        className="rounded-xl bg-[#720101] px-4 py-2.5 text-sm font-black text-white transition hover:bg-[#5a0101]"
-                                    >
-                                        {avatarPreview ? 'Edit photo' : 'Upload photo'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={chooseAvatar}
-                                        className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2.5 text-sm font-black text-[#720101] transition hover:bg-[#fff7e8]"
-                                    >
-                                        Choose file
-                                    </button>
-                                    {(data.avatar || user.avatar_url) && (
-                                        <button
-                                            type="button"
-                                            onClick={clearAvatar}
-                                            className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 transition hover:bg-red-100"
-                                        >
-                                            {data.avatar ? 'Clear' : 'Remove'}
-                                        </button>
-                                    )}
-                                </div>
-                                <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">JPG, PNG, or WEBP up to 2MB.</p>
+                                <p className="mt-2 text-sm font-bold leading-6 text-slate-500">Click to upload or change.</p>
+                                <p className="mt-1 text-xs font-bold text-slate-400">JPG, PNG, or WEBP up to 2MB.</p>
                             </div>
+                            {(data.avatar || persistedAvatarUrl) && (
+                                <button
+                                    type="button"
+                                    onClick={clearAvatar}
+                                    className="mt-4 w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 transition hover:bg-red-100"
+                                >
+                                    {data.avatar ? 'Clear selected photo' : 'Remove photo'}
+                                </button>
+                            )}
                             <FieldError message={errors.avatar} />
+                            </div>
                         </div>
-                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid content-start gap-5 sm:grid-cols-2">
                             <label>
                                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">Full name</span>
-                                <input value={data.full_name} onChange={(e) => setData('full_name', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
+                                <input value={data.full_name} onChange={(e) => setData('full_name', e.target.value)} className="mt-2 h-14 w-full rounded-xl border border-slate-200 px-4 text-sm font-bold shadow-sm transition focus:border-[#720101] focus:outline-none focus:ring-2 focus:ring-[#720101]/10" />
                                 <FieldError message={errors.full_name} />
                             </label>
                             <label>
-                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Username</span>
-                                <input value={data.username} onChange={(e) => setData('username', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
-                                <FieldError message={errors.username} />
-                            </label>
-                            <label>
                                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">Email</span>
-                                <input type="email" value={data.email} onChange={(e) => setData('email', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
+                                <input type="email" value={data.email} onChange={(e) => setData('email', e.target.value)} className="mt-2 h-14 w-full rounded-xl border border-slate-200 px-4 text-sm font-bold shadow-sm transition focus:border-[#720101] focus:outline-none focus:ring-2 focus:ring-[#720101]/10" />
                                 <FieldError message={errors.email} />
                             </label>
                             <label>
+                                <span className="text-xs font-black uppercase tracking-widest text-slate-500">Username</span>
+                                <input value={data.username} onChange={(e) => setData('username', e.target.value)} className="mt-2 h-14 w-full rounded-xl border border-slate-200 px-4 text-sm font-bold shadow-sm transition focus:border-[#720101] focus:outline-none focus:ring-2 focus:ring-[#720101]/10" />
+                                <FieldError message={errors.username} />
+                            </label>
+                            <label>
                                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">Phone</span>
-                                <input value={data.phone} onChange={(e) => setData('phone', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold" />
+                                <input value={data.phone} onChange={(e) => setData('phone', e.target.value)} className="mt-2 h-14 w-full rounded-xl border border-slate-200 px-4 text-sm font-bold shadow-sm transition focus:border-[#720101] focus:outline-none focus:ring-2 focus:ring-[#720101]/10" />
                                 <FieldError message={errors.phone} />
                             </label>
-                            <label className="sm:col-span-2 xl:col-span-1">
+                            <label className="sm:col-span-2">
                                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">Preferred contact method</span>
-                                <select value={data.preferred_contact_method} onChange={(e) => setData('preferred_contact_method', e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">
+                                <select value={data.preferred_contact_method} onChange={(e) => setData('preferred_contact_method', e.target.value)} className="mt-2 h-14 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold shadow-sm transition focus:border-[#720101] focus:outline-none focus:ring-2 focus:ring-[#720101]/10">
                                     <option value="email">Email</option>
                                     <option value="phone">Phone</option>
                                     <option value="dashboard">Dashboard messages</option>
                                 </select>
                             </label>
-                            <div className="sm:col-span-2 xl:col-span-3">
+                            <div className="sm:col-span-2">
                                 <EditActions onCancel={cancelEdit} onSave={submit} processing={processing} />
                             </div>
                         </div>
                     </div>
                 ) : (
-                    <div className="grid gap-x-8 xl:grid-cols-[220px_1fr]">
-                        <div className="mb-6 lg:mb-0">
-                            <button
-                                type="button"
-                                onClick={chooseAvatar}
-                                className="group relative h-32 w-32 overflow-hidden rounded-[2rem] bg-[#720101] text-white shadow-md"
-                                aria-label="Choose a new profile photo"
-                            >
-                                {user.avatar_url ? <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-black">{initial}</div>}
-                                <span className="absolute inset-0 flex items-center justify-center bg-black/55 px-3 text-center text-xs font-black uppercase tracking-widest opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-                                    Change photo
-                                </span>
-                            </button>
+                    <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+                        <div className="flex w-full max-w-[200px] justify-self-center self-start">
+                            <div className="w-full text-center">
+                            <div className="relative mx-auto h-32 w-32 overflow-hidden rounded-[1.75rem] bg-[#720101] text-white shadow-md">
+                                {avatarPreview ? <img src={avatarPreview} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-5xl font-black">{initial}</div>}
+                            </div>
+                            <p className="mt-4 text-xs font-black uppercase tracking-[0.18em] text-[#9f6500]">Profile photo</p>
+                            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">Edit your details to update this photo.</p>
+                            </div>
                         </div>
-                        <div className="grid gap-x-8 sm:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid content-start gap-x-8 sm:grid-cols-2 xl:grid-cols-3">
                             <InfoRow label="Full name" value={user.full_name} />
                             <InfoRow label="Username" value={user.username} />
                             <InfoRow label="Email" value={user.email} />
@@ -636,8 +679,8 @@ const ProfileEdit = () => {
                 action={isClient && editing !== 'preferences' && <button type="button" onClick={() => setEditing('preferences')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-black text-white">Set default event details</button>}
             />
             <div className="py-6">
-                <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-                    <div className="rounded-2xl border border-[#ead8cc] bg-[#fffaf3] p-5">
+                <div className={`grid gap-6 ${isClient ? 'xl:grid-cols-[0.9fr_1.1fr]' : ''}`}>
+                    {isClient && <div className="rounded-2xl border border-[#ead8cc] bg-[#fffaf3] p-5">
                         <div className="flex items-start justify-between gap-4">
                             <div>
                                 <p className="text-xs font-black uppercase tracking-[0.2em] text-[#9f6500]">Event defaults</p>
@@ -673,7 +716,7 @@ const ProfileEdit = () => {
                                 <InfoRow label="Planning notes" value={profilePrefs.planning_notes} />
                             </div>
                         )}
-                    </div>
+                    </div>}
 
                     <div className="rounded-2xl border border-[#ead8cc] bg-white p-5">
                         <div className="flex items-start gap-3">
@@ -687,7 +730,7 @@ const ProfileEdit = () => {
                             </div>
                         </div>
                         <div className="mt-5 grid gap-3">
-                            {Object.entries(notificationLabels).map(([key, label]) => (
+                            {Object.entries(activeNotificationLabels).map(([key, label]) => (
                                 <div key={key} className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 ${data.notification_preferences[key] ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
                                     <div>
                                         <p className="font-black text-slate-950">{label}</p>
@@ -828,6 +871,22 @@ const ProfileEdit = () => {
                             text="Changing your password here will not alter profile, booking, or contact details."
                             tone="warm"
                         />
+                        {isClient && (
+                            <div className="rounded-2xl border border-red-200 bg-red-50 p-5 lg:col-span-3">
+                                <p className="text-xs font-black uppercase tracking-[0.18em] text-red-700">Account deletion</p>
+                                <h3 className="mt-2 text-xl font-black text-slate-950">Deactivate my account</h3>
+                                <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">This removes your access while preserving booking, payment, and audit records for business history.</p>
+                                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                                    <input type="password" value={deleteForm.password} onChange={(e) => setDeleteForm((current) => ({ ...current, password: e.target.value }))} placeholder="Current password" className="rounded-xl border border-red-100 bg-white px-4 py-3 text-sm font-bold" />
+                                    <input value={deleteForm.confirmation} onChange={(e) => setDeleteForm((current) => ({ ...current, confirmation: e.target.value }))} placeholder="Type DELETE" className="rounded-xl border border-red-100 bg-white px-4 py-3 text-sm font-bold" />
+                                    <input value={deleteForm.reason} onChange={(e) => setDeleteForm((current) => ({ ...current, reason: e.target.value }))} placeholder="Reason, optional" className="rounded-xl border border-red-100 bg-white px-4 py-3 text-sm font-bold" />
+                                </div>
+                                {deleteError && <p className="mt-3 text-sm font-bold text-red-700">{deleteError}</p>}
+                                <button type="button" onClick={deleteAccount} disabled={deletingAccount || deleteForm.confirmation !== 'DELETE'} className="mt-4 rounded-xl bg-red-800 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                                    {deletingAccount ? 'Deactivating...' : 'Deactivate account'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -859,14 +918,8 @@ const ProfileEdit = () => {
         </>
     );
 
-    return (
-        <DefaultLayout>
-            <Head title="Profile | Eloquente Catering">
-                <meta name="description" content="Manage your Eloquente Catering profile, contact details, preferences, password, and account activity." />
-            </Head>
-            <div className="min-h-screen bg-[#f7f4ee] text-slate-950">
-                <ClientNavbar user={user} activePath="/profile" />
-                <main className="mx-auto max-w-[1500px] px-4 pb-12 pt-24 sm:px-6 lg:px-8">
+    const profileContent = (
+                <main className={isClient ? 'mx-auto max-w-[1500px] px-4 pb-12 pt-24 sm:px-6 lg:px-8' : 'mx-auto max-w-[1500px] px-4 py-10 sm:px-6 lg:px-8'}>
                     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p className="text-xs font-black uppercase tracking-[0.22em] text-[#9f6500]">Eloquente account</p>
@@ -887,56 +940,54 @@ const ProfileEdit = () => {
                         className="hidden"
                     />
 
-                    <section className="relative overflow-hidden rounded-[1.75rem] border border-[#ead8cc] bg-[#171412] shadow-xl shadow-black/10">
-                        <div className="pointer-events-none absolute -right-24 -top-28 h-72 w-72 rounded-full bg-[#f0aa0b]/20 blur-3xl" />
-                        <div className="pointer-events-none absolute bottom-0 left-1/3 h-24 w-96 rounded-full bg-[#720101]/35 blur-3xl" />
-                        <div className="relative grid gap-5 p-5 text-white lg:grid-cols-[1.05fr_1.25fr_0.85fr] lg:items-stretch">
-                            <div className="flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-[1.4rem] bg-[#720101] shadow-lg ring-4 ring-white/10">
-                                    {user.avatar_url ? <img src={user.avatar_url} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-3xl font-black">{initial}</div>}
+                    <section className="staff-console-panel">
+                        <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_1.25fr_0.85fr] lg:items-stretch">
+                            <div className="flex min-w-0 items-center gap-4 rounded-xl border border-[#ead8cc] bg-white p-4">
+                                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[#720101] text-white">
+                                    {avatarPreview ? <img src={avatarPreview} alt={`${displayName} profile`} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-3xl font-black">{initial}</div>}
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#f0aa0b]">Account profile</p>
-                                    <h2 className="mt-1 truncate text-3xl font-black leading-tight">{displayName}</h2>
-                                    <p className="mt-1 truncate text-sm font-bold text-white/60">@{user.username} / {user.role || 'Account'}</p>
+                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#9f6500]">Account profile</p>
+                                    <h2 className="mt-1 truncate text-2xl font-black leading-tight text-slate-950">{displayName}</h2>
+                                    <p className="mt-1 truncate text-sm font-bold text-slate-500">@{user.username} / {user.role || 'Account'}</p>
                                 </div>
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+                            <div className="rounded-xl border border-[#ead8cc] bg-white p-4">
                                 <div className="flex items-start justify-between gap-4">
                                     <div>
-                                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/50">Profile readiness</p>
-                                        <p className="mt-2 text-2xl font-black">{completion}%</p>
+                                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Profile readiness</p>
+                                        <p className="mt-2 text-2xl font-black text-slate-950">{completion}%</p>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={() => setActiveTab('overview')}
-                                        className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-black text-white/80 transition hover:bg-white/15"
+                                        className="staff-button-secondary min-h-0 px-3 py-1.5 text-xs"
                                     >
                                         View checklist
                                     </button>
                                 </div>
-                                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-                                    <div className="h-full rounded-full bg-gradient-to-r from-[#f0aa0b] to-[#ffd86b]" style={{ width: `${completion}%` }} />
+                                <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+                                    <div className="h-full rounded-full bg-[#720101]" style={{ width: `${completion}%` }} />
                                 </div>
-                                <p className="mt-3 text-sm font-semibold leading-6 text-white/60">
+                                <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
                                     {missingReadiness.length === 0
                                         ? 'Everything required is ready for staff communications and booking updates.'
                                         : `Add ${missingReadiness.slice(0, 2).map((item) => item.label.toLowerCase()).join(' and ')}${missingReadiness.length > 2 ? `, plus ${missingReadiness.length - 2} more` : ''} to reach 100%.`}
                                 </p>
                             </div>
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                                <div className="rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-white/45">Email</p>
-                                    <p className="mt-1 text-lg font-black">{verified ? 'Verified' : 'Needs review'}</p>
+                                <div className="rounded-xl border border-[#ead8cc] bg-white px-4 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email</p>
+                                    <p className="mt-1 text-lg font-black text-slate-950">{verified ? 'Verified' : 'Needs review'}</p>
                                 </div>
-                                <div className="rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-white/45">Contact</p>
-                                    <p className="mt-1 text-lg font-black">{contactLabels[user.preferred_contact_method || 'email']}</p>
+                                <div className="rounded-xl border border-[#ead8cc] bg-white px-4 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Contact</p>
+                                    <p className="mt-1 text-lg font-black text-slate-950">{contactLabels[user.preferred_contact_method || 'email']}</p>
                                 </div>
                             </div>
                         </div>
                         {!verified && (
-                            <div className="border-b border-[#ead8cc] bg-[#fff7d6] px-5 py-3">
+                            <div className="border-t border-[#ead8cc] bg-[#fff7d6] px-5 py-3">
                                 <p className="text-sm font-bold text-[#9f6500]">Email verification is needed for account recovery and booking notices.</p>
                             </div>
                         )}
@@ -946,7 +997,7 @@ const ProfileEdit = () => {
                         {tabs.map(([id, label]) => <TabButton key={id} active={activeTab === id} onClick={() => { setActiveTab(id); setEditing(null); }}>{label}</TabButton>)}
                     </nav>
 
-                    <section className="mt-6 overflow-hidden rounded-[1.5rem] border border-[#ead8cc] bg-white px-5 shadow-sm sm:px-6">
+                    <section className="staff-console-panel mt-6 px-5 sm:px-6">
                         {activeTab === 'overview' && renderOverview()}
                         {activeTab === 'personal' && renderPersonal()}
                         {activeTab === 'preferences' && renderPreferences()}
@@ -1068,7 +1119,7 @@ const ProfileEdit = () => {
                                     </div>
                                     <div>
                                         <p className="text-xs font-black uppercase tracking-[0.2em] text-[#9f6500]">Important alert</p>
-                                        <h3 className="mt-1 text-xl font-black text-slate-950">Turn off {notificationLabels[pendingNotificationToggle]}?</h3>
+                                        <h3 className="mt-1 text-xl font-black text-slate-950">Turn off {activeNotificationLabels[pendingNotificationToggle]}?</h3>
                                         <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
                                             This alert helps you catch booking, payment, message, or announcement updates. You can turn it back on anytime.
                                         </p>
@@ -1092,7 +1143,23 @@ const ProfileEdit = () => {
                         </div>
                     )}
                 </main>
-            </div>
+    );
+
+    return (
+        <DefaultLayout>
+            <Head title="Profile | Eloquente Catering">
+                <meta name="description" content="Manage your Eloquente Catering profile, contact details, preferences, password, and account activity." />
+            </Head>
+            {isClient ? (
+                <div className="min-h-screen bg-[#f7f4ee] text-slate-950">
+                    <ClientNavbar user={user} activePath="/profile" />
+                    {profileContent}
+                </div>
+            ) : (
+                <div className="min-h-screen bg-[#f7f4ee] text-slate-950">
+                    {profileContent}
+                </div>
+            )}
         </DefaultLayout>
     );
 };

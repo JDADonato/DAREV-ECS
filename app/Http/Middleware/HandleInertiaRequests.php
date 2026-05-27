@@ -40,6 +40,11 @@ class HandleInertiaRequests extends Middleware
                     'profile_preferences' => $request->user()->profile_preferences,
                     'role' => $request->user()->role,
                     'email_verified_at' => $request->user()->email_verified_at,
+                    'otp_expires_at' => optional($request->user()->otp_expires_at)->toIso8601String(),
+                    'otp_resend_available_at' => optional($request->user()->otp_resend_available_at)->toIso8601String(),
+                    'otp_resend_attempts' => (int) ($request->user()->otp_resend_attempts ?? 0),
+                    'account_status' => $request->user()->account_status ?? 'active',
+                    'must_change_password' => (bool) ($request->user()->must_change_password ?? false),
                 ] : null,
             ],
             'flash' => [

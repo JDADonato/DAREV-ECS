@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BusinessRule;
+use App\Models\BusinessSetting;
 use App\Models\EventType;
 use App\Models\MenuItem;
 use App\Models\Package;
@@ -12,6 +13,44 @@ use Illuminate\Validation\Rule;
 
 class SettingsController extends Controller
 {
+    public function businessSettings()
+    {
+        $settings = BusinessSetting::query()
+            ->orderBy('group')
+            ->orderBy('key')
+            ->get()
+            ->groupBy('group')
+            ->map(fn ($items) => $items->mapWithKeys(fn ($item) => [$item->key => $item->value]));
+
+        return response()->json([
+            'settings' => $settings,
+        ]);
+    }
+
+    public function updateBusinessSettings(Request $request)
+    {
+        $data = $request->validate([
+            'group' => ['required', 'string', 'max:80'],
+            'settings' => ['required', 'array'],
+        ]);
+
+        foreach ($data['settings'] as $key => $value) {
+            BusinessSetting::updateOrCreate(
+                ['key' => $key],
+                [
+                    'value' => is_array($value) ? $value : ['value' => $value],
+                    'group' => $data['group'],
+                    'updated_by' => $request->user()?->id,
+                ]
+            );
+        }
+
+        return response()->json([
+            'message' => 'Settings updated successfully.',
+            'settings' => BusinessSetting::where('group', $data['group'])->get()->mapWithKeys(fn ($item) => [$item->key => $item->value]),
+        ]);
+    }
+
     public function paymentRules()
     {
         return response()->json(BusinessRule::getActive());
