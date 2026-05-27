@@ -31,6 +31,7 @@ const StaffMessaging = lazy(() => import('../Components/common/StaffMessaging'))
 const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
 const PreparationBoard = lazy(() => import('../Components/operations/PreparationBoard'));
 import { getListData } from '../utils/apiResponses';
+import csrfFetch from '../utils/csrf';
 
 const PACKAGE_CATEGORY_OPTIONS = [
     { value: 'premium', label: 'Weddings & Debuts' },
@@ -51,19 +52,6 @@ const REVIEW_QUEUE_VIEWS = [
     { id: 'mine', label: 'My Bookings' },
     { id: 'all', label: 'All Bookings' },
 ];
-
-const csrfHeaders = (headers = {}) => ({
-    Accept: 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
-    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-    ...headers,
-});
-
-const csrfFetch = (url, options = {}) => fetch(url, {
-    ...options,
-    credentials: 'same-origin',
-    headers: csrfHeaders(options.headers || {}),
-});
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',

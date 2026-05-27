@@ -47,6 +47,13 @@ return [
             'password' => env('MAIL_PASSWORD'),
             'timeout' => null,
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+            'stream' => [
+                'ssl' => [
+                    'cafile' => env('MAIL_CA_BUNDLE', storage_path('app/cacert.pem')),
+                    'verify_peer' => env('MAIL_VERIFY_PEER', true),
+                    'verify_peer_name' => env('MAIL_VERIFY_PEER_NAME', true),
+                ],
+            ],
         ],
 
         'ses' => [

@@ -1,12 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePage } from '@inertiajs/react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
-
-const csrfRequestHeaders = () => ({
-    Accept: 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
-    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-});
+import csrfFetch from '../../utils/csrf';
 
 /**
  * NotificationBell — displays a bell icon with an unread badge.
@@ -140,7 +135,7 @@ const NotificationBell = ({ variant = 'light', placement = 'inline' }) => {
 
     const markAsRead = async (id) => {
         try {
-            await fetch(`/api/notifications/${id}/read`, { method: 'PUT', credentials: 'same-origin', headers: csrfRequestHeaders() });
+            await csrfFetch(`/api/notifications/${id}/read`, { method: 'PUT' });
             setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
             setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (e) {
@@ -150,7 +145,7 @@ const NotificationBell = ({ variant = 'light', placement = 'inline' }) => {
 
     const markAllAsRead = async () => {
         try {
-            await fetch('/api/notifications/read-all', { method: 'PUT', credentials: 'same-origin', headers: csrfRequestHeaders() });
+            await csrfFetch('/api/notifications/read-all', { method: 'PUT' });
             setNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
             setUnreadCount(0);
         } catch (e) {
@@ -162,7 +157,7 @@ const NotificationBell = ({ variant = 'light', placement = 'inline' }) => {
         const target = notifications.find(notification => notification.id === id);
 
         try {
-            const res = await fetch(`/api/notifications/${id}`, { method: 'DELETE', credentials: 'same-origin', headers: csrfRequestHeaders() });
+            const res = await csrfFetch(`/api/notifications/${id}`, { method: 'DELETE' });
             if (!res.ok) return;
 
             setNotifications(prev => prev.filter(notification => notification.id !== id));

@@ -13,6 +13,7 @@ use App\Notifications\CustomerAccountLifecycleNotification;
 use App\Notifications\StaffAccountAccessNotification;
 use App\Notifications\StaffAccountLifecycleNotification;
 use App\Services\AdminReportService;
+use App\Services\EmailDeliveryService;
 use App\Services\EventPreparationService;
 use App\Services\PostEventLifecycleService;
 use App\Support\ApiResponse;
@@ -21,7 +22,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -32,6 +32,8 @@ use Inertia\Inertia;
  */
 class AdminController extends Controller
 {
+    private const TEMPORARY_PASSWORD_TTL_HOURS = 24;
+
     /**
      * Show the Admin dashboard page.
      */
@@ -46,7 +48,7 @@ class AdminController extends Controller
 
     public function getEmployees(Request $request)
     {
-        $query = User::whereIn('role', ['Marketing', 'Accounting'])
+        $query = User::whereIn('role', ['Admin', 'Marketing', 'Accounting'])
             ->when($request->filled('role') && $request->query('role') !== 'all', fn ($q) => $q->where('role', $request->query('role')))
             ->when($request->filled('account_status') && $request->query('account_status') !== 'all', function ($q) use ($request) {
                 if ($request->query('account_status') === 'active') {
@@ -90,7 +92,7 @@ class AdminController extends Controller
             'username' => 'required|string|unique:users,username',
             'email'    => 'nullable|email|unique:users,email',
             'phone'    => 'nullable|string',
-            'role'     => 'required|in:Marketing,Accounting',
+            'role'     => 'required|in:Admin,Marketing,Accounting',
         ]);
 
         $temporaryPassword = Str::password(14);
@@ -104,24 +106,26 @@ class AdminController extends Controller
             'role'     => $request->role,
             'account_status' => 'active',
             'must_change_password' => true,
-            'temporary_password_expires_at' => now()->addDays(7),
+            'temporary_password_expires_at' => now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS),
         ]);
 
-        $emailDelivery = $this->notifyAccountUser($user, new StaffAccountAccessNotification($temporaryPassword, 'created'), 'Invitation email was queued.');
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToNotifiable($user, new StaffAccountAccessNotification($temporaryPassword, 'created'), 'staff_account_created');
 
         $this->recordAccountAudit('Staff account created', $user, 'Succeeded', [
             'target_role' => $user->role,
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'id' => $user->id,
             'username' => $user->username,
             'email' => $user->email,
-            'message' => 'Employee account created. Share the temporary password through a private channel.',
+            'message' => 'Account created. Share the temporary password through a private channel.',
             'temporary_password' => $temporaryPassword,
             'temporary_password_expires_at' => $user->temporary_password_expires_at,
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ], 201);
     }
 
@@ -151,7 +155,7 @@ class AdminController extends Controller
         if ($request->has('password') && $request->password) {
             $updates['password'] = Hash::make($request->password);
             $updates['must_change_password'] = true;
-            $updates['temporary_password_expires_at'] = now()->addDays(7);
+            $updates['temporary_password_expires_at'] = now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS);
         }
 
         if (empty($updates)) {
@@ -163,18 +167,20 @@ class AdminController extends Controller
 
         $emailDelivery = null;
         if (isset($updates['role']) && $updates['role'] !== $originalRole) {
-            $emailDelivery = $this->notifyAccountUser($user, new StaffAccountLifecycleNotification('role_changed', $user->role), 'Role update email was queued.');
+            $emailDelivery = app(EmailDeliveryService::class)
+                ->sendToNotifiable($user, new StaffAccountLifecycleNotification('role_changed', $user->role), 'staff_role_changed');
         }
 
         $this->recordAccountAudit('Staff account updated', $user, 'Succeeded', [
             'changed_fields' => array_values(array_diff(array_keys($updates), ['password'])),
             'role_changed' => isset($updates['role']) && $updates['role'] !== $originalRole,
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'] ?? null,
         ]);
 
         return response()->json([
             'message' => 'Employee account updated successfully',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'] ?? null,
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -193,14 +199,16 @@ class AdminController extends Controller
             'deactivation_reason' => 'Deactivated by administrator.',
         ])->save();
 
-        $emailDelivery = $this->notifyAccountUser($user, new StaffAccountLifecycleNotification('deactivated'), 'Deactivation email was queued.');
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToNotifiable($user, new StaffAccountLifecycleNotification('deactivated'), 'staff_deactivated');
         $this->recordAccountAudit('Staff account deactivated', $user, 'Succeeded', [
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'message' => 'Employee account deactivated successfully',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -216,12 +224,13 @@ class AdminController extends Controller
         $user->forceFill([
             'password' => Hash::make($temporaryPassword),
             'must_change_password' => true,
-            'temporary_password_expires_at' => now()->addDays(7),
+            'temporary_password_expires_at' => now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS),
         ])->save();
 
-        $emailDelivery = $this->notifyAccountUser($user, new StaffAccountAccessNotification($temporaryPassword, 'reset'), 'Password reset email was queued.');
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToNotifiable($user, new StaffAccountAccessNotification($temporaryPassword, 'reset'), 'staff_password_reset');
         $this->recordAccountAudit('Staff password reset', $user, 'Succeeded', [
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'],
         ]);
 
         return response()->json([
@@ -230,7 +239,8 @@ class AdminController extends Controller
             'message' => 'Temporary password generated. Share it through a private channel.',
             'temporary_password' => $temporaryPassword,
             'temporary_password_expires_at' => $user->temporary_password_expires_at,
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -244,14 +254,16 @@ class AdminController extends Controller
 
         $user->forceFill(['must_change_password' => true])->save();
 
-        $emailDelivery = $this->notifyAccountUser($user, new StaffAccountLifecycleNotification('force_password_change'), 'Password-change notice was queued.');
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToNotifiable($user, new StaffAccountLifecycleNotification('force_password_change'), 'staff_force_password_change');
         $this->recordAccountAudit('Required staff password change', $user, 'Succeeded', [
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'message' => 'Staff will be asked to change password on next sign-in.',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -270,14 +282,16 @@ class AdminController extends Controller
             'deactivation_reason' => null,
         ])->save();
 
-        $emailDelivery = $this->notifyAccountUser($user, new StaffAccountLifecycleNotification('reactivated'), 'Reactivation email was queued.');
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToNotifiable($user, new StaffAccountLifecycleNotification('reactivated'), 'staff_reactivated');
         $this->recordAccountAudit('Staff account reactivated', $user, 'Succeeded', [
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'message' => 'Employee account reactivated successfully',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -381,14 +395,16 @@ class AdminController extends Controller
             'deactivation_reason' => 'Deactivated by administrator.',
         ])->save();
 
-        $emailDelivery = $this->notifyCustomerAccount($originalEmail, 'deactivated', $notifyCustomer);
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToAddress($originalEmail, new CustomerAccountLifecycleNotification('deactivated'), 'customer_deactivated', $notifyCustomer);
         $this->recordAccountAudit('Customer account deactivated', $user, 'Succeeded', [
-            'notification' => $emailDelivery,
+            'notification' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'message' => 'Customer account deactivated. Booking and payment records were preserved.',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
@@ -407,62 +423,37 @@ class AdminController extends Controller
             'deactivation_reason' => null,
         ])->save();
 
-        $emailDelivery = $this->notifyCustomerAccount($user->email, 'reactivated', $request->boolean('notify_customer', true));
+        $emailDelivery = app(EmailDeliveryService::class)
+            ->sendToAddress($user->email, new CustomerAccountLifecycleNotification('reactivated'), 'customer_reactivated', $request->boolean('notify_customer', true));
         $this->recordAccountAudit('Customer account reactivated', $user, 'Succeeded', [
-            'notification' => $emailDelivery,
+            'notification' => $emailDelivery['status'],
         ]);
 
         return response()->json([
             'message' => 'Customer account reactivated successfully',
-            'email_delivery' => $emailDelivery,
+            'email_delivery' => $emailDelivery['message'],
+            'email_delivery_status' => $emailDelivery,
         ]);
     }
 
-    private function notifyAccountUser(User $user, object $notification, string $queuedMessage): string
+    public function deliveryDiagnostics(EmailDeliveryService $emailDelivery): \Illuminate\Http\JsonResponse
     {
-        if (!$user->email) {
-            return 'No email address was set, so no email was sent.';
-        }
-
-        try {
-            $user->notify($notification);
-            return $queuedMessage;
-        } catch (\Throwable $e) {
-            Log::warning('Account lifecycle email could not be queued.', [
-                'user_id' => $user->id,
-                'message' => $e->getMessage(),
-            ]);
-
-            return 'Email could not be queued. Complete the account action manually.';
-        }
+        return response()->json($emailDelivery->diagnostics());
     }
 
-    private function notifyCustomerAccount(?string $email, string $event, bool $shouldNotify): string
+    public function sendDiagnosticEmail(Request $request, EmailDeliveryService $emailDelivery): \Illuminate\Http\JsonResponse
     {
-        if (!$shouldNotify) {
-            return 'Customer email notification was skipped by admin.';
-        }
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
 
-        if (!$email) {
-            return 'No email address was set, so no customer email was sent.';
-        }
+        $result = $emailDelivery->sendDiagnostic($data['email']);
 
-        if (str_ends_with($email, '@eloquente.invalid')) {
-            return 'Customer has no reachable email address, so no email was sent.';
-        }
-
-        try {
-            Notification::route('mail', $email)->notify(new CustomerAccountLifecycleNotification($event));
-            return 'Customer notification email was queued.';
-        } catch (\Throwable $e) {
-            Log::warning('Customer account lifecycle email could not be queued.', [
-                'email' => $email,
-                'event' => $event,
-                'message' => $e->getMessage(),
-            ]);
-
-            return 'Customer email could not be queued. Account action still succeeded.';
-        }
+        return response()->json([
+            'message' => $result['message'],
+            'email_delivery' => $result['message'],
+            'email_delivery_status' => $result,
+        ], $result['status'] === 'failed' || $result['status'] === 'mail_not_configured' ? 422 : 200);
     }
 
     private function recordAccountAudit(string $action, ?User $target, string $result, array $metadata = []): void

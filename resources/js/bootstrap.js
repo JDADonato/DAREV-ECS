@@ -8,7 +8,74 @@ window.axios.defaults.withCredentials = true;
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 const originalFetch = window.fetch.bind(window);
 
-window.fetch = (input, init = {}) => {
+const updateCsrfToken = (token) => {
+    if (!token) {
+        return;
+    }
+
+    let meta = document.querySelector('meta[name="csrf-token"]');
+
+    if (!meta) {
+        meta = document.createElement('meta');
+        meta.setAttribute('name', 'csrf-token');
+        document.head.appendChild(meta);
+    }
+
+    meta.setAttribute('content', token);
+    window.axios.defaults.headers.common['X-CSRF-TOKEN'] = token;
+};
+
+const notifySessionExpired = () => {
+    window.dispatchEvent(new CustomEvent('ecs:session-expired', {
+        detail: {
+            message: 'Your session expired. Refresh the page and try again.',
+        },
+    }));
+};
+
+const refreshCsrfToken = async () => {
+    const response = await originalFetch('/api/session/csrf-token', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error('Could not refresh the session token.');
+    }
+
+    const data = await response.json().catch(() => ({}));
+    updateCsrfToken(data.token);
+    return data.token;
+};
+
+const withCsrfHeaders = (input, init = {}) => {
+    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+    const token = csrfToken();
+
+    if (token) {
+        headers.set('X-CSRF-TOKEN', token);
+    }
+
+    if (!headers.has('X-Requested-With')) {
+        headers.set('X-Requested-With', 'XMLHttpRequest');
+    }
+
+    if (!headers.has('Accept')) {
+        headers.set('Accept', 'application/json');
+    }
+
+    return {
+        ...init,
+        headers,
+        credentials: init.credentials || 'same-origin',
+    };
+};
+
+window.fetch = async (input, init = {}) => {
     const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
     const unsafeMethod = !['GET', 'HEAD', 'OPTIONS'].includes(method);
     const rawUrl = input instanceof Request ? input.url : input;
@@ -19,28 +86,37 @@ window.fetch = (input, init = {}) => {
         return originalFetch(input, init);
     }
 
-    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
-    const token = csrfToken();
+    const requestOptions = withCsrfHeaders(input, init);
+    const response = await originalFetch(input, requestOptions);
 
-    if (token && !headers.has('X-CSRF-TOKEN')) {
-        headers.set('X-CSRF-TOKEN', token);
-    }
-
-    if (!headers.has('X-Requested-With')) {
-        headers.set('X-Requested-With', 'XMLHttpRequest');
-    }
-
-    return originalFetch(input, {
-        ...init,
-        headers,
-        credentials: init.credentials || 'same-origin',
-    }).then((response) => {
-        if (response.status === 419 && sameOrigin) {
+    if (response.status !== 419 || init.__csrfRetry) {
+        if (response.status === 419) {
             console.warn('Session token expired or mismatched. Refresh the page before retrying this action.');
+            notifySessionExpired();
         }
 
         return response;
-    });
+    }
+
+    try {
+        await refreshCsrfToken();
+
+        const retryResponse = await originalFetch(input, withCsrfHeaders(input, {
+            ...init,
+            __csrfRetry: true,
+        }));
+
+        if (retryResponse.status === 419) {
+            console.warn('Session token expired or mismatched. Refresh the page before retrying this action.');
+            notifySessionExpired();
+        }
+
+        return retryResponse;
+    } catch (error) {
+        console.warn('Session token expired and could not be refreshed. Refresh the page before retrying this action.', error);
+        notifySessionExpired();
+        return response;
+    }
 };
 
 /**

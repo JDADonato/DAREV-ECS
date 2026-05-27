@@ -44,7 +44,7 @@ class HandleInertiaRequests extends Middleware
                     'otp_resend_available_at' => optional($request->user()->otp_resend_available_at)->toIso8601String(),
                     'otp_resend_attempts' => (int) ($request->user()->otp_resend_attempts ?? 0),
                     'account_status' => $request->user()->account_status ?? 'active',
-                    'must_change_password' => (bool) ($request->user()->must_change_password ?? false),
+                    'must_change_password' => $request->user()->requiresPasswordChange(),
                 ] : null,
             ],
             'flash' => [

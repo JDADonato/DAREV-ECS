@@ -3,11 +3,10 @@
 namespace App\Notifications;
 
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class StaffAccountAccessNotification extends Notification implements ShouldQueue
+class StaffAccountAccessNotification extends Notification
 {
     use Queueable;
 
@@ -24,14 +23,15 @@ class StaffAccountAccessNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
+        $workspaceLabel = $notifiable->role === 'Admin' ? 'admin console' : 'staff workspace';
         $subject = $this->purpose === 'reset'
-            ? 'Your Eloquente staff password was reset'
-            : 'Your Eloquente staff account is ready';
+            ? 'Your Eloquente account password was reset'
+            : 'Your Eloquente account is ready';
 
         return (new MailMessage)
             ->subject($subject)
             ->greeting('Hello ' . ($notifiable->full_name ?: $notifiable->username) . ',')
-            ->line('You can now sign in to the Eloquente staff workspace.')
+            ->line("You can now sign in to the Eloquente {$workspaceLabel}.")
             ->line('Temporary password: ' . $this->temporaryPassword)
             ->line('For security, you will be asked to set your own password after signing in.')
             ->action('Sign in', url('/login'))

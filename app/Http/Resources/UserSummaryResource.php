@@ -17,7 +17,7 @@ class UserSummaryResource extends JsonResource
             'phone' => $this->phone,
             'role' => $this->role,
             'account_status' => $this->account_status ?? 'active',
-            'must_change_password' => (bool) ($this->must_change_password ?? false),
+            'must_change_password' => $this->requiresPasswordChange(),
             'last_login_at' => $this->last_login_at,
             'deactivated_at' => $this->deactivated_at,
             'created_at' => $this->created_at,

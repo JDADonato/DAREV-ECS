@@ -75,7 +75,7 @@ class AuthController extends Controller
         $request->session()->regenerate();
         $user->forceFill(['last_login_at' => now()])->save();
 
-        if ($user->must_change_password) {
+        if ($user->requiresPasswordChange()) {
             return redirect()->route('password.change-required')
                 ->with('message', 'Please set your own password before continuing.');
         }
@@ -243,14 +243,45 @@ class AuthController extends Controller
             abort(401);
         }
 
+        $dashboardRoute = $this->getDashboardRoute($user->role);
         $user->forceFill([
-            'password' => $request->password,
-            'must_change_password' => false,
+            'password' => Hash::make($request->password),
             'temporary_password_expires_at' => null,
             'password_changed_at' => now(),
         ])->save();
 
-        return redirect($this->getDashboardRoute($user->role))
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update([
+                'must_change_password' => DB::connection()->getDriverName() === 'pgsql' ? DB::raw('false') : false,
+                'updated_at' => now(),
+            ]);
+
+        $user->refresh();
+        Auth::setUser($user);
+
+        Log::info('Required password changed.', [
+            'user_id' => $user->id,
+            'role' => $user->role,
+            'redirect' => $dashboardRoute,
+            'must_change_password' => $user->requiresPasswordChange(),
+            'raw_must_change_password' => $user->getRawOriginal('must_change_password'),
+        ]);
+
+        if ($request->header('X-Inertia')) {
+            return Inertia::location($dashboardRoute);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'Password updated. Welcome to your workspace.',
+                'redirect' => $dashboardRoute,
+                'role' => $user->role,
+                'must_change_password' => $user->requiresPasswordChange(),
+            ]);
+        }
+
+        return redirect($dashboardRoute)
             ->with('message', 'Password updated. Welcome to your workspace.');
     }
 

@@ -77,6 +77,18 @@ class User extends Authenticatable
         $this->storeBooleanAttribute('must_change_password', $value);
     }
 
+    public function getMustChangePasswordAttribute($value): bool
+    {
+        return $this->readBooleanAttribute($value);
+    }
+
+    public function requiresPasswordChange(): bool
+    {
+        return $this->readBooleanAttribute(
+            $this->getAttributes()['must_change_password'] ?? $this->getRawOriginal('must_change_password')
+        );
+    }
+
     public function bookings()
     {
         return $this->hasMany(Booking::class);

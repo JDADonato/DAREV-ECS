@@ -80,6 +80,8 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('auth')->group(function () {
+    Route::get('/api/session/csrf-token', fn () => response()->json(['token' => csrf_token()]))
+        ->name('session.csrf-token');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/password/change-required', [AuthController::class, 'showChangeRequired'])->name('password.change-required');
     Route::post('/password/change-required', [AuthController::class, 'changeRequiredPassword'])->middleware('throttle:5,1')->name('password.change-required.update');
@@ -305,6 +307,8 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::post('/api/admin/employees/{id}/reset-password', [AdminController::class, 'resetEmployeePassword']);
     Route::post('/api/admin/employees/{id}/force-password-change', [AdminController::class, 'forceEmployeePasswordChange']);
     Route::post('/api/admin/employees/{id}/reactivate', [AdminController::class, 'reactivateEmployee']);
+    Route::get('/api/admin/system-delivery', [AdminController::class, 'deliveryDiagnostics']);
+    Route::post('/api/admin/system-delivery/test-email', [AdminController::class, 'sendDiagnosticEmail']);
     Route::get('/api/admin/customers', [AdminController::class, 'getCustomers']);
     Route::put('/api/admin/customers/{id}', [AdminController::class, 'updateCustomer']);
     Route::delete('/api/admin/customers/{id}', [AdminController::class, 'deleteCustomer']);

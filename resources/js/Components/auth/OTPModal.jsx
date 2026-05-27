@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { usePage, router } from '@inertiajs/react';
 import { useToast } from '../../context/ToastContext';
+import csrfFetch from '../../utils/csrf';
 
 const OTPModal = () => {
     const { auth } = usePage().props;
@@ -106,15 +107,8 @@ const OTPModal = () => {
     };
 
     const handleResend = async () => {
-        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-        const response = await fetch('/resend-otp', {
+        const response = await csrfFetch('/resend-otp', {
             method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                Accept: 'application/json',
-                'X-CSRF-TOKEN': token,
-                'X-Requested-With': 'XMLHttpRequest',
-            },
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {

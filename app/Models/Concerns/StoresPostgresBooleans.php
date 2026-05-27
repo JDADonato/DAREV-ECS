@@ -20,6 +20,21 @@ trait StoresPostgresBooleans
             : $enabled;
     }
 
+    protected function readBooleanAttribute(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value === 1;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+
+        return in_array($normalized, ['1', 'true', 't', 'yes', 'y', 'on'], true);
+    }
+
     private function usesPostgresConnection(): bool
     {
         $connection = $this->getConnectionName() ?: config('database.default');

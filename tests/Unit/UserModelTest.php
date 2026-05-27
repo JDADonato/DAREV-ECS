@@ -49,4 +49,25 @@ class UserModelTest extends TestCase
 
         $this->assertSame('false', $user->getAttributes()['must_change_password']);
     }
+
+    public function test_must_change_password_reads_postgres_boolean_strings_as_booleans(): void
+    {
+        $user = new User();
+
+        $user->setRawAttributes(['must_change_password' => 'false']);
+        $this->assertFalse($user->must_change_password);
+        $this->assertFalse($user->requiresPasswordChange());
+
+        $user->setRawAttributes(['must_change_password' => 'f']);
+        $this->assertFalse($user->must_change_password);
+        $this->assertFalse($user->requiresPasswordChange());
+
+        $user->setRawAttributes(['must_change_password' => 'true']);
+        $this->assertTrue($user->must_change_password);
+        $this->assertTrue($user->requiresPasswordChange());
+
+        $user->setRawAttributes(['must_change_password' => 't']);
+        $this->assertTrue($user->must_change_password);
+        $this->assertTrue($user->requiresPasswordChange());
+    }
 }

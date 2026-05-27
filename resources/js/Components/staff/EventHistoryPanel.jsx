@@ -6,6 +6,7 @@ import StaffSkeleton from './StaffSkeleton';
 import StaffStatusBadge from './StaffStatusBadge';
 import { getListData, getPaginationMeta } from '../../utils/apiResponses';
 import { feedbackStatusLabel } from '../../utils/statusLabels';
+import csrfFetch from '../../utils/csrf';
 
 const formatDate = (value) => {
     if (!value) return '-';
@@ -103,14 +104,11 @@ const EventHistoryPanel = ({ role = 'staff', onToast }) => {
         if (!selectedEvent || noteBody.trim().length < 2) return;
         setNoteSaving(true);
         try {
-            const response = await fetch(`/api/staff/event-history/${selectedEvent.id}/notes`, {
+            const response = await csrfFetch(`/api/staff/event-history/${selectedEvent.id}/notes`, {
                 method: 'POST',
                 headers: {
-                    Accept: 'application/json',
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
                 },
-                credentials: 'same-origin',
                 body: JSON.stringify({ body: noteBody.trim() }),
             });
             const payload = await response.json().catch(() => ({}));

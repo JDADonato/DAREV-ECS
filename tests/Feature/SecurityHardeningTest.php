@@ -199,9 +199,11 @@ class SecurityHardeningTest extends TestCase
     {
         $bootstrapJs = file_get_contents(resource_path('js/bootstrap.js'));
 
-        $this->assertStringContainsString('window.fetch = (input, init = {}) =>', $bootstrapJs);
+        $this->assertStringContainsString('window.fetch = async (input, init = {}) =>', $bootstrapJs);
         $this->assertStringContainsString("headers.set('X-CSRF-TOKEN', token);", $bootstrapJs);
         $this->assertStringContainsString("headers.set('X-Requested-With', 'XMLHttpRequest');", $bootstrapJs);
+        $this->assertStringContainsString('/api/session/csrf-token', $bootstrapJs);
+        $this->assertStringContainsString('__csrfRetry: true', $bootstrapJs);
     }
 
     private function user(string $role): User

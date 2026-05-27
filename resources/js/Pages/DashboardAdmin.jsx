@@ -13,6 +13,7 @@ import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import NextActionPanel from '../Components/staff/NextActionPanel';
 import { getListData } from '../utils/apiResponses';
+import csrfFetch, { csrfRequestHeaders } from '../utils/csrf';
 import {
     formatBookingRef,
     formatCurrency,
@@ -72,6 +73,11 @@ const MENU_CATEGORY_OPTIONS = [
 ];
 
 const PERFORMANCE_LIMIT_OPTIONS = [5, 8, 10, 15, 20];
+const ACCOUNT_ROLE_OPTIONS = [
+    { value: 'Marketing', label: 'Marketing', description: 'Booking review, customer communication, event preparation, and feedback follow-up.' },
+    { value: 'Accounting', label: 'Accounting', description: 'Payment verification, receipts, refunds, and finance follow-up.' },
+    { value: 'Admin', label: 'Admin', description: 'Full console access for trusted owner or operations administrators.' },
+];
 
 const DEFAULT_ANALYTICS_FILTERS = {
     trend_months: '6',
@@ -103,12 +109,6 @@ const adminCustomersUrl = (status = 'active', filters = {}) => {
     });
     return `/api/admin/customers?${params.toString()}`;
 };
-
-const csrfRequestHeaders = () => ({
-    Accept: 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
-    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-});
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -177,6 +177,7 @@ const DashboardAdmin = () => {
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
     const [temporaryPasswordModal, setTemporaryPasswordModal] = useState({ open: false, username: '', email: '', password: '', expiresAt: null, deliveryHint: '' });
     const [empForm, setEmpForm] = useState({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
+    const [empFormErrors, setEmpFormErrors] = useState({});
     const [empFormLoading, setEmpFormLoading] = useState(false);
 
     // ==========================================
@@ -385,6 +386,10 @@ const DashboardAdmin = () => {
     const [employeeFilters, setEmployeeFilters] = useState({ search: '', role: 'all', account_status: 'all', must_change_password: 'all' });
     const [customerFilters, setCustomerFilters] = useState({ search: '', booking_activity: 'all' });
     const [confirmNotifyCustomer, setConfirmNotifyCustomer] = useState(true);
+    const [deliveryDiagnostics, setDeliveryDiagnostics] = useState(null);
+    const [deliveryLoading, setDeliveryLoading] = useState(false);
+    const [testEmail, setTestEmail] = useState(user?.email || '');
+    const [testEmailSending, setTestEmailSending] = useState(false);
     const confirmNotifyCustomerRef = useRef(true);
     const [bookingPage, setBookingPage] = useState(1);
     const [auditPage, setAuditPage] = useState(1);
@@ -406,6 +411,12 @@ const DashboardAdmin = () => {
     useEffect(() => {
         setEmployeePage(1);
     }, [employeeFilters]);
+
+    useEffect(() => {
+        if (activeTab === 'users') {
+            fetchDeliveryDiagnostics({ silent: true });
+        }
+    }, [activeTab]);
 
     const handleLogout = () => {
         router.post('/logout');
@@ -438,6 +449,53 @@ const DashboardAdmin = () => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
     };
+
+    const fetchDeliveryDiagnostics = async ({ silent = false } = {}) => {
+        if (!silent) setDeliveryLoading(true);
+        try {
+            const response = await fetch('/api/admin/system-delivery', { headers: { Accept: 'application/json' } });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Could not load delivery diagnostics.');
+            setDeliveryDiagnostics(data);
+        } catch (error) {
+            if (!silent) showToast(error.message || 'Could not load delivery diagnostics.', 'error');
+        } finally {
+            if (!silent) setDeliveryLoading(false);
+        }
+    };
+
+    const sendDiagnosticEmail = async () => {
+        if (!testEmail) {
+            showToast('Enter an email address for the test.', 'error');
+            return;
+        }
+
+        setTestEmailSending(true);
+        try {
+            const response = await csrfFetch('/api/admin/system-delivery/test-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: testEmail }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.email_delivery || data.message || 'Diagnostic email could not be sent.');
+            showToast(data.email_delivery || data.message || 'Diagnostic email sent.');
+            fetchDeliveryDiagnostics({ silent: true });
+        } catch (error) {
+            showToast(error.message || 'Diagnostic email could not be sent.', 'error');
+        } finally {
+            setTestEmailSending(false);
+        }
+    };
+
+    useEffect(() => {
+        const handleSessionExpired = (event) => {
+            showToast(event.detail?.message || 'Your session expired. Refresh the page and try again.', 'error');
+        };
+
+        window.addEventListener('ecs:session-expired', handleSessionExpired);
+        return () => window.removeEventListener('ecs:session-expired', handleSessionExpired);
+    }, []);
 
     const closeConfirmDialog = () => {
         setConfirmDialog({ isOpen: false, title: '', message: '', confirmText: 'Confirm', tone: 'default', busy: false, onConfirm: null });
@@ -841,6 +899,11 @@ const DashboardAdmin = () => {
         deactivated: customers.filter((customer) => customer.account_status === 'deactivated').length,
         withBookings: customers.filter((customer) => Number(customer.bookings_count || 0) > 0).length,
     }), [customers]);
+    const roleBadgeClass = (role) => {
+        if (role === 'Admin') return 'border-[#720101]/15 bg-[#720101]/5 text-[#720101]';
+        if (role === 'Marketing') return 'border-purple-200 bg-purple-50 text-purple-800';
+        return 'border-green-200 bg-green-50 text-green-800';
+    };
     const paginatedBookings = paginate(visibleBookings, bookingPage, rowsPerPage);
     const paginatedAudits = paginate(visibleAudits, auditPage, 12);
 
@@ -2086,6 +2149,7 @@ const DashboardAdmin = () => {
     const handleEmpSubmit = async (e) => {
         e.preventDefault();
         setEmpFormLoading(true);
+        setEmpFormErrors({});
         try {
             const isCustomerEdit = empModal.mode === 'edit' && empModal.data?.role === 'Client';
             const url = empModal.mode === 'add'
@@ -2116,7 +2180,7 @@ const DashboardAdmin = () => {
 
             if (res.ok) {
                 const data = await res.json().catch(() => ({}));
-                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully.`);
+                showToast(`${isCustomerEdit ? 'Customer' : 'Account'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully.`);
                 openTemporaryPasswordModal(data, payload);
                 setEmpModal({ open: false, mode: 'add', data: null });
                 bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
@@ -2124,6 +2188,7 @@ const DashboardAdmin = () => {
                 fetchCustomers();
             } else {
                 const err = await res.json().catch(() => ({}));
+                setEmpFormErrors(err.errors || {});
                 showToast(getErrorMessage(err, "Could not save account"), 'error');
             }
         } catch (error) {
@@ -2205,7 +2270,7 @@ const DashboardAdmin = () => {
         setConfirmDialog({
             isOpen: true,
             title: 'Reset temporary password?',
-            message: 'This creates a new temporary password, expires it in 7 days, and asks the staff member to change it after signing in.',
+            message: 'This creates a new temporary password, expires it in 24 hours, and asks the staff member to change it after signing in.',
             confirmText: 'Reset password',
             tone: 'default',
             onConfirm: () => confirmResetEmployeePassword(id),
@@ -2342,6 +2407,7 @@ const DashboardAdmin = () => {
     };
 
     const openEmpModal = (mode, employee = null) => {
+        setEmpFormErrors({});
         if (mode === 'add') {
             setEmpForm({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
         } else {
@@ -2358,6 +2424,7 @@ const DashboardAdmin = () => {
     };
 
     const openCustomerModal = (customer) => {
+        setEmpFormErrors({});
         setEmpForm({
             full_name: customer.full_name || '',
             username: customer.username,
@@ -3445,6 +3512,65 @@ const DashboardAdmin = () => {
                     )}
                     {activeTab === 'configuration' && (
                         <div className="animate-fadeIn">
+                            <div className="mb-5 rounded-2xl border border-[#720101]/10 bg-white p-4 shadow-sm">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Delivery health</p>
+                                        <h3 className="mt-1 text-lg font-black text-slate-950">Email and sign-in readiness</h3>
+                                        <p className="mt-1 max-w-3xl text-sm font-semibold text-slate-500">Use this when account invitations, password reset messages, or announcement emails do not arrive.</p>
+                                    </div>
+                                    <button type="button" onClick={() => fetchDeliveryDiagnostics()} disabled={deliveryLoading} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2 text-sm font-black text-[#720101] hover:bg-[#fff7e8] disabled:opacity-60">
+                                        {deliveryLoading ? 'Checking...' : 'Check delivery'}
+                                    </button>
+                                </div>
+                                {deliveryDiagnostics && (
+                                    <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Sign-in session</p>
+                                            <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-black ${deliveryDiagnostics.session?.authenticated ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                {deliveryDiagnostics.session?.authenticated ? 'Session looks healthy' : 'Sign-in check needed'}
+                                            </p>
+                                            <p className="mt-2 text-xs font-bold text-slate-500">Use the same site address while testing account actions.</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Email sender</p>
+                                            <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-black ${deliveryDiagnostics.mail?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                {deliveryDiagnostics.mail?.configured ? 'Ready to send' : 'Needs setup'}
+                                            </p>
+                                            <p className="mt-2 text-xs font-bold text-slate-500">{deliveryDiagnostics.mail?.from_address ? `Sender: ${deliveryDiagnostics.mail.from_address}` : 'No sender address found'}</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Send test</p>
+                                            <p className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-black ${deliveryDiagnostics.queue?.worker_required ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                                {deliveryDiagnostics.queue?.worker_required ? 'Background sending required' : 'Sends immediately'}
+                                            </p>
+                                            <div className="mt-3 flex gap-2">
+                                                <input type="email" value={testEmail} onChange={(event) => setTestEmail(event.target.value)} placeholder="Test email address" className="admin-input min-w-0 flex-1 py-2 text-sm" />
+                                                <button type="button" onClick={sendDiagnosticEmail} disabled={testEmailSending} className="rounded-xl bg-[#720101] px-3 py-2 text-xs font-black text-white hover:bg-[#5a0101] disabled:opacity-60">
+                                                    {testEmailSending ? 'Sending...' : 'Send test'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                {deliveryDiagnostics?.guidance?.length > 0 && (
+                                    <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+                                        Some emails are waiting to be sent in the background. Ask the system operator to start background email sending before expecting inbox delivery.
+                                    </div>
+                                )}
+                                {deliveryDiagnostics && (
+                                    <details className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                                        <summary className="cursor-pointer text-xs font-black uppercase tracking-widest text-slate-500">Advanced setup details</summary>
+                                        <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
+                                            <p>Current site address: {deliveryDiagnostics.session?.current_host || '-'}</p>
+                                            <p>Configured site address: {deliveryDiagnostics.session?.app_url || '-'}</p>
+                                            <p>Browser cookie mode: {deliveryDiagnostics.session?.same_site || '-'}</p>
+                                            <p>Email sending method: {deliveryDiagnostics.mail?.mailer || '-'}</p>
+                                            <p>Background delivery mode: {deliveryDiagnostics.queue?.connection || '-'}</p>
+                                        </div>
+                                    </details>
+                                )}
+                            </div>
                             <div className="animate-fadeIn">
                                 {pricingLoading ? (
                                     <StaffSkeleton variant="panel" rows={3} label="Loading pricing configuration" />
@@ -4332,6 +4458,18 @@ const DashboardAdmin = () => {
                                     ))}
                                 </div>
 
+                                <div className="mb-5 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 shadow-sm">
+                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                        <div>
+                                            <p className="text-sm font-black text-amber-950">Account emails are available as a fallback, but temporary passwords are always shown once after creation or reset.</p>
+                                            <p className="mt-1 text-xs font-bold text-amber-800">If a password email does not arrive, use the shown password and check delivery settings in Business Setup.</p>
+                                        </div>
+                                        <button type="button" onClick={() => setActiveTab('configuration')} className="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs font-black text-amber-900 hover:bg-amber-100">
+                                            Open delivery settings
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <div className="mb-5 inline-flex rounded-2xl border border-[#720101]/10 bg-white p-1 shadow-sm">
                                     {[
                                         { value: 'staff', label: 'Staff Accounts', count: employees.length },
@@ -4367,6 +4505,7 @@ const DashboardAdmin = () => {
                                             />
                                             <select value={employeeFilters.role} onChange={(event) => setEmployeeFilters(prev => ({ ...prev, role: event.target.value }))} className="admin-input">
                                                 <option value="all">All roles</option>
+                                                <option value="Admin">Admin</option>
                                                 <option value="Marketing">Marketing</option>
                                                 <option value="Accounting">Accounting</option>
                                             </select>
@@ -4417,7 +4556,7 @@ const DashboardAdmin = () => {
                                                                     <div className="text-sm text-gray-700">{emp.email || <span className="text-gray-400 italic">No email</span>}</div>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${emp.role === 'Marketing' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-green-100 text-green-800 border border-green-200'}`}>
+                                                                    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${roleBadgeClass(emp.role)}`}>
                                                                         {emp.role}
                                                                     </span>
                                                                 </td>
@@ -4435,13 +4574,19 @@ const DashboardAdmin = () => {
                                                                             Actions <ChevronDown className="ml-1 inline h-3.5 w-3.5" />
                                                                         </summary>
                                                                         <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-100 bg-white p-1 shadow-xl">
-                                                                            <button type="button" onClick={() => openEmpModal('edit', emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Edit account</button>
-                                                                            <button type="button" onClick={() => handleResetEmployeePassword(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Reset temporary password</button>
-                                                                            <button type="button" onClick={() => handleForceEmployeePasswordChange(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Force password change</button>
-                                                                            {emp.account_status === 'deactivated' ? (
-                                                                                <button type="button" onClick={() => handleReactivateEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50">Reactivate access</button>
+                                                                            {emp.role === 'Admin' ? (
+                                                                                <div className="rounded-lg bg-slate-50 px-3 py-2 text-left text-xs font-bold leading-5 text-slate-500">Admin accounts are protected from regular staff account actions.</div>
                                                                             ) : (
-                                                                                <button type="button" onClick={() => handleDeleteEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">Deactivate access</button>
+                                                                                <>
+                                                                                    <button type="button" onClick={() => openEmpModal('edit', emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Edit account</button>
+                                                                                    <button type="button" onClick={() => handleResetEmployeePassword(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Reset temporary password</button>
+                                                                                    <button type="button" onClick={() => handleForceEmployeePasswordChange(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Force password change</button>
+                                                                                    {emp.account_status === 'deactivated' ? (
+                                                                                        <button type="button" onClick={() => handleReactivateEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50">Reactivate access</button>
+                                                                                    ) : (
+                                                                                        <button type="button" onClick={() => handleDeleteEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">Deactivate access</button>
+                                                                                    )}
+                                                                                </>
                                                                             )}
                                                                         </div>
                                                                     </details>
@@ -4929,43 +5074,61 @@ const DashboardAdmin = () => {
                 empModal.open && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                         <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={() => setEmpModal({ open: false, mode: 'add', data: null })}></div>
-                        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fadeIn overflow-hidden">
-                            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl animate-fadeIn overflow-hidden">
+                            <div className="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#9f6500]">{empModal.mode === 'add' ? 'New access' : 'Account access'}</p>
                                 <h3 className="text-lg font-bold text-gray-900">
                                     {empModal.mode === 'add' ? 'Provision New Account' : empModal.data?.role === 'Client' ? 'Modify Customer Account' : 'Modify Staff Credentials'}
                                 </h3>
+                                <p className="mt-1 text-sm font-semibold text-slate-500">Set the account identity, contact details, and workspace privilege level.</p>
                             </div>
-                            <form onSubmit={handleEmpSubmit} className="p-6">
+                            <form onSubmit={handleEmpSubmit} className="max-h-[78vh] overflow-y-auto p-6 custom-scrollbar">
+                                <div className="mb-5 grid gap-3 rounded-2xl border border-[#720101]/10 bg-[#fffaf3] p-4 text-sm font-semibold text-slate-600">
+                                    <div>
+                                        <p className="text-xs font-black uppercase tracking-widest text-[#9f6500]">Access setup</p>
+                                        <p className="mt-1 text-slate-700">A temporary password is generated automatically and expires in 24 hours. Email it when available, then copy it from the one-time password dialog as a fallback.</p>
+                                    </div>
+                                    {empModal.mode === 'add' && empForm.role === 'Admin' && (
+                                        <div className="rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-[#720101]">
+                                            Admin accounts have full console access. Create these only for trusted owner or operations administrators.
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="space-y-4">
                                     {empModal.data?.role !== 'Client' && (
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Full Name</label>
                                             <input type="text" required value={empForm.full_name} onChange={e => setEmpForm({ ...empForm, full_name: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
+                                            {empFormErrors.full_name && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.full_name[0]}</p>}
                                         </div>
                                     )}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Username</label>
                                         <input type="text" required value={empForm.username} onChange={e => setEmpForm({ ...empForm, username: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium" />
+                                        {empFormErrors.username && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.username[0]}</p>}
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Email (Optional)</label>
                                             <input type="email" value={empForm.email} onChange={e => setEmpForm({ ...empForm, email: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
+                                            {empFormErrors.email && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.email[0]}</p>}
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Phone (Optional)</label>
                                             <input type="text" value={empForm.phone} onChange={e => setEmpForm({ ...empForm, phone: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
+                                            {empFormErrors.phone && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.phone[0]}</p>}
                                         </div>
                                     </div>
                                     {empModal.mode === 'add' && empModal.data?.role !== 'Client' && (
                                         <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
-                                            A temporary password will be generated and the staff member must change it on first sign-in.
+                                            A temporary password will be generated, emailed when possible, and this account must change it on first sign-in.
                                         </div>
                                     )}
                                     {empModal.mode === 'edit' && (
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">New Password</label>
                                             <input type="text" minLength="6" value={empForm.password} onChange={e => setEmpForm({ ...empForm, password: e.target.value })} placeholder="Leave blank to keep current" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" />
+                                            {empFormErrors.password && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.password[0]}</p>}
                                         </div>
                                     )}
                                     <div>
@@ -4975,11 +5138,31 @@ const DashboardAdmin = () => {
                                                 Client / Customer
                                             </div>
                                         ) : (
-                                            <select value={empForm.role} onChange={e => setEmpForm({ ...empForm, role: e.target.value })} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium">
-                                                <option value="Marketing">Marketing</option>
-                                                <option value="Accounting">Accounting</option>
-                                            </select>
+                                            <div className="grid gap-2">
+                                                {ACCOUNT_ROLE_OPTIONS
+                                                    .filter((option) => empModal.mode === 'add' || option.value !== 'Admin')
+                                                    .map((option) => (
+                                                    <label key={option.value} className={`cursor-pointer rounded-xl border px-4 py-3 transition ${empForm.role === option.value ? 'border-[#720101] bg-[#fff7e8]' : 'border-gray-200 bg-gray-50 hover:bg-white'}`}>
+                                                        <input
+                                                            type="radio"
+                                                            name="account_role"
+                                                            value={option.value}
+                                                            checked={empForm.role === option.value}
+                                                            onChange={e => setEmpForm({ ...empForm, role: e.target.value })}
+                                                            className="sr-only"
+                                                        />
+                                                        <span className="flex items-start justify-between gap-3">
+                                                            <span>
+                                                                <span className="block text-sm font-black text-slate-950">{option.label}</span>
+                                                                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{option.description}</span>
+                                                            </span>
+                                                            <span className={`mt-1 h-4 w-4 rounded-full border ${empForm.role === option.value ? 'border-[#720101] bg-[#720101]' : 'border-slate-300 bg-white'}`}></span>
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            </div>
                                         )}
+                                        {empFormErrors.role && <p className="mt-1 text-xs font-bold text-red-600">{empFormErrors.role[0]}</p>}
                                     </div>
                                 </div>
                                 <div className="mt-8 flex justify-end gap-3">
