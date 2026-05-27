@@ -3,7 +3,6 @@ import { Head, Link, router } from '@inertiajs/react';
 import { useAuth } from '../context/AuthContext';
 import ClientNavbar from '../Components/common/ClientNavbar';
 import Footer from '../Components/common/Footer';
-import logoImg from '../../images/ECS_LOGO.png';
 
 /* ── SVG Icons ── */
 const settledStatuses = ['Paid', 'Verified'];
@@ -85,11 +84,6 @@ const hasSelectedMenu = (selectedMenu) => {
         return Boolean(selectedMenu);
     }
 };
-const IcoBudget = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-const IcoMenu = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>;
-const IcoChart = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
-const IcoFilter = ({c='currentColor'}) => <svg className="w-6 h-6" fill="none" stroke={c} strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>;
-
 const useRv = () => {
     const r = useRef(null);
     useEffect(() => {
@@ -718,12 +712,15 @@ const LandingPage = () => {
                             Premium menus, polished setup, transparent planning, and service teams prepared for weddings, company events, and private celebrations.
                         </p>
                         <div className="flex flex-col items-center gap-3 sm:flex-row lg:items-start" style={{opacity:0,animation:'fadeUp .7s .7s forwards'}}>
-                            <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
-                                Book Eloquente Now
-                            </button>
-                            <button onClick={()=>router.get('/food-tasting')} className="rounded-full border border-white/25 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:border-[#f0aa0b] hover:text-[#f0aa0b]">
-                                Book Tasting
-                            </button>
+                            <Link href="/book" className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
+                                Start Booking
+                            </Link>
+                            <Link href="/menu" className="rounded-full border border-white/25 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:border-[#f0aa0b] hover:text-[#f0aa0b]">
+                                Browse Menu
+                            </Link>
+                            <Link href="/contact" className="px-2 py-4 text-sm font-bold uppercase tracking-wider text-white/75 transition-colors hover:text-[#f0aa0b]">
+                                Ask a Question
+                            </Link>
                         </div>
                     </div>
                     <div className="hidden lg:block" style={{opacity:0,animation:'fadeUp .8s .6s forwards'}}>
@@ -754,53 +751,72 @@ const LandingPage = () => {
             <section className="bg-[#fffaf3] px-5 py-14 sm:px-8">
                 <div className="mx-auto max-w-7xl">
                     <Rv>
-                        <div className="grid gap-8 rounded-3xl border border-[#720101]/10 bg-white p-6 shadow-sm sm:p-8 lg:grid-cols-[0.75fr_1.25fr] lg:items-center">
-                            <div>
-                                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#720101]">Start planning</p>
-                                <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-[#1a1a1a] md:text-4xl">A clear path from idea to booked event.</h2>
-                                <p className="mt-4 text-sm font-medium leading-7 text-gray-600">
-                                    Move through the same system your dashboard will use later: date, menu, staff review, secure payment, and event tracking.
-                                </p>
-                                <div className="mt-6 flex flex-wrap gap-3">
-                                    <button onClick={() => router.get('/book')} className="rounded-full bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-[#5a0101]">
-                                        Start Event Plan
-                                    </button>
-                                    <button onClick={() => router.get('/menu')} className="rounded-full border border-[#720101]/15 bg-white px-6 py-3 text-sm font-black uppercase tracking-widest text-[#720101] transition hover:bg-[#fff7e8]">
-                                        Browse Menu First
-                                    </button>
-                                </div>
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                {[
-                                    ['1', 'Plan event', 'Choose occasion and guest estimate.'],
-                                    ['2', 'Check date', 'See availability before submitting.'],
-                                    ['3', 'Build menu', 'Pick dishes with visible pricing.'],
-                                    ['4', 'Staff review', 'Marketing confirms details.'],
-                                    ['5', 'Pay securely', 'Use PayMongo checkout when due.'],
-                                    ['6', 'Track progress', 'Follow the journey in your dashboard.'],
-                                ].map(([number, title, text]) => (
-                                    <div key={title} className="rounded-2xl border border-[#720101]/10 bg-[#fffaf3] p-4">
-                                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0aa0b]/20 text-xs font-black text-[#720101]">{number}</span>
-                                        <h3 className="mt-4 font-display text-lg font-bold text-[#1a1a1a]">{title}</h3>
-                                        <p className="mt-2 text-xs font-semibold leading-5 text-gray-500">{text}</p>
-                                    </div>
-                                ))}
-                            </div>
+                        <div className="mb-8 max-w-2xl">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-[#720101]">Choose your next step</p>
+                            <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-[#1a1a1a] md:text-4xl">Start where you are in the planning process.</h2>
                         </div>
                     </Rv>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        {[
+                            ['Book an Event', 'Ready to check a date and submit your event details for review.', '/book', 'Start Booking', 'bg-[#720101] text-white'],
+                            ['Browse Menu', 'Compare dishes and packages before deciding what kind of celebration you want.', '/menu', 'Browse Menu', 'bg-white text-[#720101]'],
+                            ['Schedule Tasting', 'Not ready yet? Taste bestsellers and talk through your event direction first.', '/food-tasting', 'Schedule Tasting', 'bg-white text-[#720101]'],
+                        ].map(([title, text, href, label, tone], index) => (
+                            <Rv key={title} d={`rv-d${index + 1}`}>
+                                <Link href={href} className="group flex h-full flex-col rounded-3xl border border-[#720101]/10 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl">
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f0aa0b]/20 text-sm font-black text-[#720101]">{index + 1}</span>
+                                    <h3 className="mt-6 font-display text-2xl font-bold text-[#1a1a1a]">{title}</h3>
+                                    <p className="mt-3 flex-1 text-sm font-medium leading-7 text-gray-600">{text}</p>
+                                    <span className={`mt-6 inline-flex w-fit rounded-full px-5 py-3 text-xs font-black uppercase tracking-widest transition-colors ${tone} ${index === 0 ? 'group-hover:bg-[#5a0101]' : 'border border-[#720101]/15 group-hover:bg-[#fff7e8]'}`}>
+                                        {label}
+                                    </span>
+                                </Link>
+                            </Rv>
+                        ))}
+                    </div>
                 </div>
             </section>
 
-            {/* USP - Alternating layout */}
+            <section className="bg-white px-5 py-20 sm:px-8">
+                <div className="mx-auto grid max-w-7xl gap-8 rounded-3xl border border-[#720101]/10 bg-white lg:grid-cols-[0.72fr_1.28fr] lg:items-center">
+                    <Rv>
+                        <div className="p-6 sm:p-8">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-[#720101]">How booking works</p>
+                            <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-[#1a1a1a] md:text-4xl">A clear path from idea to booked event.</h2>
+                            <p className="mt-4 text-sm font-medium leading-7 text-gray-600">
+                                The same system carries you from availability and menu choices to staff review, secure payment, and dashboard tracking.
+                            </p>
+                        </div>
+                    </Rv>
+                    <div className="grid gap-3 p-6 pt-0 sm:grid-cols-2 sm:p-8 lg:grid-cols-3">
+                        {[
+                            ['1', 'Share the event', 'Choose occasion, date, venue, and guest estimate.'],
+                            ['2', 'Shape the menu', 'Pick dishes with visible package and per-head pricing.'],
+                            ['3', 'Staff review', 'Marketing confirms details or asks for missing information.'],
+                            ['4', 'Secure the date', 'Pay only when a payment step is due.'],
+                            ['5', 'Track progress', 'Use your dashboard for payments, messages, and updates.'],
+                            ['6', 'Event day', 'Preparation notes and status stay connected to your booking.'],
+                        ].map(([number, title, text]) => (
+                            <div key={title} className="rounded-2xl border border-[#720101]/10 bg-[#fffaf3] p-4">
+                                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0aa0b]/20 text-xs font-black text-[#720101]">{number}</span>
+                                <h3 className="mt-4 font-display text-lg font-bold text-[#1a1a1a]">{title}</h3>
+                                <p className="mt-2 text-xs font-semibold leading-5 text-gray-500">{text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* MENU AND AMENITIES */}
             <section className="py-24 bg-white overflow-hidden">
                 <div className="max-w-7xl mx-auto px-5 sm:px-8">
                     <Rv><div className="mb-14 grid gap-8 lg:grid-cols-[0.75fr_1fr] lg:items-end">
                         <div>
-                            <p className="text-[#720101] text-xs font-black uppercase tracking-[.22em] mb-3">Why Eloquente</p>
-                            <h2 className="font-display text-[#1a1a1a] text-3xl md:text-5xl leading-tight">Built Around Smarter Catering</h2>
+                            <p className="text-[#720101] text-xs font-black uppercase tracking-[.22em] mb-3">Menu & Amenities</p>
+                            <h2 className="font-display text-[#1a1a1a] text-3xl md:text-5xl leading-tight">Food, setup, and service planned together.</h2>
                         </div>
                         <p className="max-w-2xl text-sm font-medium leading-7 text-gray-600">
-                            ECS combines full-service catering polish with planning tools that help you understand availability, pricing, menu fit, and payment timing before you commit.
+                            Browse dishes and packages, then see how service flow, buffet presentation, crew, and venue logistics support the event beyond the menu.
                         </p>
                     </div></Rv>
 
@@ -823,44 +839,24 @@ const LandingPage = () => {
 
                     <div className="mt-6 grid gap-4 lg:grid-cols-2">
                         {[
-                            ['Decision support', 'Availability, estimates, payment schedules, and booking status stay visible so planning does not depend on guesswork.'],
-                            ['Planning safeguards', 'Dietary notes, venue details, schedule changes, and sourcing timelines are checked early so the team can prepare with confidence.'],
+                            ['Buffet and table setup', 'Serving stations, table arrangements, and presentation details are prepared around the venue and guest flow.'],
+                            ['Crew and logistics', 'Staffing, access notes, high-rise details, and cleanup expectations are checked before the event day.'],
                         ].map(([title,text],i)=>(
                             <Rv key={title} d={`rv-d${i+3}`}>
                                 <div className="rounded-2xl border border-[#720101]/10 bg-white p-6 shadow-sm">
-                                    <p className="text-xs font-black uppercase tracking-[.2em] text-[#f0aa0b]">Planning Advantage</p>
+                                    <p className="text-xs font-black uppercase tracking-[.2em] text-[#f0aa0b]">Service Detail</p>
                                     <h3 className="mt-3 font-display text-xl font-bold text-[#720101]">{title}</h3>
                                     <p className="mt-2 text-sm font-medium leading-6 text-gray-600">{text}</p>
                                 </div>
                             </Rv>
                         ))}
                     </div>
-
-                    <div className="hidden">
-                        {[
-                            {icon:<IcoBudget c="#f0aa0b"/>,title:'Budget-Guided Menu Builder',text:'Set a target budget and get a practical dish selection to review, adjust, and confirm before submitting your booking.',img:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoMenu c="#f0aa0b"/>,title:'Guided Menu Selection',text:'Choose from packages or build your own menu with clear dish counts, per-head pricing, and running totals as you decide.',img:'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoChart c="#f0aa0b"/>,title:'Decision Support',text:'Live availability, transparent pricing, and instant cost estimates - so you book with total confidence, not guesswork.',img:'https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&q=80&w=500'},
-                            {icon:<IcoFilter c="#f0aa0b"/>,title:'Smart Menu Guidance',text:'Dietary needs, venue details, and seasonal availability are checked as you plan so your choices stay practical.',img:'https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?auto=format&fit=crop&q=80&w=500'},
-                        ].map((item,i)=>(
-                            <div key={i} className={`flex flex-col ${i%2===0?'md:flex-row':'md:flex-row-reverse'} items-center gap-10 md:gap-16`}>
-                                <Rv cls={i%2===0?'rv-left':'rv-right'} d="flex-1">
-                                    <div className="relative">
-                                        <img src={item.img} alt={item.title} className="w-full h-64 md:h-72 object-cover rounded-2xl shadow-lg"/>
-                                        <div className="absolute -bottom-3 -right-3 w-24 h-24 rounded-xl bg-[#f0aa0b]/10 -z-10"/>
-                                        <div className="absolute -top-3 -left-3 w-16 h-16 rounded-xl bg-[#720101]/10 -z-10"/>
-                                    </div>
-                                </Rv>
-                                <Rv cls={i%2===0?'rv-right':'rv-left'} d="flex-1">
-                                    <div>
-                                        <div className="w-11 h-11 rounded-xl bg-[#720101]/[0.08] flex items-center justify-center mb-4">{item.icon}</div>
-                                        <h3 className="font-display text-[#1a1a1a] text-xl md:text-2xl mb-3">{item.title}</h3>
-                                        <p className="text-[#1a1a1a]/50 leading-relaxed">{item.text}</p>
-                                    </div>
-                                </Rv>
-                            </div>
-                        ))}
-                    </div>
+                    <Rv>
+                        <div className="mt-8 flex flex-wrap gap-3">
+                            <Link href="/menu" className="rounded-full bg-[#720101] px-6 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-[#5a0101]">Browse Menu</Link>
+                            <Link href="/amenities" className="rounded-full border border-[#720101]/15 bg-white px-6 py-3 text-sm font-black uppercase tracking-widest text-[#720101] transition hover:bg-[#fff7e8]">View Amenities</Link>
+                        </div>
+                    </Rv>
                 </div>
             </section>
 
@@ -894,48 +890,6 @@ const LandingPage = () => {
                             </Rv>
                         ))}
                     </div>
-                    <Rv><div className="text-center mt-10">
-                        <Link href="/menu" className="inline-flex items-center gap-1.5 text-[#720101] hover:text-[#f0aa0b] font-semibold text-sm transition-colors group">
-                            Browse Full Menu <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-                        </Link>
-                    </div></Rv>
-                </div>
-            </section>
-
-            {/* AMENITIES */}
-            <section className="bg-white py-24">
-                <div className="mx-auto grid max-w-7xl gap-10 px-5 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-                    <Rv>
-                        <div>
-                            <p className="text-xs font-black uppercase tracking-[.22em] text-[#720101]">Amenities & Setup</p>
-                            <h2 className="mt-4 font-display text-3xl font-bold leading-tight text-[#1a1a1a] md:text-5xl">
-                                The event experience is more than the menu.
-                            </h2>
-                            <p className="mt-5 max-w-xl text-sm font-medium leading-7 text-gray-600">
-                                See what is prepared around the food: service flow, table arrangements, buffet presentation, staffing expectations, and venue-ready details that help the day feel organized from arrival to cleanup.
-                            </p>
-                            <button onClick={() => router.get('/amenities')} className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#720101] px-8 py-3.5 text-sm font-black uppercase tracking-wider text-white transition-colors hover:bg-[#5a0101]">
-                                View Amenities
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
-                            </button>
-                        </div>
-                    </Rv>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        {[
-                            ['Buffet Presentation', 'Coordinated stations, serving flow, and polished table styling.'],
-                            ['Service Crew', 'Assigned staff prepared for guest volume, timing, and venue needs.'],
-                            ['Venue Details', 'Setup notes for access, high-rise logistics, serving windows, and cleanup.'],
-                            ['Guest Comfort', 'Practical expectations for lines, pacing, utensils, and event movement.'],
-                        ].map(([title, text], index) => (
-                            <Rv key={title} d={`rv-d${index + 1}`}>
-                                <div className="h-full rounded-2xl border border-[#720101]/10 bg-[#faf7f2] p-6">
-                                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f0aa0b]/20 text-sm font-black text-[#720101]">{index + 1}</span>
-                                    <h3 className="mt-5 font-display text-xl font-bold text-[#1a1a1a]">{title}</h3>
-                                    <p className="mt-3 text-sm font-medium leading-6 text-gray-600">{text}</p>
-                                </div>
-                            </Rv>
-                        ))}
-                    </div>
                 </div>
             </section>
 
@@ -950,12 +904,12 @@ const LandingPage = () => {
                                 <p className="text-[#720101] text-xs font-bold uppercase tracking-[.2em] mb-3">Try Before You Buy</p>
                                 <h2 className="font-display text-[#1a1a1a] text-3xl md:text-4xl mb-4">Schedule a Private Food Tasting</h2>
                                 <p className="text-[#1a1a1a]/60 leading-relaxed mb-8 max-w-md">
-                                    Not ready to book yet? Come experience our culinary excellence firsthand. Meet our chefs, taste our bestsellers, and discuss your vision-no strings attached.
+                                    Not ready to book yet? Taste bestsellers, meet the team, and talk through your event direction before submitting a full booking request.
                                 </p>
-                                <button onClick={()=>router.get('/food-tasting')} className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3.5 px-8 rounded-full text-sm uppercase tracking-wider transition-all shadow-md hover:shadow-lg inline-flex items-center gap-2">
-                                    Book Tasting
+                                <Link href="/food-tasting" className="bg-[#720101] hover:bg-[#5a0101] text-white font-bold py-3.5 px-8 rounded-full text-sm uppercase tracking-wider transition-all shadow-md hover:shadow-lg inline-flex items-center gap-2">
+                                    Schedule Tasting
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
-                                </button>
+                                </Link>
                             </div>
                             <div className="flex-1 w-full relative z-10">
                                 <img src="https://images.unsplash.com/photo-1528712306091-ed0763094c98?auto=format&fit=crop&q=80&w=760" alt="Tasting plates prepared for review" className="w-full h-72 md:h-80 object-cover rounded-2xl shadow-lg border-4 border-white"/>
@@ -985,41 +939,11 @@ const LandingPage = () => {
                                 <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">Payment rules that adjust to your booking timeline.</h2>
                             </div>
                             <p className="max-w-2xl text-sm font-medium leading-7 text-white/55">
-                                Your schedule is calculated from the event date. Standard bookings use the 10 / 70 / 20 plan, while closer event dates combine payments so sourcing, staffing, and final preparation stay realistic.
+                                Payment timing follows your event date, so standard bookings and rush bookings each show the right amount due before work proceeds.
                             </p>
                         </div>
                     </Rv>
 
-                    <div className="hidden">
-                        {/* Timeline line */}
-                        <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-px bg-white/10 -translate-x-1/2"/>
-                        <div className="space-y-12 md:space-y-0 md:grid md:grid-cols-1 md:gap-0">
-                            {[
-                                {pct:'10%',label:'Reservation Fee',text:'Secure your date with a non-refundable fee. We start planning your event right away.',color:'#f0aa0b',side:'left'},
-                                {pct:'70%',label:'Down Payment',text:'Due 1 month before. Funds sourcing, staffing, and full logistics preparation.',color:'#720101',side:'right'},
-                                {pct:'20%',label:'Final Balance',text:'Due 10 days before. After this, relax - we handle everything on the big day.',color:'#ffffff',side:'left'},
-                            ].map((s,i)=>(
-                                <Rv key={i} d={`rv-d${i+1}`}>
-                                    <div className={`md:flex items-center gap-8 ${s.side==='right'?'md:flex-row-reverse':''} mb-8`}>
-                                        <div className="flex-1 md:text-right">
-                                            {s.side==='left'&&<StepCard s={s}/>}
-                                        </div>
-                                        <div className="hidden md:flex flex-col items-center">
-                                            <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center" style={{borderColor:s.color}}>
-                                                <span className="font-display font-bold text-sm" style={{color:s.color}}>{s.pct}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex-1">
-                                            {s.side==='right'&&<StepCard s={s}/>}
-                                            {s.side==='left'&&<div className="md:block hidden"/>}
-                                        </div>
-                                        {/* Mobile only */}
-                                        <div className="md:hidden"><StepCard s={s} mobile/></div>
-                                    </div>
-                                </Rv>
-                            ))}
-                        </div>
-                    </div>
                     <div className="grid gap-5 lg:grid-cols-3">
                         {[
                             { tag: 'Standard', title: 'More than 30 days before event', amount: '10% / 70% / 20%', points: ['10% reservation fee due within 24 hours', '70% down payment due 1 month before', '20% final balance due 10 days before'], accent: 'bg-[#f0aa0b] text-[#1a1a1a]' },
@@ -1102,47 +1026,37 @@ const LandingPage = () => {
             </section>
 
             {/* FINAL CTA */}
-            <section className="hidden">
-                <img src="https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=85&w=1800" alt="Formal celebration table setup" className="absolute inset-0 h-full w-full object-cover opacity-24"/>
-                <div className="absolute inset-0 bg-[#15110f]/82"/>
+            <section className="relative overflow-hidden bg-[#15110f] py-20 text-center">
+                <img src="https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=85&w=1800" alt="Formal celebration table setup" className="absolute inset-0 h-full w-full object-cover opacity-28"/>
+                <div className="absolute inset-0 bg-[#15110f]/88"/>
+                <div className="absolute inset-0 bg-gradient-to-r from-[#15110f]/95 via-[#15110f]/82 to-[#15110f]/95"/>
                 <div className="relative z-10 max-w-7xl mx-auto px-5 sm:px-8">
                     <Rv>
                         <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f0aa0b]">Ready when you are</p>
-                        <h2 className="font-display text-white text-3xl md:text-4xl lg:text-5xl leading-tight mb-5">Let's make your next event unforgettable.</h2>
-                        <p className="text-white/40 mb-10 max-w-sm mx-auto">From planning to cleanup - we handle every detail so you enjoy the moment.</p>
-                        <button onClick={()=>router.get('/book')} className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
-                            Book Eloquente Now
-                        </button>
+                        <h2 className="mx-auto mt-3 max-w-4xl font-display text-white text-3xl md:text-4xl lg:text-5xl leading-tight mb-5 drop-shadow-[0_3px_14px_rgba(0,0,0,0.55)]">Let's make your next event unforgettable.</h2>
+                        <p className="text-white/85 mb-10 max-w-xl mx-auto font-semibold leading-7 drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)]">Start with a booking request, or browse the menu first if you are still shaping the celebration.</p>
+                        <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                            <Link href="/book" className="bg-[#f0aa0b] hover:bg-[#d4950a] text-[#1a1a1a] font-bold py-4 px-10 rounded-full text-sm uppercase tracking-wider transition-colors shadow-lg">
+                                Start Booking
+                            </Link>
+                            <Link href="/menu" className="rounded-full border border-white/20 px-8 py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:border-[#f0aa0b] hover:text-[#f0aa0b]">
+                                Browse Menu
+                            </Link>
+                        </div>
                     </Rv>
                 </div>
             </section>
 
-            {/* FOOTER */}
-            <footer className="hidden">
-                <div className="max-w-6xl mx-auto px-5 sm:px-8 flex flex-col md:flex-row items-center justify-between gap-8">
-                    <img src={logoImg} alt="Eloquente" className="h-10 w-auto opacity-80"/>
-                    <div className="flex flex-wrap gap-6 text-sm font-semibold text-white/45">
-                        <Link href="/about" className="hover:text-white/60 transition-colors">About</Link>
-                        <Link href="/menu" className="hover:text-white/60 transition-colors">Menu</Link>
-                        <Link href="/contact" className="hover:text-white/60 transition-colors">Contact</Link>
-                    </div>
+            {/*
                     <p className="text-white/20 text-xs">© 2026 Eloquente Catering Services</p>
                 </div>
-            </footer>
+            </footer>}
+
+            */}
 
             <Footer />
         </div>
     );
 };
-
-const StepCard = ({s, mobile}) => (
-    <div className={mobile ? 'block md:hidden' : 'hidden md:block'}>
-        <div className="bg-white/[.04] rounded-xl p-6 border border-white/[.06] hover:bg-white/[.07] transition-colors duration-300">
-            {mobile && <span className="font-display font-bold text-lg mb-2 block" style={{color:s.color}}>{s.pct}</span>}
-            <h3 className="text-white font-display font-bold text-lg mb-2">{s.label}</h3>
-            <p className="text-white/40 text-sm leading-relaxed">{s.text}</p>
-        </div>
-    </div>
-);
 
 export default LandingPage;

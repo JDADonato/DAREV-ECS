@@ -5,6 +5,7 @@ import StaffPagination from './StaffPagination';
 import StaffSkeleton from './StaffSkeleton';
 import StaffStatusBadge from './StaffStatusBadge';
 import { getListData, getPaginationMeta } from '../../utils/apiResponses';
+import { feedbackStatusLabel } from '../../utils/statusLabels';
 
 const formatDate = (value) => {
     if (!value) return '-';
@@ -321,7 +322,12 @@ const EventHistoryPanel = ({ role = 'staff', onToast }) => {
                                         </td>
                                         <td>{event.owner_name || 'Unassigned'}</td>
                                         <td><StaffStatusBadge tone={statusTone(event.post_event_status)}>{event.post_event_status || 'Completed'}</StaffStatusBadge></td>
-                                        <td><StaffStatusBadge tone={statusTone(feedback.review_status)}>{feedback.review_status || 'No feedback'}</StaffStatusBadge></td>
+                                        <td>
+                                            {(() => {
+                                                const status = feedbackStatusLabel(feedback.review_status);
+                                                return <StaffStatusBadge tone={status.tone === 'success' ? 'good' : status.tone === 'danger' ? 'danger' : status.tone === 'warning' ? 'warn' : 'muted'}>{status.label}</StaffStatusBadge>;
+                                            })()}
+                                        </td>
                                         <td className="text-right font-black text-slate-950">{formatMoney(event.total_cost)}</td>
                                         <td className="text-right">
                                             <button type="button" onClick={() => setSelectedEvent(event)} className="staff-row-action">Open</button>

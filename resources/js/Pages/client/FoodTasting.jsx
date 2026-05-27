@@ -4,7 +4,7 @@ import { ArrowLeft, CalendarDays, CheckCircle2, Clock, MessageSquareText, Phone,
 import { useAuth } from '../../context/AuthContext';
 
 const FoodTasting = () => {
-    const { user, logout } = useAuth();
+    const { user } = useAuth();
     const [formData, setFormData] = useState({
         guest_name: user ? user.username : '',
         guest_email: user ? user.email || '' : '',
@@ -15,6 +15,7 @@ const FoodTasting = () => {
     });
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState(null);
+    const [scheduledTastingId, setScheduledTastingId] = useState(null);
 
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -33,8 +34,8 @@ const FoodTasting = () => {
 
             if (response.ok) {
                 setMessage({ type: 'success', text: 'Food tasting scheduled successfully.' });
-                if (user) setTimeout(() => router.get('/dashboard/client?tab=tastings'), 1200);
-                else setFormData({ guest_name: '', guest_email: '', guest_phone: '', preferred_date: '', preferred_time: '', notes: '' });
+                setScheduledTastingId(data.tastingId || true);
+                if (!user) setFormData({ guest_name: '', guest_email: '', guest_phone: '', preferred_date: '', preferred_time: '', notes: '' });
             } else {
                 setMessage({ type: 'error', text: data.message || 'We could not schedule the tasting. Please try again.' });
             }
@@ -57,8 +58,8 @@ const FoodTasting = () => {
                         <p className="text-[11px] font-black uppercase tracking-[0.24em] text-[#720101]">Food Tasting</p>
                         <p className="hidden text-xs font-semibold text-gray-500 sm:block">Schedule a tasting session before finalizing your menu</p>
                     </div>
-                    <button onClick={() => router.get('/dashboard/client?tab=tastings')} className="rounded-full bg-[#720101] px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-[#5a0101]">
-                        Tastings
+                    <button onClick={() => router.get(user ? '/dashboard/client' : '/')} className="rounded-full bg-[#720101] px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-[#5a0101]">
+                        {user ? 'Dashboard' : 'Home'}
                     </button>
                 </div>
             </header>
@@ -93,13 +94,23 @@ const FoodTasting = () => {
                             <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">Request Session</p>
                             <h2 className="mt-1 text-2xl font-display font-bold">Schedule your tasting</h2>
                         </div>
-                        <button onClick={() => router.get('/dashboard/client?tab=tastings')} className="hidden rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50 sm:block">My Tastings</button>
+                        {user && <button onClick={() => router.get('/dashboard/client')} className="hidden rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50 sm:block">Dashboard</button>}
                     </div>
 
                     {message && (
                         <div className={`mb-6 flex items-center gap-3 rounded-2xl p-4 text-sm font-bold ${message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                             <CheckCircle2 className="h-5 w-5" />
                             {message.text}
+                        </div>
+                    )}
+
+                    {scheduledTastingId && user && (
+                        <div className="mb-6 rounded-2xl border border-[#720101]/10 bg-[#faf7f2] p-4">
+                            <p className="text-sm font-bold text-[#1a1a1a]">Your tasting request is on file. The team will confirm the schedule from the Marketing workspace.</p>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                <button onClick={() => router.get('/dashboard/client')} className="rounded-xl bg-[#720101] px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-[#5a0101]">Go to Dashboard</button>
+                                <button onClick={() => router.get('/menu')} className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-gray-700 hover:bg-gray-50">Browse Menu</button>
+                            </div>
                         </div>
                     )}
 

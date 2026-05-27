@@ -27,6 +27,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\StaffEventHistoryController;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Models\Announcement;
@@ -47,6 +48,22 @@ Route::get('/', fn () => Inertia::render('LandingPage'))->name('home');
 Route::get('/about', fn () => Inertia::render('About'))->name('about');
 Route::get('/amenities', fn () => Inertia::render('Amenities'))->name('amenities');
 Route::get('/contact', fn () => Inertia::render('Contact'))->name('contact');
+Route::get('/robots.txt', function () {
+    return response(File::get(public_path('robots.txt')), 200)
+        ->header('Content-Type', 'text/plain');
+})->name('robots');
+Route::get('/sitemap.xml', function () {
+    $url = rtrim((string) config('app.url'), '/');
+    $routes = collect(config('security.public_routes', []));
+
+    $xml = view('sitemap', [
+        'routes' => $routes,
+        'baseUrl' => $url,
+        'lastmod' => now()->toDateString(),
+    ])->render();
+
+    return response($xml, 200)->header('Content-Type', 'application/xml');
+})->name('sitemap');
 Route::get('/api/announcements', [AnnouncementController::class, 'publicIndex'])->middleware('cache.headers:public;max_age=60;etag');
 Route::post('/api/contact-inquiries', [ContactInquiryController::class, 'store'])->middleware('throttle:10,1');
 Route::post('/webhook/paymongo', PayMongoWebhookController::class)->name('webhook.paymongo');

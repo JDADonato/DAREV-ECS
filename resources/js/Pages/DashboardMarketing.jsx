@@ -11,19 +11,20 @@ import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
+import EventDetailDrawer from '../Components/staff/EventDetailDrawer';
+import NextActionPanel from '../Components/staff/NextActionPanel';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
+import { bookingStatusLabel, reviewStatusLabel } from '../utils/statusLabels';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import {
     formatDate,
-    formatFullAddress,
     formatMoney,
     formatTime,
     getBookingValue,
     getDateKey,
     getDaysInMonth,
     getFirstDayOfMonth,
-    getSelectedDishes,
     titleCase,
 } from '../utils/dashboardUtils';
 
@@ -946,44 +947,77 @@ const DashboardMarketing = () => {
         };
     }, [bookings, marketingRemoteSummary]);
 
+    const marketingNextActions = useMemo(() => ([
+        {
+            id: 'booking-intake',
+            priority: marketingSummary.pending > 0 ? 'action' : 'info',
+            title: 'Review submitted bookings',
+            description: marketingSummary.pending > 0 ? `${marketingSummary.pending} bookings are waiting for ownership or review.` : 'No submitted bookings are waiting right now.',
+            badge: marketingSummary.pending,
+            primaryLabel: 'Open',
+            tone: marketingSummary.pending > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('intake'),
+        },
+        {
+            id: 'needs-details',
+            priority: marketingSummary.needsDetails > 0 ? 'urgent' : 'info',
+            title: 'Customer details needed',
+            description: marketingSummary.needsDetails > 0 ? `${marketingSummary.needsDetails} bookings are blocked by missing or clarified information.` : 'No customer detail requests are blocking work.',
+            badge: marketingSummary.needsDetails,
+            primaryLabel: 'Open',
+            tone: marketingSummary.needsDetails > 0 ? 'danger' : 'good',
+            onOpen: () => setActiveTab('intake'),
+        },
+        {
+            id: 'guest-inquiries',
+            priority: (leadData.summary?.open || 0) > 0 ? 'followup' : 'info',
+            title: 'Triage guest inquiries',
+            description: (leadData.summary?.open || 0) > 0 ? `${leadData.summary.open} contact-form messages need assignment or follow-up.` : 'No guest inquiries are waiting.',
+            badge: leadData.summary?.open || 0,
+            primaryLabel: 'Open',
+            tone: (leadData.summary?.open || 0) > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('leads'),
+        },
+        {
+            id: 'upcoming-handoffs',
+            priority: marketingSummary.upcoming > 0 ? 'followup' : 'info',
+            title: 'Prepare upcoming events',
+            description: marketingSummary.upcoming > 0 ? `${marketingSummary.upcoming} approved events need preparation visibility.` : 'No upcoming approved events need handoff yet.',
+            badge: marketingSummary.upcoming,
+            primaryLabel: 'Open',
+            tone: marketingSummary.upcoming > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('preparation'),
+        },
+        {
+            id: 'messages',
+            priority: 'action',
+            title: 'Customer messages',
+            description: 'Open the shared inbox to claim, answer, transfer, or resolve customer conversations.',
+            badge: 'Inbox',
+            primaryLabel: 'Open',
+            tone: 'muted',
+            onOpen: () => setActiveTab('messages'),
+        },
+        {
+            id: 'feedback-followups',
+            priority: feedbackSummary.followUps > 0 ? 'followup' : 'info',
+            title: 'Post-event feedback',
+            description: feedbackSummary.followUps > 0 ? `${feedbackSummary.followUps} completed events need feedback follow-up or testimonial review.` : 'No feedback follow-ups are waiting.',
+            badge: feedbackSummary.followUps,
+            primaryLabel: 'Open',
+            tone: feedbackSummary.followUps > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('history'),
+        },
+    ]), [feedbackSummary.followUps, leadData.summary?.open, marketingSummary.needsDetails, marketingSummary.pending, marketingSummary.upcoming]);
+
     const renderToday = () => (
         <div className="staff-today-grid">
-            <section className="staff-work-surface">
-                <div className="staff-surface-head">
-                    <div>
-                        <p className="marketing-kicker">Priority queue</p>
-                        <h3 className="mt-1 text-lg font-black text-slate-950">Marketing work needing action</h3>
-                    </div>
-                </div>
-                <div className="p-4">
-                    <div className="staff-priority-list">
-                        <button type="button" onClick={() => setActiveTab('intake')} className="staff-priority-item">
-                            <div><h3>Booking intake</h3><p>{marketingSummary.pending} submitted bookings are waiting for review or approval.</p></div>
-                            <StaffStatusBadge tone={marketingSummary.pending > 0 ? 'warn' : 'good'}>{marketingSummary.pending}</StaffStatusBadge>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('intake')} className="staff-priority-item">
-                            <div><h3>Needs customer details</h3><p>{marketingSummary.needsDetails} bookings are blocked by missing or clarified information.</p></div>
-                            <StaffStatusBadge tone={marketingSummary.needsDetails > 0 ? 'danger' : 'good'}>{marketingSummary.needsDetails}</StaffStatusBadge>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('leads')} className="staff-priority-item">
-                            <div><h3>Guest inquiries</h3><p>{leadData.summary?.open || 0} contact-form messages need triage, assignment, or follow-up.</p></div>
-                            <StaffStatusBadge tone={(leadData.summary?.open || 0) > 0 ? 'warn' : 'good'}>{leadData.summary?.open || 0}</StaffStatusBadge>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('preparation')} className="staff-priority-item">
-                            <div><h3>Upcoming handoffs</h3><p>{marketingSummary.upcoming} confirmed or reserved events need preparation visibility.</p></div>
-                            <StaffStatusBadge tone={marketingSummary.upcoming > 0 ? 'warn' : 'good'}>{marketingSummary.upcoming}</StaffStatusBadge>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('messages')} className="staff-priority-item">
-                            <div><h3>Customer messages</h3><p>Open the shared inbox to claim, answer, transfer, or resolve customer conversations.</p></div>
-                            <StaffStatusBadge tone="muted">Inbox</StaffStatusBadge>
-                        </button>
-                        <button type="button" className="staff-priority-item">
-                            <div><h3>Post-event feedback</h3><p>{feedbackSummary.followUps} completed events need feedback follow-up or testimonial review.</p></div>
-                            <StaffStatusBadge tone={feedbackSummary.followUps > 0 ? 'warn' : 'good'}>{feedbackSummary.followUps}</StaffStatusBadge>
-                        </button>
-                    </div>
-                </div>
-            </section>
+            <NextActionPanel
+                title="Marketing work needing action"
+                actions={marketingNextActions}
+                emptyTitle="No Marketing actions waiting"
+                emptyMessage="Claim requests, customer replies, guest inquiries, and feedback follow-ups will appear here."
+            />
 
             <section className="staff-work-surface">
                 <div className="staff-surface-head">
@@ -1002,7 +1036,7 @@ const DashboardMarketing = () => {
                                     <h3>{eventDisplayName(booking)}</h3>
                                     <p>{formatDate(booking.event_date)} / {booking.pax || 0} guests / {booking.client_full_name || booking.username || 'Customer'}</p>
                                 </div>
-                                <StaffStatusBadge tone="good">{booking.status}</StaffStatusBadge>
+                                <StaffStatusBadge tone="good">{bookingStatusLabel(booking.status).label}</StaffStatusBadge>
                             </button>
                         ))}
                     </div>
@@ -1080,11 +1114,16 @@ const DashboardMarketing = () => {
                                 <div>{booking.preparation_state || 'No tasks yet'}</div>
                                 <div>{booking.payment_state || 'Payments pending'}</div>
                             </td>
-                            <td className="px-4 py-3 text-right"><StaffStatusBadge tone={String(booking.status).toLowerCase() === 'confirmed' ? 'good' : 'warn'}>{booking.status}</StaffStatusBadge></td>
+                            <td className="px-4 py-3 text-right">
+                                {(() => {
+                                    const status = bookingStatusLabel(booking.status);
+                                    return <StaffStatusBadge tone={status.tone === 'success' ? 'good' : status.tone === 'danger' ? 'danger' : status.tone === 'warning' ? 'warn' : 'muted'}>{status.label}</StaffStatusBadge>;
+                                })()}
+                            </td>
                         </tr>
                     ))}
                     {calendarBookings.length === 0 && (
-                        <tr><td colSpan="7" className="px-4 py-10 text-center font-bold text-slate-400">No events match the selected filters.</td></tr>
+                        <tr><td colSpan="7" className="px-4 py-10"><StaffEmptyState title="No calendar events found" message="No events match this date range or filter." /></td></tr>
                     )}
                 </tbody>
             </table>
@@ -1093,34 +1132,77 @@ const DashboardMarketing = () => {
 
     const renderBookingModal = () => {
         if (!selectedBooking) return null;
-        const selectedDishes = getSelectedDishes(selectedBooking);
         const isApproved = selectedBooking.status === 'Confirmed';
         const reviewStatus = selectedBooking.review_status || (selectedBooking.status === 'Pending' ? 'Submitted' : selectedBooking.status);
+        const reviewStatusInfo = reviewStatusLabel(reviewStatus);
         const canEdit = canEditBooking(selectedBooking);
         const canClaim = canClaimBooking(selectedBooking);
         const pendingTransferToMe = Boolean(selectedBooking.can_accept_transfer);
         const hasPendingTransfer = Boolean(selectedBooking.transfer_requested_to);
 
         return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setSelectedBooking(null)}>
-                <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"></div>
-                <div className="relative flex max-h-[90vh] w-full max-w-2xl animate-fadeIn flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-amber-100 bg-[#fffaf3] px-6 py-4">
-                        <div>
-                            <h3 className="text-lg font-bold text-slate-950">Event Brief</h3>
-                            <p className="mt-1 text-xs font-bold text-slate-500">Reference: #BK-{selectedBooking.id.toString().padStart(4, '0')}</p>
-                        </div>
-                        <button onClick={() => setSelectedBooking(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                    </div>
-
-                    <div className="custom-scrollbar flex-1 space-y-8 overflow-y-auto bg-white p-6">
+            <EventDetailDrawer
+                isOpen={Boolean(selectedBooking)}
+                booking={selectedBooking}
+                role="marketing"
+                currentUser={user}
+                title="Event brief"
+                onClose={() => setSelectedBooking(null)}
+                footer={<button onClick={() => setSelectedBooking(null)} className="staff-button-primary">Done</button>}
+                actionSlot={(
+                    <>
+                        {pendingTransferToMe && (
+                            <>
+                                <button onClick={() => respondToTransfer(selectedBooking.id, 'accept')} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
+                                    Accept transfer
+                                </button>
+                                <button onClick={() => respondToTransfer(selectedBooking.id, 'decline')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">
+                                    Decline
+                                </button>
+                            </>
+                        )}
+                        {canClaim && (
+                            <button onClick={() => assignBooking(selectedBooking.id)} className="rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5">
+                                Claim booking
+                            </button>
+                        )}
+                        {selectedBooking.assigned_to && (canEdit || user?.role === 'Admin') && (
+                            <div className="relative">
+                                <button onClick={() => { setShowBookingTransfer(!showBookingTransfer); if (!showBookingTransfer) fetchBookingTransferStaff(); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                                    Transfer owner
+                                </button>
+                                {showBookingTransfer && (
+                                    <div className="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white py-2 shadow-lg">
+                                        {bookingTransferStaff.length === 0 ? (
+                                            <p className="px-3 py-2 text-xs font-bold text-slate-400">No Marketing staff available</p>
+                                        ) : bookingTransferStaff.map(staff => (
+                                            <button key={staff.id} onClick={() => transferBooking(selectedBooking.id, staff.id)} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">
+                                                <span>{staff.username}</span>
+                                                <span className="text-[10px] text-slate-400">{staff.role}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {selectedBooking.assigned_to && canEdit && !['Completed'].includes(selectedBooking.status) && (
+                            <button onClick={() => releaseBooking(selectedBooking.id)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">
+                                Unclaim booking
+                            </button>
+                        )}
+                        {canEdit && (
+                            <button onClick={() => requestClarification(selectedBooking.id)} className="rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-[#fff0cf]">
+                                Request details
+                            </button>
+                        )}
+                    </>
+                )}
+            >
                         <div className="rounded-xl border border-[#720101]/10 bg-[#fffaf3] p-4">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
                                     <p className="marketing-kicker">Review workflow</p>
-                                    <h4 className="mt-1 text-lg font-black text-slate-950">{reviewStatus}</h4>
+                                    <h4 className="mt-1 text-lg font-black text-slate-950">{reviewStatusInfo.label}</h4>
                                     <p className="mt-1 text-sm font-semibold text-slate-500">
                                         Owner: {selectedBooking.owner_name || selectedBooking.assigned_name || 'Unassigned'}
                                     </p>
@@ -1133,52 +1215,6 @@ const DashboardMarketing = () => {
                                         <p className="mt-2 text-xs font-bold text-amber-700">
                                             {pendingTransferToMe ? 'Accept this transfer to become the owner.' : canClaim ? 'Claim this booking to take action.' : 'Owned by another staff member. Actions are locked until ownership is transferred.'}
                                         </p>
-                                    )}
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    {pendingTransferToMe && (
-                                        <>
-                                            <button onClick={() => respondToTransfer(selectedBooking.id, 'accept')} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
-                                                Accept transfer
-                                            </button>
-                                            <button onClick={() => respondToTransfer(selectedBooking.id, 'decline')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">
-                                                Decline
-                                            </button>
-                                        </>
-                                    )}
-                                    {canClaim && (
-                                        <button onClick={() => assignBooking(selectedBooking.id)} className="rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5">
-                                            Claim booking
-                                        </button>
-                                    )}
-                                    {selectedBooking.assigned_to && (canEdit || user?.role === 'Admin') && (
-                                        <div className="relative">
-                                            <button onClick={() => { setShowBookingTransfer(!showBookingTransfer); if (!showBookingTransfer) fetchBookingTransferStaff(); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
-                                                Transfer owner
-                                            </button>
-                                            {showBookingTransfer && (
-                                                <div className="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white py-2 shadow-lg">
-                                                    {bookingTransferStaff.length === 0 ? (
-                                                        <p className="px-3 py-2 text-xs font-bold text-slate-400">No Marketing staff available</p>
-                                                    ) : bookingTransferStaff.map(staff => (
-                                                        <button key={staff.id} onClick={() => transferBooking(selectedBooking.id, staff.id)} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">
-                                                            <span>{staff.username}</span>
-                                                            <span className="text-[10px] text-slate-400">{staff.role}</span>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {selectedBooking.assigned_to && canEdit && !['Completed'].includes(selectedBooking.status) && (
-                                        <button onClick={() => releaseBooking(selectedBooking.id)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">
-                                            Unclaim booking
-                                        </button>
-                                    )}
-                                    {canEdit && (
-                                        <button onClick={() => requestClarification(selectedBooking.id)} className="rounded-lg border border-[#f0aa0b]/40 bg-[#fff7e8] px-3 py-2 text-xs font-black text-[#9f6500] hover:bg-[#fff0cf]">
-                                            Request details
-                                        </button>
                                     )}
                                 </div>
                             </div>
@@ -1212,115 +1248,6 @@ const DashboardMarketing = () => {
                             )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-4">
-                                <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-900">
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                                    Client Logic
-                                </h4>
-                                <div className="space-y-3">
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Primary Entity</p>
-                                        <p className="text-sm font-semibold text-gray-900">{selectedBooking.client_full_name || selectedBooking.username || 'N/A'}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Email)</p>
-                                        <p className="text-sm text-gray-700">{selectedBooking.client_email || 'N/A'}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Contact (Phone)</p>
-                                        <p className="text-sm text-gray-700">{selectedBooking.client_phone || 'N/A'}</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
-                                <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-900">
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                    Schedule
-                                </h4>
-                                <div className="space-y-3">
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Event Date</p>
-                                        <p className="text-sm font-semibold text-gray-900">{formatDate(selectedBooking.event_date)}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Start Time</p>
-                                        <p className="text-sm text-gray-700">{formatTime(selectedBooking.event_time)}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Booking Status</p>
-                                        <span className={`inline-flex mt-1 items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isApproved ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                            {selectedBooking.status}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Event Venue</h4>
-                            <div className="rounded-lg border border-rose-100 bg-rose-50/60 p-4">
-                                <p className="text-xs text-gray-500 font-medium">Venue Address</p>
-                                <p className="mt-1 text-sm font-bold text-gray-900">{formatFullAddress(selectedBooking)}</p>
-                                {selectedBooking.venue_building_details && (
-                                    <p className="mt-2 text-xs font-medium text-gray-600">{selectedBooking.venue_building_details}</p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div>
-                            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Selected Dishes</h4>
-                            {selectedDishes.length === 0 ? (
-                                <div className="bg-gray-50 rounded-lg p-4 text-sm font-medium text-gray-500">No dishes selected for this booking.</div>
-                            ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {selectedDishes.map((dish, index) => (
-                                        <div key={`${dish.category}-${dish.name}-${index}`} className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">{dish.category}</p>
-                                            <p className="mt-1 text-sm font-bold text-gray-900">{dish.name}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div>
-                            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Financial Summary</h4>
-                            <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div>
-                                    <p className="text-xs text-gray-500 font-medium">Guest count</p>
-                                    <p className="text-lg font-bold text-gray-900">{selectedBooking.pax}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-gray-500 font-medium">Event Total (PHP)</p>
-                                    <p className="text-lg font-bold text-gray-900">{formatMoney(selectedBooking.total_cost || selectedBooking.budget)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-gray-500 font-medium">Travel Fee (PHP)</p>
-                                    <p className="text-lg font-bold text-orange-600">{formatMoney(selectedBooking.transport_fee)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-gray-500 font-medium">Extra Service Hours (PHP)</p>
-                                    <p className="text-lg font-bold text-orange-600">{formatMoney(selectedBooking.labor_surcharge)}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {selectedBooking.preparation_tasks?.length > 0 && (
-                            <div>
-                                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Preparation Tasks</h4>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                    {selectedBooking.preparation_tasks.map(task => (
-                                        <div key={task.id} className={`rounded-lg border px-4 py-3 ${task.status === 'Done' ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-[#fffaf3]'}`}>
-                                            <p className="text-sm font-bold text-gray-900">{task.label}</p>
-                                            <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-gray-400">{task.department} / {task.status}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
                         {isApproved && (
                             <div>
                                 <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2 flex items-center gap-1">
@@ -1344,15 +1271,7 @@ const DashboardMarketing = () => {
                                 </div>
                             </div>
                         )}
-                    </div>
-
-                    <div className="flex justify-end border-t border-amber-100 bg-[#fffaf3] px-6 py-4">
-                        <button onClick={() => setSelectedBooking(null)} className="marketing-primary-btn px-6 py-2 text-sm">
-                            Done
-                        </button>
-                    </div>
-                </div>
-            </div>
+            </EventDetailDrawer>
         );
     };
     // ---- PDF Export Functions ----

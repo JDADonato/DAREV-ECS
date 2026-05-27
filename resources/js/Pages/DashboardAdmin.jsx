@@ -9,7 +9,9 @@ import ConfirmModal from '../Components/common/ConfirmModal';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
+import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
+import NextActionPanel from '../Components/staff/NextActionPanel';
 import { getListData } from '../utils/apiResponses';
 import {
     formatBookingRef,
@@ -255,6 +257,9 @@ const DashboardAdmin = () => {
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditSearch, setAuditSearch] = useState('');
     const [auditRoleFilter, setAuditRoleFilter] = useState('All');
+    const [auditResultFilter, setAuditResultFilter] = useState('All');
+    const [auditWorkspaceFilter, setAuditWorkspaceFilter] = useState('All');
+    const [auditActivityFilter, setAuditActivityFilter] = useState('Operational');
     const [availabilityMonth, setAvailabilityMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -566,6 +571,65 @@ const DashboardAdmin = () => {
         }, { count: 0, paid: 0, fees: 0, refundable: 0 });
     }, [refundQueue]);
 
+    const adminNextActions = useMemo(() => {
+        const failedAudits = audits.filter((audit) => Number(audit.status_code || 0) >= 400).length;
+        const blockedStaff = employees.filter((employee) => employee.account_status === 'deactivated' || employee.must_change_password).length;
+        const topAlertCount = visibleOperationalAlerts.reduce((sum, alert) => sum + Number(alert.count || 0), 0);
+
+        return [
+            {
+                id: 'booking-oversight',
+                priority: bookingStats.pending > 0 ? 'action' : 'info',
+                title: 'Review booking oversight',
+                description: bookingStats.pending > 0 ? `${bookingStats.pending} bookings are still awaiting review.` : 'No pending booking requests need admin oversight.',
+                badge: bookingStats.pending,
+                primaryLabel: 'Open',
+                tone: bookingStats.pending > 0 ? 'warn' : 'good',
+                onOpen: () => setActiveTab('bookings'),
+            },
+            {
+                id: 'refund-oversight',
+                priority: refundQueue.length > 0 ? 'urgent' : 'info',
+                title: 'Monitor refund queue',
+                description: refundQueue.length > 0 ? `${refundQueue.length} refund cases may need approval or processing.` : 'No refund cases are waiting.',
+                badge: refundQueue.length,
+                primaryLabel: 'Open',
+                tone: refundQueue.length > 0 ? 'danger' : 'good',
+                onOpen: () => setActiveTab('refunds'),
+            },
+            {
+                id: 'people-accounts',
+                priority: blockedStaff > 0 ? 'action' : 'info',
+                title: 'Check staff account access',
+                description: blockedStaff > 0 ? `${blockedStaff} staff accounts need account-status or password attention.` : 'Staff account access looks clear.',
+                badge: blockedStaff,
+                primaryLabel: 'Open',
+                tone: blockedStaff > 0 ? 'warn' : 'good',
+                onOpen: () => setActiveTab('users'),
+            },
+            {
+                id: 'system-activity',
+                priority: failedAudits > 0 ? 'urgent' : 'info',
+                title: 'Inspect activity exceptions',
+                description: failedAudits > 0 ? `${failedAudits} recent activity records ended with blocked or failed results.` : 'No failed activity records in the recent log.',
+                badge: failedAudits,
+                primaryLabel: 'Open',
+                tone: failedAudits > 0 ? 'danger' : 'good',
+                onOpen: () => setActiveTab('audits'),
+            },
+            {
+                id: 'operational-alerts',
+                priority: topAlertCount > 0 ? 'followup' : 'info',
+                title: 'Review operational alerts',
+                description: topAlertCount > 0 ? `${topAlertCount} alert items are showing in the overview.` : 'Operational alerts are quiet for this filter.',
+                badge: topAlertCount,
+                primaryLabel: 'Review',
+                tone: topAlertCount > 0 ? 'warn' : 'good',
+                onOpen: () => setActiveTab('dashboard'),
+            },
+        ];
+    }, [audits, bookingStats.pending, employees, refundQueue.length, visibleOperationalAlerts]);
+
     const visibleBookings = useMemo(() => {
         const query = bookingSearch.trim().toLowerCase();
 
@@ -644,10 +708,16 @@ const DashboardAdmin = () => {
 
         return audits.filter((audit) => {
             if (auditRoleFilter !== 'All' && audit.role !== auditRoleFilter) return false;
-            if (!query) return true;
-
             const workspace = getAuditWorkspace(audit);
             const result = getAuditResult(audit).label;
+            const actionText = String(audit.action || '').toLowerCase();
+            const isSystemAccess = actionText.includes('opened') || actionText.includes('dashboard') || actionText.includes('viewed');
+
+            if (auditWorkspaceFilter !== 'All' && workspace !== auditWorkspaceFilter) return false;
+            if (auditResultFilter !== 'All' && result !== auditResultFilter) return false;
+            if (auditActivityFilter === 'Operational' && isSystemAccess) return false;
+            if (auditActivityFilter === 'System access' && !isSystemAccess) return false;
+            if (!query) return true;
 
             return [
                 audit.username,
@@ -657,7 +727,9 @@ const DashboardAdmin = () => {
                 result,
             ].filter(Boolean).join(' ').toLowerCase().includes(query);
         });
-    }, [audits, auditSearch, auditRoleFilter]);
+    }, [audits, auditActivityFilter, auditResultFilter, auditRoleFilter, auditSearch, auditWorkspaceFilter]);
+    const auditWorkspaceOptions = useMemo(() => Array.from(new Set(audits.map(getAuditWorkspace).filter(Boolean))).sort(), [audits]);
+    const auditResultOptions = useMemo(() => Array.from(new Set(audits.map((audit) => getAuditResult(audit).label).filter(Boolean))).sort(), [audits]);
     const selectedAvailabilityEvents = useMemo(() => (
         availabilityEvents.filter((event) => event.date === availabilityDate)
     ), [availabilityEvents, availabilityDate]);
@@ -2347,6 +2419,15 @@ const DashboardAdmin = () => {
                                         ))}
                                     </div>
                                 </section>
+
+                                <NextActionPanel
+                                    eyebrow="Oversight"
+                                    title="Admin work needing attention"
+                                    description="Exceptions, account access, refunds, and system activity are grouped here before the detailed reports."
+                                    actions={adminNextActions}
+                                    emptyTitle="No admin actions waiting"
+                                    emptyMessage="Booking, refund, account, and system exceptions will appear here."
+                                />
 
                                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
                                     <section className="admin-panel p-6 xl:col-span-2">
@@ -4473,6 +4554,19 @@ const DashboardAdmin = () => {
                                             <option value="Marketing">Marketing</option>
                                             <option value="Accounting">Accounting</option>
                                         </select>
+                                        <select value={auditActivityFilter} onChange={(e) => setAuditActivityFilter(e.target.value)} className="admin-select px-4 py-3 text-sm font-bold outline-none">
+                                            <option value="Operational">Operational activity</option>
+                                            <option value="System access">System access</option>
+                                            <option value="All">All activity</option>
+                                        </select>
+                                        <select value={auditWorkspaceFilter} onChange={(e) => setAuditWorkspaceFilter(e.target.value)} className="admin-select px-4 py-3 text-sm font-bold outline-none">
+                                            <option value="All">All workspaces</option>
+                                            {auditWorkspaceOptions.map((workspace) => <option key={workspace} value={workspace}>{workspace}</option>)}
+                                        </select>
+                                        <select value={auditResultFilter} onChange={(e) => setAuditResultFilter(e.target.value)} className="admin-select px-4 py-3 text-sm font-bold outline-none">
+                                            <option value="All">All results</option>
+                                            {auditResultOptions.map((result) => <option key={result} value={result}>{result}</option>)}
+                                        </select>
                                     </div>
                                 </div>
 
@@ -4480,10 +4574,7 @@ const DashboardAdmin = () => {
                                     {auditLoading ? (
                                         <StaffSkeleton rows={7} label="Loading activity log" />
                                     ) : visibleAudits.length === 0 ? (
-                                        <div className="p-12 text-center">
-                                            <h3 className="text-base font-black text-gray-900">No audit activity yet</h3>
-                                            <p className="mt-1 text-sm text-gray-500">Staff activity will appear here as admins, marketing, and accounting users work in the system.</p>
-                                        </div>
+                                        <StaffEmptyState title="No activity matches these filters" message="Adjust the role, workspace, result, or activity type to review more staff activity." />
                                     ) : (
                                         <table className="min-w-full divide-y divide-gray-200 text-sm">
                                             <thead>

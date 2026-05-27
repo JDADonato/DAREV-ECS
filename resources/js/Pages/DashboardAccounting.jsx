@@ -12,8 +12,9 @@ import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
 import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
+import EventDetailDrawer from '../Components/staff/EventDetailDrawer';
+import NextActionPanel from '../Components/staff/NextActionPanel';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
-import StaffDrawer from '../Components/staff/StaffDrawer';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import { staffPaymentStatus } from '../utils/statusLabels';
 
@@ -361,6 +362,49 @@ const DashboardAccounting = () => {
         history: 'Event History',
     };
 
+    const financeNextActions = useMemo(() => ([
+        {
+            id: 'verify-payments',
+            priority: dashboardSummary.pending > 0 ? 'action' : 'info',
+            title: 'Verify customer payments',
+            description: dashboardSummary.pending > 0 ? `${dashboardSummary.pending} payment records need review.` : 'No payments are waiting for verification.',
+            badge: dashboardSummary.pending,
+            primaryLabel: 'Open',
+            tone: dashboardSummary.pending > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('bookings'),
+        },
+        {
+            id: 'overdue-balances',
+            priority: dashboardSummary.overdue > 0 ? 'urgent' : 'info',
+            title: 'Follow up overdue balances',
+            description: dashboardSummary.overdue > 0 ? `${dashboardSummary.overdue} balances are past due.` : 'No overdue balances today.',
+            badge: dashboardSummary.overdue,
+            primaryLabel: 'Open',
+            tone: dashboardSummary.overdue > 0 ? 'danger' : 'good',
+            onOpen: () => setActiveTab('ledger'),
+        },
+        {
+            id: 'payment-exceptions',
+            priority: dashboardSummary.exceptions > 0 ? 'urgent' : 'info',
+            title: 'Resolve payment issues',
+            description: dashboardSummary.exceptions > 0 ? `${dashboardSummary.exceptions} payment records need attention.` : 'Online and staff payment records are aligned.',
+            badge: dashboardSummary.exceptions,
+            primaryLabel: 'Open',
+            tone: dashboardSummary.exceptions > 0 ? 'danger' : 'good',
+            onOpen: () => setActiveTab('reconciliation'),
+        },
+        {
+            id: 'refund-queue',
+            priority: dashboardSummary.refunds > 0 ? 'followup' : 'info',
+            title: 'Process refund cases',
+            description: dashboardSummary.refunds > 0 ? `${dashboardSummary.refunds} refund cases are waiting.` : 'No refund cases are waiting.',
+            badge: dashboardSummary.refunds,
+            primaryLabel: 'Open',
+            tone: dashboardSummary.refunds > 0 ? 'warn' : 'good',
+            onOpen: () => setActiveTab('refunds'),
+        },
+    ]), [dashboardSummary.exceptions, dashboardSummary.overdue, dashboardSummary.pending, dashboardSummary.refunds]);
+
     const exceptionLabels = {
         checkout_started_unpaid: 'Customer started checkout but did not pay',
         provider_paid_not_local: 'Online payment needs staff review',
@@ -500,8 +544,10 @@ const DashboardAccounting = () => {
         const remainingBalance = Math.max(totalCost - paidAmount, 0);
 
         return (
-            <StaffDrawer
+            <EventDetailDrawer
                 isOpen={Boolean(selectedFinanceBooking)}
+                booking={booking}
+                role="accounting"
                 eyebrow="Payment review"
                 title={`Booking #${booking.id}`}
                 onClose={() => setSelectedFinanceBooking(null)}
@@ -518,13 +564,7 @@ const DashboardAccounting = () => {
                     </div>
                 )}
             >
-                <div className="staff-detail-grid">
-                    <section className="staff-detail-card">
-                        <p className="staff-detail-label">Client</p>
-                        <p className="staff-detail-value">{booking.client_full_name || booking.username || 'Customer'}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-500">{formatAccountingDate(booking.event_date)} / {booking.pax || 0} guests</p>
-                    </section>
-                    <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-3">
                         <section className="staff-detail-card">
                             <p className="staff-detail-label">Total</p>
                             <p className="staff-detail-value">{'P' + totalCost.toLocaleString()}</p>
@@ -537,7 +577,7 @@ const DashboardAccounting = () => {
                             <p className="staff-detail-label">Balance</p>
                             <p className={`staff-detail-value ${remainingBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{'P' + remainingBalance.toLocaleString()}</p>
                         </section>
-                    </div>
+                </div>
                     <section className="staff-detail-card">
                         <div className="mb-3 flex items-center justify-between">
                             <div>
@@ -577,8 +617,7 @@ const DashboardAccounting = () => {
                             </table>
                         </div>
                     </section>
-                </div>
-            </StaffDrawer>
+            </EventDetailDrawer>
         );
     };
 
@@ -723,62 +762,12 @@ const DashboardAccounting = () => {
 
                 {activeTab === 'today' && (
                     <div className="staff-today-grid">
-                        <section className="staff-work-surface">
-                            <div className="staff-surface-head">
-                                <div>
-                                    <p className="marketing-kicker">Priority queue</p>
-                                    <h3 className="mt-1 text-lg font-black text-slate-950">Finance actions</h3>
-                                </div>
-                            </div>
-                            <div className="p-4">
-                                <div className="staff-priority-list">
-                                    <button type="button" onClick={() => setActiveTab('bookings')} className="staff-priority-item">
-                                        <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Payment Review</span>
-                                            <h3>Review customer payments</h3>
-                                            <p>{dashboardSummary.pending > 0 ? `${dashboardSummary.pending} payment records need review.` : 'No payments waiting for review.'}</p>
-                                        </div>
-                                        <div className="staff-priority-meta">
-                                            <StaffStatusBadge tone={dashboardSummary.pending > 0 ? 'warn' : 'good'}>{dashboardSummary.pending}</StaffStatusBadge>
-                                            <span>Open</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" onClick={() => setActiveTab('ledger')} className="staff-priority-item">
-                                        <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Ledger</span>
-                                            <h3>Follow up overdue balances</h3>
-                                            <p>{dashboardSummary.overdue > 0 ? `${dashboardSummary.overdue} balances are past due.` : 'No overdue balances today.'}</p>
-                                        </div>
-                                        <div className="staff-priority-meta">
-                                            <StaffStatusBadge tone={dashboardSummary.overdue > 0 ? 'danger' : 'good'}>{dashboardSummary.overdue}</StaffStatusBadge>
-                                            <span>Open</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-priority-item">
-                                        <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Payment Issues</span>
-                                            <h3>Resolve payment mismatches</h3>
-                                            <p>{dashboardSummary.exceptions > 0 ? `${dashboardSummary.exceptions} payment records need attention.` : 'Online and staff payment records are aligned.'}</p>
-                                        </div>
-                                        <div className="staff-priority-meta">
-                                            <StaffStatusBadge tone={dashboardSummary.exceptions > 0 ? 'danger' : 'good'}>{dashboardSummary.exceptions}</StaffStatusBadge>
-                                            <span>Open</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" onClick={() => setActiveTab('refunds')} className="staff-priority-item">
-                                        <div className="staff-priority-copy">
-                                            <span className="staff-item-kicker">Refunds</span>
-                                            <h3>Process refund cases</h3>
-                                            <p>{dashboardSummary.refunds > 0 ? `${dashboardSummary.refunds} refund cases are waiting.` : 'No refund cases waiting.'}</p>
-                                        </div>
-                                        <div className="staff-priority-meta">
-                                            <StaffStatusBadge tone={dashboardSummary.refunds > 0 ? 'warn' : 'good'}>{dashboardSummary.refunds}</StaffStatusBadge>
-                                            <span>Open</span>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                        </section>
+                        <NextActionPanel
+                            title="Finance actions"
+                            actions={financeNextActions}
+                            emptyTitle="No finance actions waiting"
+                            emptyMessage="Payment reviews, overdue balances, refunds, and reconciliation issues will appear here."
+                        />
                         <section className="staff-work-surface">
                             <div className="staff-surface-head">
                                 <div>

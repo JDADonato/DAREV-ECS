@@ -1,4 +1,5 @@
 import React from 'react';
+import { paymentMethodLabel } from '../../utils/statusLabels';
 import { Download, Printer, CheckCircle, FileText } from 'lucide-react';
 
 const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
@@ -122,7 +123,7 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
                                 </div>
                                 <div className="text-right">
                                     <p className="text-xs font-medium text-gray-500">Method</p>
-                                    <p className="font-bold text-gray-900">{payment.payment_method_label || payment.payment_method}</p>
+                                    <p className="font-bold text-gray-900">{paymentMethodLabel(payment.payment_method_label || payment.payment_method)}</p>
                                 </div>
                             </div>
                             

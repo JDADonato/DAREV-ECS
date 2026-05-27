@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePage } from '@inertiajs/react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
 
@@ -202,6 +202,22 @@ const NotificationBell = ({ variant = 'light' }) => {
         }
     };
 
+    const groupedNotifications = useMemo(() => {
+        const groups = [
+            { id: 'urgent', label: 'Urgent', items: [] },
+            { id: 'action', label: 'Needs action', items: [] },
+            { id: 'info', label: 'Updates', items: [] },
+        ];
+
+        notifications.forEach((notification) => {
+            const priority = notification.priority || 'info';
+            const group = groups.find((item) => item.id === priority) || groups[2];
+            group.items.push(notification);
+        });
+
+        return groups.filter((group) => group.items.length > 0);
+    }, [notifications]);
+
     const isLight = variant === 'light';
 
     return (
@@ -258,37 +274,44 @@ const NotificationBell = ({ variant = 'light' }) => {
                                 <p className="mt-1 text-xs font-semibold text-slate-400">New updates will appear here.</p>
                             </div>
                         ) : (
-                            notifications.map(notification => (
-                                <div
-                                    key={notification.id}
-                                    onClick={() => !notification.read_at && markAsRead(notification.id)}
-                                    className={`mb-1 flex cursor-pointer items-start gap-3 rounded-xl px-3 py-3 transition-colors ${!notification.read_at ? 'bg-[#fff7e8] hover:bg-[#fff1d3]' : 'hover:bg-slate-50'}`}
-                                >
-                                    {getIcon(notification.type)}
-                                    <div className="flex-1 min-w-0">
-                                        <p className={`text-sm leading-5 ${!notification.read_at ? 'font-bold text-slate-950' : 'font-semibold text-slate-600'}`}>
-                                            {notification.message}
-                                        </p>
-                                        <p className="mt-1 text-[11px] font-bold text-slate-400">{notification.time_ago}</p>
-                                    </div>
-                                    {notification.read_at ? (
-                                        <button
-                                            type="button"
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                removeNotification(notification.id);
-                                            }}
-                                            className="mt-0.5 rounded-full p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
-                                            aria-label="Remove notification"
-                                            title="Remove notification"
+                            groupedNotifications.map((group) => (
+                                <div key={group.id} className="mb-2">
+                                    <p className="px-3 pb-1 pt-2 text-[10px] font-black uppercase tracking-widest text-slate-400">{group.label}</p>
+                                    {group.items.map(notification => (
+                                        <div
+                                            key={notification.id}
+                                            onClick={() => !notification.read_at && markAsRead(notification.id)}
+                                            className={`mb-1 flex cursor-pointer items-start gap-3 rounded-xl px-3 py-3 transition-colors ${!notification.read_at ? 'bg-[#fff7e8] hover:bg-[#fff1d3]' : 'hover:bg-slate-50'}`}
                                         >
-                                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
-                                    ) : (
-                                        <div className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-[#720101]"></div>
-                                    )}
+                                            {getIcon(notification.type)}
+                                            <div className="flex-1 min-w-0">
+                                                <p className={`text-sm leading-5 ${!notification.read_at ? 'font-bold text-slate-950' : 'font-semibold text-slate-600'}`}>
+                                                    {notification.message}
+                                                </p>
+                                                <p className="mt-1 text-[11px] font-bold text-slate-400">
+                                                    {notification.category ? `${notification.category} / ` : ''}{notification.time_ago}
+                                                </p>
+                                            </div>
+                                            {notification.read_at ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        removeNotification(notification.id);
+                                                    }}
+                                                    className="mt-0.5 rounded-full p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
+                                                    aria-label="Remove notification"
+                                                    title="Remove notification"
+                                                >
+                                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                                    </svg>
+                                                </button>
+                                            ) : (
+                                                <div className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-[#720101]"></div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
                             ))
                         )}

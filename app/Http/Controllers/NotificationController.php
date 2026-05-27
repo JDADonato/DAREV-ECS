@@ -24,11 +24,21 @@ class NotificationController extends Controller
             ->take(50)
             ->get()
             ->map(function ($notification) {
+                $type = $notification->data['type'] ?? 'general';
+                $message = $notification->data['message'] ?? '';
+                $priority = $notification->data['priority'] ?? $this->notificationPriority($type, $message);
+                $category = $notification->data['category'] ?? $this->notificationCategory($type, $message);
+
                 return [
                     'id' => $notification->id,
-                    'type' => $notification->data['type'] ?? 'general',
-                    'message' => $notification->data['message'] ?? '',
+                    'type' => $type,
+                    'message' => $message,
                     'booking_id' => $notification->data['booking_id'] ?? null,
+                    'target_type' => $notification->data['target_type'] ?? (isset($notification->data['booking_id']) ? 'booking' : null),
+                    'target_id' => $notification->data['target_id'] ?? ($notification->data['booking_id'] ?? null),
+                    'action_url' => $notification->data['action_url'] ?? null,
+                    'priority' => $priority,
+                    'category' => $category,
                     'read_at' => $notification->read_at,
                     'created_at' => $notification->created_at->toISOString(),
                     'time_ago' => $notification->created_at->diffForHumans(),
@@ -77,5 +87,32 @@ class NotificationController extends Controller
         $notification->delete();
 
         return response()->json(['success' => true]);
+    }
+
+    private function notificationPriority(string $type, string $message): string
+    {
+        $text = strtolower($type . ' ' . $message);
+
+        if (str_contains($text, 'failed') || str_contains($text, 'rejected') || str_contains($text, 'overdue') || str_contains($text, 'refund')) {
+            return 'urgent';
+        }
+
+        if (str_contains($text, 'new_booking') || str_contains($text, 'clarification') || str_contains($text, 'payment') || str_contains($text, 'transfer')) {
+            return 'action';
+        }
+
+        return 'info';
+    }
+
+    private function notificationCategory(string $type, string $message): string
+    {
+        $text = strtolower($type . ' ' . $message);
+
+        if (str_contains($text, 'booking') || str_contains($text, 'event')) return 'booking';
+        if (str_contains($text, 'payment') || str_contains($text, 'refund')) return 'finance';
+        if (str_contains($text, 'chat') || str_contains($text, 'message')) return 'message';
+        if (str_contains($text, 'feedback') || str_contains($text, 'testimonial')) return 'feedback';
+
+        return 'update';
     }
 }

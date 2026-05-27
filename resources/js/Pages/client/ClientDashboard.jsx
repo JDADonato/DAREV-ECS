@@ -5,6 +5,7 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ConfirmModal from '../../Components/common/ConfirmModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
+import NextActionPanel from '../../Components/staff/NextActionPanel';
 import { customerBookingStatus, customerPaymentStatus, isSettledPaymentStatus, paymentTypeLabel, statusToneClasses } from '../../utils/statusLabels';
 
 const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
@@ -18,12 +19,13 @@ const menuCategories = [
     { id: 'dessert', label: 'Desserts' },
     { id: 'drink', label: 'Refreshments' },
 ];
-const dashboardSections = ['details', 'menu', 'tastings', 'payments', 'history'];
+const dashboardSections = ['details', 'menu', 'payments', 'history'];
 const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
 const sharedSelectedBookingKey = 'ecs_selected_booking_id';
 const formatEventDate = (date, options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) => (
     date ? new Date(date).toLocaleDateString('en-US', options) : 'Date pending'
 );
+const isOpenTasting = (tasting) => tasting && !['Cancelled', 'Completed'].includes(tasting.status);
 const toDateInputValue = (date) => {
     if (!date) return '';
     const parsed = new Date(date);
@@ -609,6 +611,9 @@ const ClientDashboard = () => {
         const target = params.get('target');
         if (dashboardSections.includes(tab)) {
             setActiveSection(tab);
+        } else if (tab === 'tastings') {
+            setActiveSection('details');
+            window.history.replaceState({}, '', `${window.location.pathname}${window.location.search.replace(/([?&])tab=tastings&?/, '$1').replace(/[?&]$/, '')}${window.location.hash}`);
         }
         if (booking) {
             setActiveBookingId(booking);
@@ -833,6 +838,61 @@ const ClientDashboard = () => {
     const completedJourneySteps = React.useMemo(() => actionableJourneySteps.filter((step) => step.done), [actionableJourneySteps]);
     const journeyProgress = actionableJourneySteps.length > 0 ? (completedJourneySteps.length / actionableJourneySteps.length) * 100 : 100;
     const remainingJourneySteps = React.useMemo(() => actionableJourneySteps.filter((step) => !step.done), [actionableJourneySteps]);
+    const latestTasting = React.useMemo(() => {
+        if (!data.tastings.length) return null;
+        return data.tastings.find(isOpenTasting) || data.tastings[0];
+    }, [data.tastings]);
+
+    const jumpToJourneyStep = (step) => {
+        if (!step || step.locked) return;
+        if (step.tab && dashboardSections.includes(step.tab)) {
+            setActiveSection(step.tab);
+        }
+        if (step.target) {
+            setPendingScrollTarget(step.target);
+        }
+    };
+
+    const clientNextActions = React.useMemo(() => {
+        if (!activeBooking) {
+            return [{
+                id: 'start-booking',
+                priority: 'action',
+                title: 'Start your event request',
+                description: 'Create a booking request so the team can review your date, menu, and event details.',
+                badge: 'Start',
+                primaryLabel: 'Book',
+                onOpen: () => router.visit('/booking'),
+            }];
+        }
+
+        const nextStep = remainingJourneySteps.find((step) => !step.locked) || remainingJourneySteps[0];
+        if (!nextStep) {
+            return [{
+                id: 'event-ready',
+                priority: 'info',
+                title: 'Your event file is complete',
+                description: activeBooking.status === 'Completed' ? 'This event is completed. Receipts and history stay available below.' : 'Everything currently needed for this event is complete.',
+                badge: 'Ready',
+                primaryLabel: 'Review',
+                tone: 'good',
+                onOpen: () => setActiveSection(activeBooking.status === 'Completed' ? 'history' : 'details'),
+            }];
+        }
+
+        return [{
+            id: `journey-${nextStep.label}`,
+            priority: nextStep.isPendingGate ? 'urgent' : 'action',
+            title: nextStep.label,
+            description: nextStep.action,
+            target: eventDisplayName(activeBooking),
+            badge: remainingJourneySteps.length,
+            primaryLabel: 'Continue',
+            tone: nextStep.isPendingGate ? 'danger' : 'warn',
+            disabledReason: nextStep.locked ? 'This step unlocks after Marketing approves your booking.' : null,
+            onOpen: () => jumpToJourneyStep(nextStep),
+        }];
+    }, [activeBooking, remainingJourneySteps]);
 
     if (loading) {
         return (
@@ -862,7 +922,7 @@ const ClientDashboard = () => {
                     <div className="flex flex-col gap-8 lg:flex-row">
                         <aside className="w-full flex-shrink-0 space-y-6 lg:w-64">
                             <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-                                {[0, 1, 2, 3, 4].map((item) => (
+                                {[0, 1, 2, 3].map((item) => (
                                     <div key={item} className={`flex items-center gap-3 border-l-4 px-5 py-4 ${item === 0 ? 'border-[#720101] bg-[#720101]/5' : 'border-transparent'}`}>
                                         <span className="h-5 w-5 animate-pulse rounded-md bg-[#ead8cc]" />
                                         <span className={`h-4 animate-pulse rounded-full bg-[#eee7df] ${item === 2 ? 'w-28' : 'w-24'}`} />
@@ -1110,16 +1170,6 @@ const ClientDashboard = () => {
         });
     };
 
-    const jumpToJourneyStep = (step) => {
-        if (!step || step.locked) return;
-        if (step.tab && dashboardSections.includes(step.tab)) {
-            setActiveSection(step.tab);
-        }
-        if (step.target) {
-            setPendingScrollTarget(step.target);
-        }
-    };
-
     const handleCoreUpdate = async (event) => {
         event.preventDefault();
         if (!activeBooking?.id || savingCore) return;
@@ -1246,7 +1296,7 @@ const ClientDashboard = () => {
                         <div>
                             <p className="text-xs font-bold uppercase tracking-widest text-[#f0aa0b]">Client Dashboard</p>
                             <h1 className="mt-2 text-3xl font-display font-bold sm:text-4xl">Plan, track, and complete your event.</h1>
-                            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/60">Use the tabs below to review booking details, monitor requirements, manage tasting schedules, and complete payments in order.</p>
+                            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/60">Use the tabs below to review booking details, finalize your menu, complete payments, and keep your event history in one place.</p>
                         </div>
                         {activeBooking && (
                             <div className="grid min-w-full gap-3 sm:grid-cols-3 lg:min-w-[520px]">
@@ -1293,7 +1343,6 @@ const ClientDashboard = () => {
                                 {[
                                     { id: 'details', label: 'Event Details', needsWork: activeJourneySteps.some(s => s.label === 'Event details' && !s.done), icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1 -18 0 a 9 9 0 0 1 18 0z' },
                                     { id: 'menu', label: 'Menu', needsWork: activeJourneySteps.some(s => s.label === 'Menu selection' && !s.done), icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
-                                    { id: 'tastings', label: 'Food Tastings', needsWork: data.tastings.length === 0, icon: 'M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 4.5h15v15h-15z' },
                                     { id: 'payments', label: 'Payments', needsWork: activeBooking.nextPaymentDue, icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 1 1 -4 0 a 2 2 0 0 1 4 0z' },
                                     { id: 'history', label: 'History', needsWork: false, icon: 'M12 8v4l3 3m6-3a9 9 0 1 1 -18 0 a 9 9 0 0 1 18 0z' },
                                 ].map(section => (
@@ -1452,6 +1501,14 @@ const ClientDashboard = () => {
                                             </div>
                                         </div>
                                     )}
+
+                                    <NextActionPanel
+                                        eyebrow="Continue your event"
+                                        title="Your next step"
+                                        actions={clientNextActions}
+                                        emptyTitle="Nothing needed right now"
+                                        emptyMessage="Your next booking, payment, message, or feedback step will appear here."
+                                    />
 
                                     <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-7">
                                         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1881,6 +1938,57 @@ const ClientDashboard = () => {
                                                     </button>
                                                 )}
                                             </div>
+
+                                            <div className="mb-8 rounded-2xl border border-[#720101]/10 bg-[#faf7f2]/70 p-5">
+                                                {latestTasting ? (
+                                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                                        <div>
+                                                            <p className="text-[11px] font-black uppercase tracking-widest text-[#720101]">Optional tasting</p>
+                                                            <h4 className="mt-1 text-lg font-display font-bold text-[#1a1a1a]">
+                                                                {isOpenTasting(latestTasting) ? 'Food tasting request on file' : 'Latest tasting request'}
+                                                            </h4>
+                                                            <p className="mt-2 text-sm font-semibold leading-6 text-gray-600">
+                                                                {formatEventDate(latestTasting.preferred_date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                                                                {latestTasting.preferred_time ? ` at ${latestTasting.preferred_time}` : ''} - {latestTasting.status || 'Pending'}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button onClick={() => router.get('/food-tasting')} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#720101] hover:bg-[#720101]/5">
+                                                                View tasting page
+                                                            </button>
+                                                            {isOpenTasting(latestTasting) && (
+                                                                <button
+                                                                    onClick={() => setConfirmModal({
+                                                                        isOpen: true,
+                                                                        title: 'Cancel tasting session?',
+                                                                        message: 'This will cancel the selected food tasting request.',
+                                                                        confirmText: 'Cancel Session',
+                                                                        onConfirm: () => {
+                                                                            closeConfirmModal();
+                                                                            fetch(`/api/food-tasting/${latestTasting.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' } })
+                                                                                .then(() => { setToast({ message: 'Tasting cancelled.', type: 'success' }); fetchData(); })
+                                                                                .catch(() => setToast({ message: 'Error cancelling tasting.', type: 'error' }));
+                                                                        },
+                                                                    })}
+                                                                    className="rounded-xl bg-red-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-red-700 hover:bg-red-100"
+                                                                >
+                                                                    Cancel tasting
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div>
+                                                            <p className="text-[11px] font-black uppercase tracking-widest text-[#720101]">Optional tasting</p>
+                                                            <p className="mt-1 text-sm font-semibold leading-6 text-gray-600">Want to taste the menu first? Schedule a tasting before final menu decisions.</p>
+                                                        </div>
+                                                        <button onClick={() => router.get('/food-tasting')} className="rounded-xl border border-[#720101]/15 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#720101] hover:bg-[#720101]/5">
+                                                            Schedule tasting
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                             
                                             {!activeBooking.canEditMenu && activeBooking.status !== 'Cancelled' && (
                                                 <div className="mb-8 p-5 rounded-2xl flex items-start gap-4 bg-red-50 border border-red-100 shadow-sm">
@@ -2009,83 +2117,6 @@ const ClientDashboard = () => {
                                                     <button onClick={saveMenuSelection} disabled={savingMenu} className="flex items-center gap-2 rounded-2xl bg-[#720101] px-10 py-3.5 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-[#720101]/20 hover:bg-[#5a0101] transition-all active:scale-95 disabled:opacity-50">
                                                         {savingMenu ? 'Processing Selection...' : 'Save & Recalculate Total'}
                                                     </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {activeSection === 'tastings' && (
-                                        <div className="space-y-6">
-                                            <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
-                                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div>
-                                                        <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">Food Tastings</p>
-                                                        <h3 className="mt-1 text-xl font-display font-bold text-[#1a1a1a]">Scheduled tasting sessions</h3>
-                                                        <p className="mt-2 max-w-xl text-sm font-medium leading-6 text-gray-500">Review your tasting date, contact details, notes, and current approval status.</p>
-                                                    </div>
-                                                    <button onClick={() => router.get('/food-tasting')} className="rounded-xl bg-[#720101] px-5 py-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#5a0101]">
-                                                        Book Tasting
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {data.tastings.length === 0 ? (
-                                                <div className="rounded-3xl border border-dashed border-gray-300 bg-white p-10 text-center">
-                                                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f0aa0b]/10 text-[#720101]">
-                                                        <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 6v12m6-6H6" /></svg>
-                                                    </div>
-                                                    <h4 className="text-lg font-bold text-gray-900">No food tasting sessions yet</h4>
-                                                    <p className="mx-auto mt-2 max-w-md text-sm font-medium text-gray-500">Schedule a tasting to align menu preferences before final event preparation.</p>
-                                                </div>
-                                            ) : (
-                                                <div className="grid gap-4">
-                                                    {data.tastings.map((tasting) => (
-                                                        <div key={tasting.id} className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
-                                                            <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-                                                                <div>
-                                                                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                                                                        <h4 className="text-lg font-bold text-gray-900">{tasting.guest_name || user?.username || 'Food tasting guest'}</h4>
-                                                                        <span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-widest ${tasting.status === 'Approved' || tasting.status === 'Confirmed' ? 'bg-green-100 text-green-700' : tasting.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                                                            {tasting.status}
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="grid gap-3 text-sm font-medium text-gray-600 sm:grid-cols-2">
-                                                                        <p><span className="block text-xs font-bold uppercase tracking-widest text-gray-400">Date</span>{new Date(tasting.preferred_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
-                                                                        <p><span className="block text-xs font-bold uppercase tracking-widest text-gray-400">Time</span>{tasting.preferred_time}</p>
-                                                                        <p><span className="block text-xs font-bold uppercase tracking-widest text-gray-400">Email</span>{tasting.guest_email || user?.email || 'Not provided'}</p>
-                                                                        <p><span className="block text-xs font-bold uppercase tracking-widest text-gray-400">Phone</span>{tasting.guest_phone || 'Not provided'}</p>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex flex-col gap-4 md:items-end">
-                                                                    <div className="rounded-2xl bg-gray-50 p-4 md:max-w-xs w-full text-left">
-                                                                        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Notes</p>
-                                                                        <p className="mt-2 text-sm font-medium leading-6 text-gray-600">{tasting.notes || 'No special notes were added for this tasting session.'}</p>
-                                                                    </div>
-                                                                    {tasting.status !== 'Cancelled' && (
-                                                                        <div className="flex gap-2">
-                                                                            <button 
-                                                                                onClick={() => setConfirmModal({
-                                                                                    isOpen: true,
-                                                                                    title: 'Cancel tasting session?',
-                                                                                    message: 'This will cancel the selected food tasting request.',
-                                                                                    confirmText: 'Cancel Session',
-                                                                                    onConfirm: () => {
-                                                                                        closeConfirmModal();
-                                                                                        fetch(`/api/food-tasting/${tasting.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' } })
-                                                                                            .then(() => { setToast({ message: 'Tasting cancelled.', type: 'success' }); fetchData(); })
-                                                                                            .catch(() => setToast({ message: 'Error cancelling tasting.', type: 'error' }));
-                                                                                    },
-                                                                                })}
-                                                                                className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg"
-                                                                            >
-                                                                                Cancel Session
-                                                                            </button>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
                                                 </div>
                                             )}
                                         </div>

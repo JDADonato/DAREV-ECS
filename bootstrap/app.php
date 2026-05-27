@@ -16,7 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('bookings:complete-past-submitted')->daily();
     })
     ->withMiddleware(function (Middleware $middleware): void {
+        if ($trustedProxies = env('TRUSTED_PROXIES')) {
+            $middleware->trustProxies($trustedProxies === '*' ? '*' : array_map('trim', explode(',', $trustedProxies)));
+        }
+
         $middleware->web(append: [
+            \App\Http\Middleware\SecurityHeaders::class,
             \App\Http\Middleware\SetPostgresSessionContext::class,
             \App\Http\Middleware\RecordPerformanceTiming::class,
             \App\Http\Middleware\RecordStaffAuditLog::class,
