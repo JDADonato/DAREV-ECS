@@ -5,7 +5,6 @@ import { fetchMenuItemsFromAPI } from '../../utils/menuUtils';
 import ClientNavbar from '../../Components/common/ClientNavbar';
 import ConfirmModal from '../../Components/common/ConfirmModal';
 import CustomerAnnouncements from '../../Components/content/CustomerAnnouncements';
-import NextActionPanel from '../../Components/staff/NextActionPanel';
 import { customerBookingStatus, customerPaymentStatus, isSettledPaymentStatus, paymentTypeLabel, statusToneClasses } from '../../utils/statusLabels';
 
 const ReceiptModal = lazy(() => import('../../Components/common/ReceiptModal'));
@@ -586,6 +585,7 @@ const ClientDashboard = () => {
     const [coreForm, setCoreForm] = useState({ event_date: '', pax: '' });
     const [savingCore, setSavingCore] = useState(false);
     const [pendingScrollTarget, setPendingScrollTarget] = useState(null);
+    const autoSelectedInitialSection = React.useRef(false);
 
     // Modal states
     const [editCoreModalOpen, setEditCoreModalOpen] = useState(false);
@@ -893,6 +893,22 @@ const ClientDashboard = () => {
             onOpen: () => jumpToJourneyStep(nextStep),
         }];
     }, [activeBooking, remainingJourneySteps]);
+    const activeNextAction = clientNextActions[0] || null;
+
+    useEffect(() => {
+        if (!activeBooking || loading || autoSelectedInitialSection.current) return;
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('tab')) {
+            autoSelectedInitialSection.current = true;
+            return;
+        }
+
+        const nextStep = remainingJourneySteps.find((step) => !step.locked && step.tab && dashboardSections.includes(step.tab));
+        if (nextStep?.tab && activeSection === 'details') {
+            setActiveSection(nextStep.tab);
+        }
+        autoSelectedInitialSection.current = true;
+    }, [activeBooking, activeSection, loading, remainingJourneySteps]);
 
     if (loading) {
         return (
@@ -1502,58 +1518,26 @@ const ClientDashboard = () => {
                                         </div>
                                     )}
 
-                                    <NextActionPanel
-                                        eyebrow="Continue your event"
-                                        title="Your next step"
-                                        actions={clientNextActions}
-                                        emptyTitle="Nothing needed right now"
-                                        emptyMessage="Your next booking, payment, message, or feedback step will appear here."
-                                    />
-
-                                    <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:p-7">
-                                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                            <div>
-                                                <p className="text-xs font-bold uppercase tracking-widest text-[#720101]">Journey Tracker</p>
-                                                <h3 className="mt-1 text-lg font-display font-bold text-[#1a1a1a]">
-                                                    {remainingJourneySteps.length === 0 ? 'Everything needed is complete' : `${remainingJourneySteps.length} step${remainingJourneySteps.length > 1 ? 's' : ''} remaining`}
-                                                </h3>
-                                            </div>
-                                            <div className="min-w-[170px]">
-                                                <div className="mb-2 flex justify-between text-xs font-bold text-gray-500">
-                                                    <span>Progress</span>
-                                                    <span>{Math.round(journeyProgress)}%</span>
+                                    {activeNextAction && (
+                                        <div className="rounded-2xl border border-[#720101]/10 bg-white px-4 py-3 shadow-sm">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="min-w-0">
+                                                    <p className="text-[11px] font-black uppercase tracking-widest text-[#720101]">Next</p>
+                                                    <p className="mt-1 text-sm font-bold leading-6 text-[#1a1a1a]">
+                                                        {activeNextAction.title}: <span className="font-semibold text-gray-600">{activeNextAction.disabledReason || activeNextAction.description}</span>
+                                                    </p>
                                                 </div>
-                                                <div className="h-2 rounded-full bg-gray-100">
-                                                    <div
-                                                        className="h-2 rounded-full bg-[#720101] transition-all duration-700"
-                                                        style={{ width: `${journeyProgress}%` }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div
-                                            className="grid max-w-full gap-2"
-                                            style={{ gridTemplateColumns: `repeat(${Math.max(activeJourneySteps.length, 1)}, minmax(0, 1fr))` }}
-                                        >
-                                            {activeJourneySteps.map((step, index) => (
                                                 <button
                                                     type="button"
-                                                    key={step.label}
-                                                    onClick={() => jumpToJourneyStep(step)}
-                                                    disabled={step.locked}
-                                                    className={`min-w-0 rounded-xl border px-2.5 py-2 text-left transition ${step.done ? 'border-green-200 bg-green-50 hover:border-green-300' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/5 ring-1 ring-[#f0aa0b]/20 hover:bg-[#f0aa0b]/10' : step.locked ? 'cursor-not-allowed border-gray-100 bg-gray-50 opacity-50' : 'border-gray-200 bg-gray-50 hover:border-[#720101]/20 hover:bg-white'}`}
+                                                    disabled={Boolean(activeNextAction.disabledReason)}
+                                                    onClick={activeNextAction.disabledReason ? undefined : activeNextAction.onOpen}
+                                                    className="shrink-0 rounded-xl bg-[#720101] px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white transition hover:bg-[#5a0101] disabled:cursor-not-allowed disabled:bg-gray-300"
                                                 >
-                                                    <div className="mb-1.5 flex items-center gap-1.5">
-                                                    <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white animate-pulse' : step.notRequired ? 'bg-gray-100 text-gray-400' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
-                                                        {step.done ? 'OK' : step.notRequired ? '-' : step.locked ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg> : index + 1}
-                                                    </div>
-                                                    <p className={`min-w-0 truncate text-[11px] font-bold ${step.locked || step.notRequired ? 'text-gray-400' : 'text-gray-900'}`}>{step.label}</p>
-                                                    </div>
-                                                    {!step.done && <p className={`line-clamp-2 text-[10px] font-medium leading-4 ${step.isPendingGate ? 'text-[#b27a00]' : 'text-gray-500'}`}>{step.action}</p>}
+                                                    {activeNextAction.primaryLabel || 'Continue'}
                                                 </button>
-                                            ))}
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     {/* Pending Approval Banner */}
                                     {activeBooking.status === 'Pending' && (
@@ -2345,6 +2329,35 @@ const ClientDashboard = () => {
                                             )}
                                         </div>
                                     )}
+
+                                    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-[11px] font-black uppercase tracking-widest text-[#720101]">Event progress</span>
+                                                <span className="rounded-full bg-[#720101]/10 px-2.5 py-1 text-[11px] font-black text-[#720101]">{Math.round(journeyProgress)}%</span>
+                                                <span className="text-xs font-semibold text-gray-500">
+                                                    {remainingJourneySteps.length === 0 ? 'Complete' : `${remainingJourneySteps.length} step${remainingJourneySteps.length > 1 ? 's' : ''} left`}
+                                                </span>
+                                            </div>
+                                            <div className="flex min-w-0 flex-wrap gap-1.5">
+                                                {activeJourneySteps.map((step, index) => (
+                                                    <button
+                                                        type="button"
+                                                        key={step.label}
+                                                        onClick={() => jumpToJourneyStep(step)}
+                                                        disabled={step.locked}
+                                                        title={step.action}
+                                                        className={`inline-flex max-w-[11rem] items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold transition ${step.done ? 'border-green-200 bg-green-50 text-green-700 hover:border-green-300' : step.isPendingGate ? 'border-[#f0aa0b]/40 bg-[#f0aa0b]/10 text-[#9f6500]' : step.locked ? 'cursor-not-allowed border-gray-100 bg-gray-50 text-gray-400' : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-[#720101]/20 hover:bg-white'}`}
+                                                    >
+                                                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] ${step.done ? 'bg-green-600 text-white' : step.isPendingGate ? 'bg-[#f0aa0b] text-white' : step.locked ? 'bg-gray-200 text-gray-400' : 'bg-white text-gray-500 ring-1 ring-gray-200'}`}>
+                                                            {step.done ? 'OK' : index + 1}
+                                                        </span>
+                                                        <span className="truncate">{step.label}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </>
                             )}
                         </div>
