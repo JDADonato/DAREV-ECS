@@ -29,6 +29,7 @@ const ForgotPassword = () => {
             title="Forgot password"
             subtitle="Enter the email connected to your Eloquente account."
             features={[]}
+            hideAuthSwitch
             footer={<Link href="/login" className="text-sm font-bold text-red-900 hover:text-amber-700">Back to sign in</Link>}
         >
             <form className="space-y-5" onSubmit={submit}>

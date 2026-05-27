@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FeedbackResponse extends Model
 {
+    use StoresPostgresBooleans;
+
     protected $fillable = [
         'feedback_request_id',
         'booking_id',
@@ -43,6 +46,16 @@ class FeedbackResponse extends Model
     public function booking(): BelongsTo
     {
         return $this->belongsTo(Booking::class);
+    }
+
+    public function setTestimonialPermissionAttribute($value): void
+    {
+        $this->storeBooleanAttribute('testimonial_permission', $value);
+    }
+
+    public function setFollowUpRequiredAttribute($value): void
+    {
+        $this->storeBooleanAttribute('follow_up_required', $value);
     }
 
     public function assignee(): BelongsTo

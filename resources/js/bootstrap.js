@@ -2,6 +2,8 @@ import axios from 'axios';
 window.axios = axios;
 
 window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+window.axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+window.axios.defaults.withCredentials = true;
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 const originalFetch = window.fetch.bind(window);
@@ -28,7 +30,17 @@ window.fetch = (input, init = {}) => {
         headers.set('X-Requested-With', 'XMLHttpRequest');
     }
 
-    return originalFetch(input, { ...init, headers });
+    return originalFetch(input, {
+        ...init,
+        headers,
+        credentials: init.credentials || 'same-origin',
+    }).then((response) => {
+        if (response.status === 419 && sameOrigin) {
+            console.warn('Session token expired or mismatched. Refresh the page before retrying this action.');
+        }
+
+        return response;
+    });
 };
 
 /**

@@ -24,6 +24,8 @@ const PAYMENT_TYPE_LABELS = {
     Final: { label: 'Final Payment', pct: '20%', icon: 'F' },
 };
 
+const eventDisplayName = (booking) => booking?.event_display_name || booking?.event_name || booking?.event_type || booking?.package_name || (booking?.id ? `Booking #${booking.id}` : 'Eloquente event');
+
 const DashboardAccounting = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('today');
@@ -683,7 +685,8 @@ const DashboardAccounting = () => {
                                     <tr key={booking.id}>
                                         <td className="font-black text-[#720101]">#{booking.id}</td>
                                         <td>
-                                            <p className="font-black text-slate-950">{booking.client_full_name || booking.username || 'Customer'}</p>
+                                            <p className="font-black text-slate-950">{eventDisplayName(booking)}</p>
+                                            <p className="text-xs font-semibold text-slate-500">{booking.client_full_name || booking.username || 'Customer'}</p>
                                             <p className="text-xs font-bold text-slate-400">{booking.client_email || booking.client_phone || 'No contact info'}</p>
                                         </td>
                                         <td>{formatAccountingDate(booking.event_date)} / {booking.pax || 0} guests</td>
@@ -788,7 +791,7 @@ const DashboardAccounting = () => {
                                         <button key={item.id} type="button" onClick={() => setActiveTab('reconciliation')} className="staff-provider-item">
                                             <div className="staff-provider-main">
                                                 <span className="staff-item-kicker">Payment #{item.id}</span>
-                                                <h3>{item.client_full_name || 'Customer'}</h3>
+                                                <h3>{eventDisplayName(item)}</h3>
                                                 <p>Booking #{item.booking_id} / {formatAccountingDate(item.event_date)}</p>
                                             </div>
                                             <div className="staff-provider-tags">

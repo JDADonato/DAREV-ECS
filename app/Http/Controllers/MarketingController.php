@@ -41,7 +41,7 @@ class MarketingController extends Controller
      */
     public function getAllBookings(Request $request)
     {
-        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks'])
+        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks', 'historyNotes:id,booking_id,user_id,body,created_at'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('date_from'), fn ($q, $date) => $q->whereDate('event_date', '>=', $date))
             ->when($request->query('date_to'), fn ($q, $date) => $q->whereDate('event_date', '<=', $date))
@@ -86,7 +86,7 @@ class MarketingController extends Controller
             ->where(fn ($query) => $query->where('review_status', 'Needs Customer Details')->orWhereNotNull('clarification_request'));
         $upcomingQuery = Booking::query()
             ->whereNotNull('event_date')
-            ->whereIn('status', ['Confirmed', 'Reserved']);
+            ->where('status', 'Confirmed');
         $thisMonthQuery = (clone $upcomingQuery)
             ->whereBetween('event_date', [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()]);
         $urgentQuery = (clone $pendingQuery)
@@ -159,7 +159,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking status updated',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -195,14 +195,14 @@ class MarketingController extends Controller
 
             return response()->json([
                 'error' => 'This booking was already claimed by ' . ($booking->assignee?->full_name ?: ($booking->assignee->username ?? 'another staff member')) . '.',
-                'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+                'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
             ], 409);
         }
 
         return response()->json([
             'success' => true,
             'message' => 'Booking claimed.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -241,7 +241,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Transfer request sent. The new staff member must accept it before ownership changes.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -269,7 +269,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking transfer accepted.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -298,7 +298,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking transfer declined.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -329,7 +329,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Booking returned to the unassigned queue.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -367,7 +367,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Review status updated.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -417,7 +417,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Details requested from customer.',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -449,7 +449,7 @@ class MarketingController extends Controller
             'completed_at' => $data['status'] === 'Done' ? now() : null,
         ]);
 
-        $booking = Booking::with(['user', 'assignee', 'reviewTasks', 'preparationTasks'])->find($bookingId);
+        $booking = Booking::with(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])->find($bookingId);
 
         return response()->json([
             'success' => true,
@@ -485,7 +485,7 @@ class MarketingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Live status updated',
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ]);
     }
 
@@ -495,7 +495,7 @@ class MarketingController extends Controller
      */
     public function show(int $id)
     {
-        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks'])->find($id);
+        $booking = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks', 'historyNotes:id,booking_id,user_id,body,created_at'])->find($id);
 
         if (!$booking) {
             return response()->json(['error' => 'Booking not found'], 404);
@@ -529,7 +529,7 @@ class MarketingController extends Controller
         if (is_null($booking->assigned_to)) {
             return response()->json([
                 'error' => 'Claim this booking before making changes.',
-                'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+                'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
             ], 403);
         }
 
@@ -538,7 +538,7 @@ class MarketingController extends Controller
 
         return response()->json([
             'error' => "This booking is owned by {$ownerName}. Ask the owner or an admin to transfer it before making changes.",
-            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks'])),
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
         ], 403);
     }
 }

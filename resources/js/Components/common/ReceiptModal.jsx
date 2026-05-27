@@ -73,7 +73,7 @@ const ReceiptModal = ({ isOpen, onClose, payment, booking }) => {
                         </div>
                         <div>
                             <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Event Details</p>
-                            <p className="font-bold text-gray-900">{booking.event_type || 'Catering Event'}</p>
+                            <p className="font-bold text-gray-900">{booking.event_display_name || booking.event_name || booking.event_type || booking.package_name || 'Catering Event'}</p>
                             <p className="text-sm text-gray-600 mt-1">Date: <span className="font-medium">{new Date(booking.event_date).toLocaleDateString('en-US', { dateStyle: 'medium' })}</span></p>
                             <p className="text-sm text-gray-600">Guests: <span className="font-medium">{booking.pax} pax</span></p>
                         </div>

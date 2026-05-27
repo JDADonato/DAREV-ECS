@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,6 +11,8 @@ use Illuminate\Support\Carbon;
 
 class Announcement extends Model
 {
+    use StoresPostgresBooleans;
+
     protected $fillable = [
         'title',
         'slug',
@@ -61,6 +64,11 @@ class Announcement extends Model
     public function reads(): HasMany
     {
         return $this->hasMany(AnnouncementRead::class);
+    }
+
+    public function setSendEmailAttribute($value): void
+    {
+        $this->storeBooleanAttribute('send_email', $value);
     }
 
     public function scopeVisibleNow(Builder $query): Builder

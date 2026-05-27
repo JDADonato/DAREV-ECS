@@ -2,6 +2,12 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePage } from '@inertiajs/react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
 
+const csrfRequestHeaders = () => ({
+    Accept: 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+});
+
 /**
  * NotificationBell — displays a bell icon with an unread badge.
  * Refreshes unread count only while the page is visible and active.
@@ -9,8 +15,9 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
  *
  * Props:
  *   - variant: 'light' (for dark backgrounds like navbar) or 'dark' (for light backgrounds)
+ *   - placement: 'inline' or 'fixed-right'
  */
-const NotificationBell = ({ variant = 'light' }) => {
+const NotificationBell = ({ variant = 'light', placement = 'inline' }) => {
     const { auth } = usePage().props;
     const notificationPreferences = auth?.user?.notification_preferences || {};
     const [isOpen, setIsOpen] = useState(false);
@@ -133,7 +140,7 @@ const NotificationBell = ({ variant = 'light' }) => {
 
     const markAsRead = async (id) => {
         try {
-            await fetch(`/api/notifications/${id}/read`, { method: 'PUT' });
+            await fetch(`/api/notifications/${id}/read`, { method: 'PUT', credentials: 'same-origin', headers: csrfRequestHeaders() });
             setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
             setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (e) {
@@ -143,7 +150,7 @@ const NotificationBell = ({ variant = 'light' }) => {
 
     const markAllAsRead = async () => {
         try {
-            await fetch('/api/notifications/read-all', { method: 'PUT' });
+            await fetch('/api/notifications/read-all', { method: 'PUT', credentials: 'same-origin', headers: csrfRequestHeaders() });
             setNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
             setUnreadCount(0);
         } catch (e) {
@@ -155,7 +162,7 @@ const NotificationBell = ({ variant = 'light' }) => {
         const target = notifications.find(notification => notification.id === id);
 
         try {
-            const res = await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/notifications/${id}`, { method: 'DELETE', credentials: 'same-origin', headers: csrfRequestHeaders() });
             if (!res.ok) return;
 
             setNotifications(prev => prev.filter(notification => notification.id !== id));
@@ -219,9 +226,12 @@ const NotificationBell = ({ variant = 'light' }) => {
     }, [notifications]);
 
     const isLight = variant === 'light';
+    const dropdownClass = placement === 'fixed-right'
+        ? 'fixed right-3 top-16 w-[min(25rem,calc(100vw-1.5rem))]'
+        : 'absolute right-0 mt-3 w-[min(24rem,calc(100vw-1.5rem))]';
 
     return (
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative flex-shrink-0" ref={dropdownRef}>
             {/* Bell button */}
             <button
                 onClick={handleToggle}
@@ -241,7 +251,7 @@ const NotificationBell = ({ variant = 'light' }) => {
 
             {/* Dropdown panel */}
             {isOpen && (
-                <div className="absolute right-0 mt-3 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-[#720101]/10 bg-white shadow-2xl shadow-slate-950/15 ring-1 ring-black/5 z-50" style={{ animation: 'fadeIn .2s ease' }}>
+                <div className={`${dropdownClass} overflow-hidden rounded-2xl border border-[#720101]/10 bg-white shadow-2xl shadow-slate-950/15 ring-1 ring-black/5 z-50`} style={{ animation: 'fadeIn .2s ease' }}>
                     {/* Header */}
                     <div className="flex items-center justify-between gap-4 border-b border-[#720101]/10 bg-[#fffaf3] px-4 py-3.5">
                         <div>
@@ -259,7 +269,7 @@ const NotificationBell = ({ variant = 'light' }) => {
                     </div>
 
                     {/* Notification list */}
-                    <div className="custom-scrollbar max-h-80 overflow-y-auto bg-white p-2">
+                    <div className="custom-scrollbar max-h-[min(30rem,calc(100vh-8rem))] overflow-y-auto bg-white p-2">
                         {loading ? (
                             <div className="p-8 text-center">
                                 <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-[#720101] border-t-transparent"></div>
@@ -285,7 +295,7 @@ const NotificationBell = ({ variant = 'light' }) => {
                                         >
                                             {getIcon(notification.type)}
                                             <div className="flex-1 min-w-0">
-                                                <p className={`text-sm leading-5 ${!notification.read_at ? 'font-bold text-slate-950' : 'font-semibold text-slate-600'}`}>
+                                                <p className={`break-words text-sm leading-5 ${!notification.read_at ? 'font-bold text-slate-950' : 'font-semibold text-slate-600'}`}>
                                                     {notification.message}
                                                 </p>
                                                 <p className="mt-1 text-[11px] font-bold text-slate-400">

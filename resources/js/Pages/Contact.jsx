@@ -20,9 +20,20 @@ const initialForm = (user) => ({
 const safeErrorMessage = (errors = {}) => {
     if (errors.email) return 'Please enter a valid email address.';
     if (errors.full_name) return 'Please enter your name.';
+    if (errors.subject) return 'Please add a subject.';
     if (errors.message) return 'Please tell us what you need help with.';
+    if (errors.pax) return 'Guest count must be a valid number.';
+    if (errors.event_date) return 'Please choose a valid event date.';
     return 'Please review the highlighted details and try again.';
 };
+
+const fieldClass = (errors, field, extra = '') => (
+    `${extra} rounded-xl border bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101] ${
+        errors[field] ? 'border-[#720101] bg-red-50 ring-2 ring-[#720101]/15' : 'border-transparent'
+    }`
+);
+
+const FieldError = ({ message }) => message ? <p className="mt-1.5 text-xs font-bold text-[#720101]">{Array.isArray(message) ? message[0] : message}</p> : null;
 
 const Contact = () => {
     const { user, logout } = useAuth();
@@ -51,10 +62,12 @@ const Contact = () => {
         try {
             const response = await fetch('/api/contact-inquiries', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                    'X-Requested-With': 'XMLHttpRequest',
                 },
                 body: JSON.stringify({
                     ...form,
@@ -159,30 +172,55 @@ const Contact = () => {
                                 <p className="mt-2 text-sm font-medium leading-6 text-gray-500">These details become a staff-visible inquiry so the team can follow up with the right context.</p>
                                 <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
                                     <div className="grid gap-5 sm:grid-cols-2">
-                                        <input required value={form.full_name} onChange={(e) => updateField('full_name', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Full name" />
-                                        <input required type="email" value={form.email} onChange={(e) => updateField('email', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Email address" />
+                                        <div>
+                                            <input required value={form.full_name} onChange={(e) => updateField('full_name', e.target.value)} className={fieldClass(errors, 'full_name', 'w-full')} placeholder="Full name" />
+                                            <FieldError message={errors.full_name} />
+                                        </div>
+                                        <div>
+                                            <input required type="email" value={form.email} onChange={(e) => updateField('email', e.target.value)} className={fieldClass(errors, 'email', 'w-full')} placeholder="Email address" />
+                                            <FieldError message={errors.email} />
+                                        </div>
                                     </div>
                                     <div className="grid gap-5 sm:grid-cols-3">
-                                        <input value={form.phone} onChange={(e) => updateField('phone', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Phone number" />
-                                        <input type="date" value={form.event_date} onChange={(e) => updateField('event_date', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" aria-label="Event date" />
-                                        <input type="number" min="1" value={form.pax} onChange={(e) => updateField('pax', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Guest count" />
+                                        <div>
+                                            <input value={form.phone} onChange={(e) => updateField('phone', e.target.value)} className={fieldClass(errors, 'phone', 'w-full')} placeholder="Phone number" />
+                                            <FieldError message={errors.phone} />
+                                        </div>
+                                        <div>
+                                            <input type="date" value={form.event_date} onChange={(e) => updateField('event_date', e.target.value)} className={fieldClass(errors, 'event_date', 'w-full')} aria-label="Event date" />
+                                            <FieldError message={errors.event_date} />
+                                        </div>
+                                        <div>
+                                            <input type="number" min="1" value={form.pax} onChange={(e) => updateField('pax', e.target.value)} className={fieldClass(errors, 'pax', 'w-full')} placeholder="Guest count" />
+                                            <FieldError message={errors.pax} />
+                                        </div>
                                     </div>
                                     <div className="grid gap-5 sm:grid-cols-2">
-                                        <input value={form.event_type} onChange={(e) => updateField('event_type', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Event type" />
-                                        <select value={form.concern_type} onChange={(e) => updateField('concern_type', e.target.value)} className="rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]">
-                                            <option value="planning">Planning inquiry</option>
-                                            <option value="availability">Availability</option>
-                                            <option value="menu">Menu and packages</option>
-                                            <option value="pricing">Pricing</option>
-                                            <option value="tasting">Food tasting</option>
-                                            <option value="active_booking">Active booking support</option>
-                                            <option value="general">General question</option>
-                                        </select>
+                                        <div>
+                                            <input value={form.event_type} onChange={(e) => updateField('event_type', e.target.value)} className={fieldClass(errors, 'event_type', 'w-full')} placeholder="Event type" />
+                                            <FieldError message={errors.event_type} />
+                                        </div>
+                                        <div>
+                                            <select value={form.concern_type} onChange={(e) => updateField('concern_type', e.target.value)} className={fieldClass(errors, 'concern_type', 'w-full')}>
+                                                <option value="planning">Planning inquiry</option>
+                                                <option value="availability">Availability</option>
+                                                <option value="menu">Menu and packages</option>
+                                                <option value="pricing">Pricing</option>
+                                                <option value="tasting">Food tasting</option>
+                                                <option value="active_booking">Active booking support</option>
+                                                <option value="general">General question</option>
+                                            </select>
+                                            <FieldError message={errors.concern_type} />
+                                        </div>
                                     </div>
                                     <div>
-                                        <input required value={form.subject} onChange={(e) => updateField('subject', e.target.value)} className="w-full rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Subject" />
+                                        <input required value={form.subject} onChange={(e) => updateField('subject', e.target.value)} className={fieldClass(errors, 'subject', 'w-full')} placeholder="Subject" />
+                                        <FieldError message={errors.subject} />
                                     </div>
-                                    <textarea required rows="6" value={form.message} onChange={(e) => updateField('message', e.target.value)} className="w-full resize-none rounded-xl border border-transparent bg-gray-50 px-4 py-3 text-sm font-semibold shadow-sm transition-all focus:border-[#720101] focus:ring-[#720101]" placeholder="Tell us about your event, timeline, guest count, or question." />
+                                    <div>
+                                        <textarea required rows="6" value={form.message} onChange={(e) => updateField('message', e.target.value)} className={fieldClass(errors, 'message', 'w-full resize-none')} placeholder="Tell us about your event, timeline, guest count, or question." />
+                                        <FieldError message={errors.message} />
+                                    </div>
                                     {Object.keys(errors).length > 0 && <p className="text-sm font-bold text-[#720101]">{safeErrorMessage(errors)}</p>}
                                     <button type="submit" disabled={!canSubmit || submitting} className="rounded-xl bg-[#720101] px-7 py-3 text-sm font-black uppercase tracking-widest text-white shadow-sm hover:bg-[#5a0101] disabled:cursor-not-allowed disabled:opacity-50">
                                         {submitting ? 'Sending...' : 'Send Inquiry'}

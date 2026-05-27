@@ -15,6 +15,11 @@ import { customerBookingStatus } from '../../utils/statusLabels';
  */
 const CHAT_CACHE_TTL_MS = 60000;
 const BOOKING_CACHE_TTL_MS = 180000;
+const sortMessagesOldestFirst = (items = []) => [...items].sort((a, b) => {
+    const left = Number(a.id) || new Date(a.created_at || 0).getTime();
+    const right = Number(b.id) || new Date(b.created_at || 0).getTime();
+    return left - right;
+});
 
 const ChatBubble = ({ user, openOnMount = false }) => {
     const hasRealtime = typeof window !== 'undefined' && Boolean(window.Echo);
@@ -33,6 +38,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
     const [hasOlderMessages, setHasOlderMessages] = useState(false);
     const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
     const messagesEndRef = useRef(null);
+    const shouldScrollToBottomRef = useRef(false);
     const typingTimeoutRef = useRef(null);
     const echoChannelRef = useRef(null);
     const conversationRef = useRef(null);
@@ -81,11 +87,11 @@ const ChatBubble = ({ user, openOnMount = false }) => {
 
     const normalizeMessagesResponse = (payload) => {
         if (Array.isArray(payload)) {
-            return { data: payload, pagination: { has_more: false } };
+            return { data: sortMessagesOldestFirst(payload), pagination: { has_more: false } };
         }
 
         return {
-            data: Array.isArray(payload?.data) ? payload.data : [],
+            data: sortMessagesOldestFirst(Array.isArray(payload?.data) ? payload.data : []),
             pagination: payload?.pagination || { has_more: false },
         };
     };
@@ -102,6 +108,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
             const res = await fetch(`/api/chat/conversations/${convId}/messages?limit=30`);
             if (res.ok) {
                 const d = normalizeMessagesResponse(await res.json());
+                shouldScrollToBottomRef.current = true;
                 setMessages(d.data);
                 setHasOlderMessages(Boolean(d.pagination?.has_more));
                 messagesLoadedForRef.current = convId;
@@ -121,7 +128,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
             const res = await fetch(`/api/chat/conversations/${conversation.id}/messages?limit=30&before_id=${messages[0].id}`);
             if (res.ok) {
                 const d = normalizeMessagesResponse(await res.json());
-                setMessages(prev => [...d.data, ...prev]);
+                setMessages(prev => sortMessagesOldestFirst([...d.data, ...prev]));
                 setHasOlderMessages(Boolean(d.pagination?.has_more));
             }
         } catch (e) { /* silent */ }
@@ -185,7 +192,8 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                 if (conversationRef.current?.id === e.conversationId) {
                     setMessages(prev => {
                         if (prev.find(m => m.id === e.messageData.id)) return prev;
-                        return [...prev, { ...e.messageData, is_mine: false }];
+                        shouldScrollToBottomRef.current = true;
+                        return sortMessagesOldestFirst([...prev, { ...e.messageData, is_mine: false }]);
                     });
 
                     setStaffTyping(false);
@@ -216,6 +224,8 @@ const ChatBubble = ({ user, openOnMount = false }) => {
 
     // Auto-scroll
     useEffect(() => {
+        if (!shouldScrollToBottomRef.current) return;
+        shouldScrollToBottomRef.current = false;
         if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
@@ -273,7 +283,8 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                 });
                 if (res.ok) {
                     const msg = await res.json();
-                    setMessages(prev => [...prev, msg]);
+                    shouldScrollToBottomRef.current = true;
+                    setMessages(prev => sortMessagesOldestFirst([...prev, msg]));
                     setNewMessage('');
                 }
             } else {
@@ -295,6 +306,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                 if (res.ok) {
                     const d = await res.json();
                     setConversation(d.conversation);
+                    shouldScrollToBottomRef.current = true;
                     setMessages([d.message]);
                     setNewMessage('');
                     setTopicWarning('');
@@ -318,7 +330,8 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                 });
                 if (res.ok) {
                     const msg = await res.json();
-                    setMessages(prev => [...prev, msg]);
+                    shouldScrollToBottomRef.current = true;
+                    setMessages(prev => sortMessagesOldestFirst([...prev, msg]));
                     setShowBookingPicker(false);
                 }
             } else {
@@ -330,6 +343,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                 if (res.ok) {
                     const d = await res.json();
                     setConversation(d.conversation);
+                    shouldScrollToBottomRef.current = true;
                     setMessages([d.message]);
                     setShowBookingPicker(false);
                 }

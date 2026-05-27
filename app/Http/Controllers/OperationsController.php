@@ -73,7 +73,7 @@ class OperationsController extends Controller
                 'user:id,full_name,username,email',
             ])
             ->whereBetween('event_date', [$start->toDateString(), $end->toDateString()])
-            ->whereIn('status', ['Confirmed', 'Reserved'])
+            ->where('status', 'Confirmed')
             ->orderBy('event_date')
             ->orderBy('event_time');
 

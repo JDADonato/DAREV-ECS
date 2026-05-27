@@ -89,6 +89,26 @@ const DEFAULT_ANALYTICS_FILTERS = {
 const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=25';
 const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=25';
 const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=25';
+const adminEmployeesUrl = (filters = {}) => {
+    const params = new URLSearchParams({ paginated: '1', per_page: '100' });
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value && value !== 'all') params.set(key, value);
+    });
+    return `/api/admin/employees?${params.toString()}`;
+};
+const adminCustomersUrl = (status = 'active', filters = {}) => {
+    const params = new URLSearchParams({ paginated: '1', per_page: '100', status });
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value && value !== 'all') params.set(key, value);
+    });
+    return `/api/admin/customers?${params.toString()}`;
+};
+
+const csrfRequestHeaders = () => ({
+    Accept: 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+});
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -118,6 +138,7 @@ const emptyEventTypeForm = () => ({
     security_label: 'Php 1,500 Cash Bond',
     security_description: 'Refundable deposit for broken plates or missing equipment.',
 });
+const eventDisplayName = (booking) => booking?.event_display_name || booking?.event_name || booking?.event_type || booking?.package_name || (booking?.id ? `Booking #${booking.id}` : 'Eloquente event');
 
 const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
 const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
@@ -154,6 +175,7 @@ const DashboardAdmin = () => {
     const [empLoading, setEmpLoading] = useState(false);
     const [customerLoading, setCustomerLoading] = useState(false);
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
+    const [temporaryPasswordModal, setTemporaryPasswordModal] = useState({ open: false, username: '', email: '', password: '', expiresAt: null, deliveryHint: '' });
     const [empForm, setEmpForm] = useState({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
     const [empFormLoading, setEmpFormLoading] = useState(false);
 
@@ -339,7 +361,7 @@ const DashboardAdmin = () => {
     const visibleReportLibraryWidgets = reportLibraryExpanded ? reportWidgets : reportWidgets.slice(0, 6);
     const reportBookingStatusOptions = useMemo(() => {
         const statuses = bookings.map(booking => booking.status).filter(Boolean);
-        return Array.from(new Set(['Pending', 'Confirmed', 'Reserved', 'Completed', 'Cancelled', ...statuses]));
+        return Array.from(new Set(['Pending', 'Confirmed', 'Completed', 'Cancelled', ...statuses.filter(status => status !== 'Reserved')]));
     }, [bookings]);
     const reportPaymentStatusOptions = useMemo(() => {
         const statuses = bookings.flatMap(booking => (booking.payments || []).map(payment => payment.status)).filter(Boolean);
@@ -358,6 +380,12 @@ const DashboardAdmin = () => {
     const [menuItemPage, setMenuItemPage] = useState(1);
     const [employeePage, setEmployeePage] = useState(1);
     const [customerPage, setCustomerPage] = useState(1);
+    const [accountSegment, setAccountSegment] = useState('staff');
+    const [customerStatusFilter, setCustomerStatusFilter] = useState('active');
+    const [employeeFilters, setEmployeeFilters] = useState({ search: '', role: 'all', account_status: 'all', must_change_password: 'all' });
+    const [customerFilters, setCustomerFilters] = useState({ search: '', booking_activity: 'all' });
+    const [confirmNotifyCustomer, setConfirmNotifyCustomer] = useState(true);
+    const confirmNotifyCustomerRef = useRef(true);
     const [bookingPage, setBookingPage] = useState(1);
     const [auditPage, setAuditPage] = useState(1);
     const rowsPerPage = 8;
@@ -370,6 +398,14 @@ const DashboardAdmin = () => {
             phone: user?.phone || '',
         }));
     }, [user?.username, user?.email, user?.phone]);
+
+    useEffect(() => {
+        setCustomerPage(1);
+    }, [customerStatusFilter, customerFilters]);
+
+    useEffect(() => {
+        setEmployeePage(1);
+    }, [employeeFilters]);
 
     const handleLogout = () => {
         router.post('/logout');
@@ -407,6 +443,33 @@ const DashboardAdmin = () => {
         setConfirmDialog({ isOpen: false, title: '', message: '', confirmText: 'Confirm', tone: 'default', busy: false, onConfirm: null });
     };
 
+    const openTemporaryPasswordModal = (data, fallback = {}) => {
+        if (!data?.temporary_password) return;
+
+        setTemporaryPasswordModal({
+            open: true,
+            username: data.username || fallback.username || '',
+            email: data.email || fallback.email || '',
+            password: data.temporary_password,
+            expiresAt: data.temporary_password_expires_at || null,
+            deliveryHint: data.email_delivery || (data.email || fallback.email ? 'Email delivery depends on the configured mail queue.' : 'No email address was set, so no invitation email was sent.'),
+        });
+    };
+
+    const closeTemporaryPasswordModal = () => {
+        setTemporaryPasswordModal({ open: false, username: '', email: '', password: '', expiresAt: null, deliveryHint: '' });
+    };
+
+    const copyTemporaryPassword = async () => {
+        try {
+            await navigator.clipboard.writeText(temporaryPasswordModal.password);
+            showToast('Temporary password copied.');
+        } catch (error) {
+            console.error(error);
+            showToast('Could not copy password automatically. Select and copy it manually.', 'error');
+        }
+    };
+
     const formatAnalyticsCardValue = (value, format) => {
         if (format === 'currency') return formatCurrency(value || 0);
         if (format === 'percent') return `${Number(value || 0).toLocaleString()}%`;
@@ -415,7 +478,7 @@ const DashboardAdmin = () => {
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
         if (activeTab === 'users') {
-            bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
+            bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL, adminCustomersUrl('active'), adminCustomersUrl('deactivated'), adminCustomersUrl('all'));
             fetchEmployees({ silent });
             fetchCustomers({ silent });
         } else if (activeTab === 'configuration') {
@@ -487,9 +550,9 @@ const DashboardAdmin = () => {
             description: 'Close dates or control remaining event slots and guest capacity.',
         },
         users: {
-            eyebrow: 'Access & clients',
-            title: 'People Directory',
-            description: 'Staff credentials, client accounts, and booking activity.',
+            eyebrow: 'Access control',
+            title: 'Account Management',
+            description: 'Manage staff access, customer account status, and password recovery actions.',
         },
         bookings: {
             eyebrow: 'Daily work',
@@ -539,7 +602,7 @@ const DashboardAdmin = () => {
             items: [
                 { id: 'content', label: 'Announcements' },
                 { id: 'availability', label: 'Date Availability' },
-                { id: 'users', label: 'People' },
+                { id: 'users', label: 'Accounts' },
                 { id: 'configuration', label: 'Business Setup' },
                 { id: 'history', label: 'Event History' },
                 { id: 'audits', label: 'Activity Log' },
@@ -767,6 +830,17 @@ const DashboardAdmin = () => {
     const paginatedMenuItems = paginate(getMergedDishes(activeMenuCategory), menuItemPage, rowsPerPage);
     const paginatedEmployees = paginate(employees, employeePage, rowsPerPage);
     const paginatedCustomers = paginate(customers, customerPage, rowsPerPage);
+    const employeeAccountStats = useMemo(() => ({
+        active: employees.filter((employee) => employee.account_status !== 'deactivated').length,
+        deactivated: employees.filter((employee) => employee.account_status === 'deactivated').length,
+        password: employees.filter((employee) => Boolean(employee.must_change_password)).length,
+    }), [employees]);
+    const customerAccountStats = useMemo(() => ({
+        shown: customers.length,
+        active: customers.filter((customer) => customer.account_status !== 'deactivated').length,
+        deactivated: customers.filter((customer) => customer.account_status === 'deactivated').length,
+        withBookings: customers.filter((customer) => Number(customer.bookings_count || 0) > 0).length,
+    }), [customers]);
     const paginatedBookings = paginate(visibleBookings, bookingPage, rowsPerPage);
     const paginatedAudits = paginate(visibleAudits, auditPage, 12);
 
@@ -824,7 +898,7 @@ const DashboardAdmin = () => {
         } else if (activeTab === 'audits') {
             fetchAudits();
         }
-    }, [activeTab, availabilityMonth]);
+    }, [activeTab, availabilityMonth, customerStatusFilter, employeeFilters, customerFilters]);
 
     useSmartRefresh({
         enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'preparation', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
@@ -952,7 +1026,7 @@ const DashboardAdmin = () => {
     const fetchEmployees = async ({ silent = false } = {}) => {
         if (!silent) setEmpLoading(true);
         try {
-            const data = await fetchCachedJson(ADMIN_EMPLOYEES_URL, 60000);
+            const data = await fetchCachedJson(adminEmployeesUrl(employeeFilters), 60000);
             setEmployees(getListData(data));
         } catch (error) {
             console.error(error);
@@ -965,7 +1039,7 @@ const DashboardAdmin = () => {
     const fetchCustomers = async ({ silent = false } = {}) => {
         if (!silent) setCustomerLoading(true);
         try {
-            const data = await fetchCachedJson(ADMIN_CUSTOMERS_URL, 60000);
+            const data = await fetchCachedJson(adminCustomersUrl(customerStatusFilter, customerFilters), 60000);
             setCustomers(getListData(data));
         } catch (error) {
             console.error(error);
@@ -2033,15 +2107,17 @@ const DashboardAdmin = () => {
             const res = await fetch(url, {
                 method,
                 headers: {
+                    ...csrfRequestHeaders(),
                     'Content-Type': 'application/json'
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify(payload)
             });
 
             if (res.ok) {
                 const data = await res.json().catch(() => ({}));
-                const tempMessage = data.temporary_password ? ` Temporary password: ${data.temporary_password}` : '';
-                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully.${tempMessage}`);
+                showToast(`${isCustomerEdit ? 'Customer' : 'Employee'} ${empModal.mode === 'add' ? 'created' : 'updated'} successfully.`);
+                openTemporaryPasswordModal(data, payload);
                 setEmpModal({ open: false, mode: 'add', data: null });
                 bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL);
                 fetchEmployees();
@@ -2061,8 +2137,8 @@ const DashboardAdmin = () => {
     const handleDeleteEmployee = async (id) => {
         setConfirmDialog({
             isOpen: true,
-            title: 'Delete employee account?',
-            message: 'This staff account will lose access to the system.',
+            title: 'Deactivate staff account?',
+            message: 'This staff account will lose access, but bookings, audit history, and operational records remain preserved.',
             confirmText: 'Deactivate',
             tone: 'danger',
             onConfirm: () => confirmDeleteEmployee(id),
@@ -2075,30 +2151,49 @@ const DashboardAdmin = () => {
             // Session auth - no token needed
             const res = await fetch(`/api/admin/employees/${id}`, {
                 method: 'DELETE',
-                headers: { }
+                credentials: 'same-origin',
+                headers: csrfRequestHeaders(),
             });
+            const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                showToast("Employee deactivated successfully");
+                showToast(data.email_delivery || data.message || "Employee deactivated successfully");
                 bustAdminCache(ADMIN_EMPLOYEES_URL);
                 fetchEmployees();
             } else {
-                showToast("Could not delete employee", 'error');
+                showToast(getErrorMessage(data, "Could not deactivate employee"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Could not delete employee. Please try again.", 'error');
+            showToast("Could not deactivate employee. Please try again.", 'error');
         }
     };
 
     const handleReactivateEmployee = async (id) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Restore staff access?',
+            message: 'This staff member will be able to sign in again with their current password unless a password change is required.',
+            confirmText: 'Reactivate',
+            tone: 'default',
+            onConfirm: () => confirmReactivateEmployee(id),
+        });
+    };
+
+    const confirmReactivateEmployee = async (id) => {
+        closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/employees/${id}/reactivate`, { method: 'POST' });
+            const res = await fetch(`/api/admin/employees/${id}/reactivate`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: csrfRequestHeaders(),
+            });
+            const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                showToast('Employee reactivated successfully');
+                showToast(data.email_delivery || data.message || 'Employee reactivated successfully');
                 bustAdminCache(ADMIN_EMPLOYEES_URL);
                 fetchEmployees();
             } else {
-                showToast('Could not reactivate employee', 'error');
+                showToast(getErrorMessage(data, 'Could not reactivate employee'), 'error');
             }
         } catch (error) {
             console.error(error);
@@ -2107,11 +2202,28 @@ const DashboardAdmin = () => {
     };
 
     const handleResetEmployeePassword = async (id) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Reset temporary password?',
+            message: 'This creates a new temporary password, expires it in 7 days, and asks the staff member to change it after signing in.',
+            confirmText: 'Reset password',
+            tone: 'default',
+            onConfirm: () => confirmResetEmployeePassword(id),
+        });
+    };
+
+    const confirmResetEmployeePassword = async (id) => {
+        closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/employees/${id}/reset-password`, { method: 'POST' });
+            const res = await fetch(`/api/admin/employees/${id}/reset-password`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: csrfRequestHeaders(),
+            });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                showToast(`Temporary password generated: ${data.temporary_password}`);
+                showToast(data.email_delivery || 'Temporary password generated.');
+                openTemporaryPasswordModal(data);
                 fetchEmployees();
             } else {
                 showToast(getErrorMessage(data, 'Could not reset password'), 'error');
@@ -2122,13 +2234,49 @@ const DashboardAdmin = () => {
         }
     };
 
-    const handleDeleteCustomer = async (id) => {
+    const handleForceEmployeePasswordChange = async (id) => {
         setConfirmDialog({
             isOpen: true,
-            title: 'Delete customer account?',
-            message: 'This will also remove records tied to the account, including bookings.',
-            confirmText: 'Delete',
+            title: 'Require password change?',
+            message: 'This keeps the current password, but the staff member must set a new one on the next sign-in.',
+            confirmText: 'Require change',
+            tone: 'default',
+            onConfirm: () => confirmForceEmployeePasswordChange(id),
+        });
+    };
+
+    const confirmForceEmployeePasswordChange = async (id) => {
+        closeConfirmDialog();
+        try {
+            const res = await fetch(`/api/admin/employees/${id}/force-password-change`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: csrfRequestHeaders(),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast(data.email_delivery || data.message || 'Staff will change password on next sign-in.');
+                bustAdminCache(ADMIN_EMPLOYEES_URL);
+                fetchEmployees();
+            } else {
+                showToast(getErrorMessage(data, 'Could not require password change'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Could not require password change. Please try again.', 'error');
+        }
+    };
+
+    const handleDeleteCustomer = async (id) => {
+        setConfirmNotifyCustomer(true);
+        confirmNotifyCustomerRef.current = true;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Deactivate customer account?',
+            message: 'This disables customer sign-in while preserving booking, payment, and audit records.',
+            confirmText: 'Deactivate',
             tone: 'danger',
+            showNotifyCustomer: true,
             onConfirm: () => confirmDeleteCustomer(id),
         });
     };
@@ -2138,19 +2286,58 @@ const DashboardAdmin = () => {
         try {
             const res = await fetch(`/api/admin/customers/${id}`, {
                 method: 'DELETE',
-                headers: { }
+                credentials: 'same-origin',
+                headers: { ...csrfRequestHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notify_customer: confirmNotifyCustomerRef.current }),
             });
+            const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                showToast("Customer deleted successfully");
-                bustAdminCache(ADMIN_CUSTOMERS_URL, ADMIN_BOOKINGS_URL, '/api/admin/analytics');
+                showToast(data.email_delivery || data.message || "Customer account deactivated successfully");
+                bustAdminCache(ADMIN_CUSTOMERS_URL, adminCustomersUrl('active'), adminCustomersUrl('deactivated'), adminCustomersUrl('all'), ADMIN_BOOKINGS_URL, '/api/admin/analytics');
                 fetchCustomers();
             } else {
-                const err = await res.json().catch(() => ({}));
-                showToast(getErrorMessage(err, "Could not delete customer"), 'error');
+                showToast(getErrorMessage(data, res.status === 419 ? "Your session expired. Refresh the page and try again." : "Could not update customer account"), 'error');
             }
         } catch (error) {
             console.error(error);
-            showToast("Could not delete customer. Please try again.", 'error');
+            showToast("Could not update customer account. Please try again.", 'error');
+        }
+    };
+
+    const handleReactivateCustomer = async (id) => {
+        setConfirmNotifyCustomer(true);
+        confirmNotifyCustomerRef.current = true;
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Restore customer access?',
+            message: 'The customer will be able to sign in again with their current password. Booking and payment history stays preserved.',
+            confirmText: 'Reactivate',
+            tone: 'default',
+            showNotifyCustomer: true,
+            onConfirm: () => confirmReactivateCustomer(id),
+        });
+    };
+
+    const confirmReactivateCustomer = async (id) => {
+        closeConfirmDialog();
+        try {
+            const res = await fetch(`/api/admin/customers/${id}/reactivate`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { ...csrfRequestHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notify_customer: confirmNotifyCustomerRef.current }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast(data.email_delivery || data.message || 'Customer account reactivated successfully');
+                bustAdminCache(ADMIN_CUSTOMERS_URL, adminCustomersUrl('active'), adminCustomersUrl('deactivated'), adminCustomersUrl('all'));
+                fetchCustomers();
+            } else {
+                showToast(getErrorMessage(data, 'Could not reactivate customer account'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Could not reactivate customer account. Please try again.', 'error');
         }
     };
 
@@ -2339,7 +2526,7 @@ const DashboardAdmin = () => {
                 navGroups={[
                     { label: 'Daily Work', items: ['Overview', 'Bookings', 'Event Preparation', 'Refund Queue'] },
                     { label: 'Business Insight', items: ['Analytics', 'Reports'] },
-                    { label: 'Management', items: ['Announcements', 'Date Availability', 'People', 'Business Setup', 'Event History', 'Activity Log'] },
+                    { label: 'Management', items: ['Announcements', 'Date Availability', 'Accounts', 'Business Setup', 'Event History', 'Activity Log'] },
                 ]}
             />
         );
@@ -4119,21 +4306,80 @@ const DashboardAdmin = () => {
                     {
                         activeTab === 'users' && (
                             <div className="animate-fadeIn">
-                                <div className="flex justify-end mb-6">
-                                    <button onClick={() => openEmpModal('add')} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-colors self-start">
+                                <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-[#720101]/10 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Accounts</p>
+                                        <h3 className="mt-1 text-xl font-black text-gray-950">Access and customer account controls</h3>
+                                        <p className="mt-1 max-w-3xl text-sm font-semibold text-slate-500">Deactivate preserves records. Reset creates a temporary password. Force change keeps the current password but requires a new one on next sign-in.</p>
+                                    </div>
+                                    <button onClick={() => openEmpModal('add')} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#720101] px-4 py-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-[#5a0101]">
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                        Add Employee
+                                        Add staff account
                                     </button>
                                 </div>
 
+                                <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                    {[
+                                        { label: 'Active staff', value: employeeAccountStats.active },
+                                        { label: 'Need password change', value: employeeAccountStats.password },
+                                        { label: 'Deactivated staff', value: employeeAccountStats.deactivated },
+                                        { label: 'Customers with bookings', value: customerAccountStats.withBookings },
+                                    ].map((stat) => (
+                                        <div key={stat.label} className="rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                                            <p className="mt-1 text-2xl font-black text-slate-950">{stat.value}</p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="mb-5 inline-flex rounded-2xl border border-[#720101]/10 bg-white p-1 shadow-sm">
+                                    {[
+                                        { value: 'staff', label: 'Staff Accounts', count: employees.length },
+                                        { value: 'customers', label: 'Customer Accounts', count: customerAccountStats.shown },
+                                    ].map((segment) => (
+                                        <button
+                                            key={segment.value}
+                                            type="button"
+                                            onClick={() => setAccountSegment(segment.value)}
+                                            className={`rounded-xl px-4 py-2 text-sm font-black transition ${accountSegment === segment.value ? 'bg-[#720101] text-white' : 'text-slate-500 hover:bg-[#fff7e8] hover:text-[#720101]'}`}
+                                        >
+                                            {segment.label}<span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs">{segment.count}</span>
+                                        </button>
+                                    ))}
+                                </div>
+
                                 <div className="space-y-8">
-                                    <div>
+                                    {accountSegment === 'staff' && <div>
                                         <div className="flex items-center justify-between mb-3">
                                             <div>
                                                 <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Staff Accounts</h3>
                                                 <p className="text-xs text-gray-500 mt-1">Marketing and Accounting personnel accounts.</p>
                                             </div>
                                             <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1">{employees.length} staff</span>
+                                        </div>
+                                        <div className="mb-4 grid gap-3 rounded-2xl border border-indigo-50 bg-white p-4 md:grid-cols-[minmax(220px,1fr)_160px_170px_190px]">
+                                            <input
+                                                type="search"
+                                                value={employeeFilters.search}
+                                                onChange={(event) => setEmployeeFilters(prev => ({ ...prev, search: event.target.value }))}
+                                                placeholder="Search staff name, username, email, or phone"
+                                                className="admin-input"
+                                            />
+                                            <select value={employeeFilters.role} onChange={(event) => setEmployeeFilters(prev => ({ ...prev, role: event.target.value }))} className="admin-input">
+                                                <option value="all">All roles</option>
+                                                <option value="Marketing">Marketing</option>
+                                                <option value="Accounting">Accounting</option>
+                                            </select>
+                                            <select value={employeeFilters.account_status} onChange={(event) => setEmployeeFilters(prev => ({ ...prev, account_status: event.target.value }))} className="admin-input">
+                                                <option value="all">All statuses</option>
+                                                <option value="active">Active</option>
+                                                <option value="deactivated">Deactivated</option>
+                                            </select>
+                                            <select value={employeeFilters.must_change_password} onChange={(event) => setEmployeeFilters(prev => ({ ...prev, must_change_password: event.target.value }))} className="admin-input">
+                                                <option value="all">All password states</option>
+                                                <option value="1">Password change needed</option>
+                                                <option value="0">Password current</option>
+                                            </select>
                                         </div>
 
                                         <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
@@ -4184,13 +4430,21 @@ const DashboardAdmin = () => {
                                                                     <div className="text-sm text-gray-500">{formatDate(emp.created_at)}</div>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                                    <button onClick={() => openEmpModal('edit', emp)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
-                                                                    <button onClick={() => handleResetEmployeePassword(emp.id)} className="text-amber-700 hover:text-amber-900 mr-4 font-semibold">Reset password</button>
-                                                                    {emp.account_status === 'deactivated' ? (
-                                                                        <button onClick={() => handleReactivateEmployee(emp.id)} className="text-green-700 hover:text-green-900 font-semibold">Reactivate</button>
-                                                                    ) : (
-                                                                        <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-500 hover:text-red-700 font-semibold">Deactivate</button>
-                                                                    )}
+                                                                    <details className="relative inline-block text-left">
+                                                                        <summary className="list-none rounded-xl border border-[#720101]/10 bg-white px-3 py-2 text-xs font-black text-[#720101] shadow-sm marker:hidden hover:bg-[#fff7e8]">
+                                                                            Actions <ChevronDown className="ml-1 inline h-3.5 w-3.5" />
+                                                                        </summary>
+                                                                        <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-100 bg-white p-1 shadow-xl">
+                                                                            <button type="button" onClick={() => openEmpModal('edit', emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Edit account</button>
+                                                                            <button type="button" onClick={() => handleResetEmployeePassword(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Reset temporary password</button>
+                                                                            <button type="button" onClick={() => handleForceEmployeePasswordChange(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Force password change</button>
+                                                                            {emp.account_status === 'deactivated' ? (
+                                                                                <button type="button" onClick={() => handleReactivateEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50">Reactivate access</button>
+                                                                            ) : (
+                                                                                <button type="button" onClick={() => handleDeleteEmployee(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">Deactivate access</button>
+                                                                            )}
+                                                                        </div>
+                                                                    </details>
                                                                 </td>
                                                             </tr>
                                                         ))}
@@ -4201,15 +4455,45 @@ const DashboardAdmin = () => {
                                         {!empLoading && employees.length > 0 && (
                                             <PaginationControls pageInfo={paginatedEmployees} onPageChange={setEmployeePage} />
                                         )}
-                                    </div>
+                                    </div>}
 
-                                    <div>
+                                    {accountSegment === 'customers' && <div>
                                         <div className="flex items-center justify-between mb-3">
                                             <div>
                                                 <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Customer Accounts</h3>
-                                                <p className="text-xs text-gray-500 mt-1">Registered client accounts with contact details and booking activity.</p>
+                                                <p className="text-xs text-gray-500 mt-1">Active customer accounts by default. Deactivated customers are preserved for booking and payment history.</p>
                                             </div>
-                                            <span className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-100 rounded-full px-3 py-1">{customers.length} customers</span>
+                                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                                {[
+                                                    { value: 'active', label: 'Active' },
+                                                    { value: 'deactivated', label: 'Deactivated' },
+                                                    { value: 'all', label: 'All' },
+                                                ].map(option => (
+                                                    <button
+                                                        key={option.value}
+                                                        type="button"
+                                                        onClick={() => setCustomerStatusFilter(option.value)}
+                                                        className={`rounded-full border px-3 py-1 text-xs font-black transition ${customerStatusFilter === option.value ? 'border-rose-700 bg-rose-700 text-white' : 'border-rose-100 bg-white text-rose-700 hover:bg-rose-50'}`}
+                                                    >
+                                                        {option.label}
+                                                    </button>
+                                                ))}
+                                                <span className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-100 rounded-full px-3 py-1">{customers.length} shown</span>
+                                            </div>
+                                        </div>
+                                        <div className="mb-4 grid gap-3 rounded-2xl border border-rose-50 bg-white p-4 md:grid-cols-[minmax(220px,1fr)_190px]">
+                                            <input
+                                                type="search"
+                                                value={customerFilters.search}
+                                                onChange={(event) => setCustomerFilters(prev => ({ ...prev, search: event.target.value }))}
+                                                placeholder="Search customer name, username, email, or phone"
+                                                className="admin-input"
+                                            />
+                                            <select value={customerFilters.booking_activity} onChange={(event) => setCustomerFilters(prev => ({ ...prev, booking_activity: event.target.value }))} className="admin-input">
+                                                <option value="all">All booking activity</option>
+                                                <option value="with_bookings">With bookings</option>
+                                                <option value="without_bookings">No bookings</option>
+                                            </select>
                                         </div>
 
                                         <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
@@ -4234,13 +4518,18 @@ const DashboardAdmin = () => {
                                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                                     <div className="flex items-center">
                                                                         <div className="flex-shrink-0 h-8 w-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 font-bold">
-                                                                            {customer.username.charAt(0).toUpperCase()}
+                                                                            {(customer.username || customer.full_name || 'C').charAt(0).toUpperCase()}
                                                                         </div>
                                                                         <div className="ml-4">
-                                                                            <div className="text-sm font-bold text-gray-900">{customer.username}</div>
-                                                                            <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100">
-                                                                                {customer.role}
-                                                                            </span>
+                                                                            <div className="text-sm font-bold text-gray-900">{customer.username || customer.full_name || 'Customer'}</div>
+                                                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100">
+                                                                                    {customer.role}
+                                                                                </span>
+                                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${customer.account_status === 'deactivated' ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>
+                                                                                    {customer.account_status === 'deactivated' ? 'Deactivated' : 'Active'}
+                                                                                </span>
+                                                                            </div>
                                                                         </div>
                                                                     </div>
                                                                 </td>
@@ -4256,8 +4545,19 @@ const DashboardAdmin = () => {
                                                                     <div className="text-sm text-gray-500">{formatDate(customer.created_at)}</div>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                                    <button onClick={() => openCustomerModal(customer)} className="text-indigo-600 hover:text-indigo-900 mr-4 font-semibold">Edit</button>
-                                                                    <button onClick={() => handleDeleteCustomer(customer.id)} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                                                                    <details className="relative inline-block text-left">
+                                                                        <summary className="list-none rounded-xl border border-[#720101]/10 bg-white px-3 py-2 text-xs font-black text-[#720101] shadow-sm marker:hidden hover:bg-[#fff7e8]">
+                                                                            Actions <ChevronDown className="ml-1 inline h-3.5 w-3.5" />
+                                                                        </summary>
+                                                                        <div className="absolute right-0 z-20 mt-2 w-52 overflow-hidden rounded-xl border border-slate-100 bg-white p-1 shadow-xl">
+                                                                            <button type="button" onClick={() => openCustomerModal(customer)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Edit account</button>
+                                                                            {customer.account_status === 'deactivated' ? (
+                                                                                <button type="button" onClick={() => handleReactivateCustomer(customer.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50">Reactivate access</button>
+                                                                            ) : (
+                                                                                <button type="button" onClick={() => handleDeleteCustomer(customer.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">Deactivate access</button>
+                                                                            )}
+                                                                        </div>
+                                                                    </details>
                                                                 </td>
                                                             </tr>
                                                         ))}
@@ -4268,7 +4568,7 @@ const DashboardAdmin = () => {
                                         {!customerLoading && customers.length > 0 && (
                                             <PaginationControls pageInfo={paginatedCustomers} onPageChange={setCustomerPage} />
                                         )}
-                                    </div>
+                                    </div>}
                                 </div>
                             </div>
                         )
@@ -4366,7 +4666,8 @@ const DashboardAdmin = () => {
                                                             <div className="text-xs font-medium text-gray-500">Submitted {formatDate(booking.created_at)}</div>
                                                         </td>
                                                         <td className="px-6 py-4">
-                                                            <div className="text-sm font-bold text-gray-900">{booking.client_full_name || booking.client_name || booking.username || 'Unnamed client'}</div>
+                                                            <div className="text-sm font-bold text-gray-900">{eventDisplayName(booking)}</div>
+                                                            <div className="text-xs font-semibold text-gray-500">{booking.client_full_name || booking.client_name || booking.username || 'Unnamed client'}</div>
                                                             <div className="text-xs text-gray-500">{booking.client_email || booking.user_email || 'No email'} / {booking.client_phone || booking.user_phone || 'No phone'}</div>
                                                         </td>
                                                         <td className="px-6 py-4">
@@ -5094,7 +5395,61 @@ const DashboardAdmin = () => {
                 busy={confirmDialog.busy}
                 onCancel={closeConfirmDialog}
                 onConfirm={confirmDialog.onConfirm}
-            />
+            >
+                {confirmDialog.showNotifyCustomer && (
+                    <label className="flex items-start gap-3 rounded-xl border border-[#720101]/10 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+                        <input
+                            type="checkbox"
+                            checked={confirmNotifyCustomer}
+                            onChange={(event) => {
+                                setConfirmNotifyCustomer(event.target.checked);
+                                confirmNotifyCustomerRef.current = event.target.checked;
+                            }}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-[#720101] focus:ring-[#720101]"
+                        />
+                        <span>
+                            Notify customer by email
+                            <span className="block text-xs font-medium text-slate-400">The account action still succeeds if email cannot be queued.</span>
+                        </span>
+                    </label>
+                )}
+            </ConfirmModal>
+
+            {temporaryPasswordModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={closeTemporaryPasswordModal}></div>
+                    <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+                        <div className="border-b border-amber-100 bg-[#fffaf3] px-6 py-5">
+                            <p className="text-xs font-black uppercase tracking-[0.28em] text-[#a56500]">Staff access</p>
+                            <h3 className="mt-2 text-2xl font-black text-slate-950">Temporary password</h3>
+                            <p className="mt-2 text-sm font-semibold text-slate-600">Copy this password now. For security, it is only shown in this dialog.</p>
+                        </div>
+                        <div className="space-y-4 px-6 py-5">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Account</p>
+                                <p className="mt-1 text-sm font-black text-slate-950">{temporaryPasswordModal.username || 'Staff account'}</p>
+                                {temporaryPasswordModal.email && <p className="text-xs font-semibold text-slate-500">{temporaryPasswordModal.email}</p>}
+                            </div>
+                            <div className="rounded-xl border border-rose-100 bg-rose-50 p-4">
+                                <p className="text-xs font-black uppercase tracking-widest text-rose-700">Temporary password</p>
+                                <div className="mt-2 break-all rounded-lg border border-rose-200 bg-white px-3 py-3 font-mono text-lg font-black text-slate-950">
+                                    {temporaryPasswordModal.password}
+                                </div>
+                                {temporaryPasswordModal.expiresAt && (
+                                    <p className="mt-2 text-xs font-semibold text-rose-700">Expires: {formatDateTime(temporaryPasswordModal.expiresAt)}</p>
+                                )}
+                            </div>
+                            <p className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+                                {temporaryPasswordModal.deliveryHint}
+                            </p>
+                        </div>
+                        <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
+                            <button type="button" onClick={closeTemporaryPasswordModal} className="rounded-lg px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100">Close</button>
+                            <button type="button" onClick={copyTemporaryPassword} className="rounded-lg bg-[#8b0000] px-5 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#6f0000]">Copy password</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Toast */}
             {

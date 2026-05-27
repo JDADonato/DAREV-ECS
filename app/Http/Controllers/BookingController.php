@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Booking;
+use App\Models\AuditLog;
+use App\Models\BookingHistoryNote;
 use App\Models\Conversation;
 use App\Models\MenuItem;
 use App\Models\Message;
@@ -22,6 +24,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Ported from: server/controllers/bookingController.js
@@ -209,7 +212,7 @@ class BookingController extends Controller
 
         $booking->reviewTasks()
             ->where('task_type', 'clarification')
-            ->where('customer_visible', true)
+            ->whereRaw('customer_visible is true')
             ->whereIn('status', ['Pending', 'Needs Customer'])
             ->latest()
             ->first()
@@ -463,6 +466,7 @@ class BookingController extends Controller
             return response()->json(['error' => 'One or more selected dishes are unavailable. Please refresh your menu.'], 422);
         }
 
+        $oldTotal = (float) ($booking->total_cost ?? $booking->budget ?? 0);
         $newTotal = $menuItemIds->reduce(function ($sum, $itemId) use ($menuItems, $booking) {
             $item = $menuItems[$itemId];
             return $sum + (($item->cost_per_head + ($item->price_adj ?? 0)) * (int) $booking->pax);
@@ -506,25 +510,189 @@ class BookingController extends Controller
             ]);
         });
 
-        // 3. Notification Triggers (Phase 4)
-        $booking->load('user');
+        $booking->refresh()->load('user');
         if ($booking->user) {
             $booking->user->notify(new \App\Notifications\ClientMenuUpdatedNotification($booking, $newTotal));
         }
 
         $staff = \App\Models\User::whereIn('role', ['Marketing', 'Accounting', 'Admin'])->get();
         foreach ($staff as $user) {
-            $user->notify(new \App\Notifications\StaffMenuUpdatedNotification($booking, $newTotal));
+            $user->notify(new \App\Notifications\StaffMenuUpdatedNotification($booking, $newTotal, $oldTotal));
         }
+
+        $this->recordCustomerMenuUpdate($request, $booking, $oldTotal, (float) $newTotal);
 
         if ($request->wantsJson()) {
             return response()->json([
                 'message' => 'Menu updated and pricing recalculated.',
                 'total_cost' => $newTotal,
+                'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'payments'])),
             ]);
         }
 
         return back();
+    }
+
+    private function recalculateMenuPricingForBooking(Booking $booking, int $oldPax, float $oldTotal): ?array
+    {
+        $selectedMenu = $booking->selected_menu_array ?: [];
+        $menuItemIds = $this->selectedMenuItemIds($selectedMenu);
+
+        if ($menuItemIds->isEmpty()) {
+            return null;
+        }
+
+        $menuItems = MenuItem::whereIn('id', $menuItemIds)
+            ->where('is_active', DB::raw('true'))
+            ->get()
+            ->keyBy('id');
+
+        if ($menuItems->isEmpty()) {
+            return null;
+        }
+
+        $newTotal = $menuItemIds->reduce(function ($sum, $itemId) use ($menuItems, $booking) {
+            if (!isset($menuItems[$itemId])) {
+                return $sum;
+            }
+
+            $item = $menuItems[$itemId];
+            return $sum + (((float) $item->cost_per_head + (float) ($item->price_adj ?? 0)) * (int) $booking->pax);
+        }, 0.0);
+
+        $affectedPayments = [];
+        $paidTotal = 0.0;
+
+        DB::transaction(function () use ($booking, $newTotal, &$affectedPayments, &$paidTotal) {
+            $paidTotal = (float) $booking->payments()
+                ->whereIn('status', ['Paid', 'Verified'])
+                ->sum('amount');
+
+            $pendingPayments = $booking->payments()
+                ->whereIn('status', ['Pending', 'Failed', 'Rejected'])
+                ->orderByRaw("CASE payment_type WHEN 'Reservation' THEN 1 WHEN 'DownPayment' THEN 2 WHEN 'Final' THEN 3 ELSE 4 END")
+                ->get();
+
+            $remaining = max($newTotal - $paidTotal, 0);
+            $pendingTotal = (float) $pendingPayments->sum('amount');
+
+            foreach ($pendingPayments as $index => $payment) {
+                $oldAmount = (float) $payment->amount;
+
+                if ($remaining <= 0) {
+                    $amount = 0;
+                } elseif ($index === $pendingPayments->count() - 1) {
+                    $amount = round($remaining, 2);
+                } elseif ($pendingTotal > 0) {
+                    $amount = round($remaining * ($oldAmount / $pendingTotal), 2);
+                } else {
+                    $amount = round($remaining / max($pendingPayments->count(), 1), 2);
+                }
+
+                $payment->update(['amount' => $amount]);
+                $remaining -= $amount;
+
+                if (round($oldAmount, 2) !== round($amount, 2)) {
+                    $affectedPayments[] = [
+                        'id' => $payment->id,
+                        'payment_type' => $payment->payment_type,
+                        'old_amount' => round($oldAmount, 2),
+                        'new_amount' => round($amount, 2),
+                    ];
+                }
+            }
+
+            $booking->update([
+                'total_cost' => $newTotal,
+                'live_status' => $paidTotal > $newTotal ? 'Credit Review' : $booking->live_status,
+            ]);
+        });
+
+        $booking->refresh();
+
+        return [
+            'old_pax' => $oldPax,
+            'new_pax' => (int) $booking->pax,
+            'old_total' => round($oldTotal, 2),
+            'new_total' => round((float) $newTotal, 2),
+            'paid_total' => round($paidTotal, 2),
+            'remaining_balance' => round(max((float) $newTotal - $paidTotal, 0), 2),
+            'affected_payments' => $affectedPayments,
+        ];
+    }
+
+    private function selectedMenuItemIds(array $selectedMenu): \Illuminate\Support\Collection
+    {
+        return collect($selectedMenu)
+            ->flatMap(fn ($items) => is_array($items) ? $items : [])
+            ->map(function ($item) {
+                if (is_array($item)) {
+                    return $item['id'] ?? null;
+                }
+
+                return $item;
+            })
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->values();
+    }
+
+    private function recordCustomerMenuUpdate(Request $request, Booking $booking, float $oldTotal, float $newTotal): void
+    {
+        $note = "Menu updated by customer. Event total changed from PHP " . number_format($oldTotal, 2) . " to PHP " . number_format($newTotal, 2) . ".";
+
+        try {
+            if (Schema::hasTable('booking_history_notes')) {
+                BookingHistoryNote::create([
+                    'booking_id' => $booking->id,
+                    'user_id' => Auth::id(),
+                    'body' => $note,
+                ]);
+            }
+
+            Conversation::where('booking_id', $booking->id)
+                ->where('status', 'active')
+                ->each(function (Conversation $conversation) use ($booking, $oldTotal, $newTotal) {
+                    Message::create([
+                        'conversation_id' => $conversation->id,
+                        'sender_id' => Auth::id() ?: $conversation->client_id,
+                        'receiver_id' => $conversation->staff_id ?: $conversation->client_id,
+                        'message' => 'Booking menu was updated by the customer.',
+                        'message_type' => 'system',
+                        'metadata' => [
+                            'type' => 'customer_menu_updated',
+                            'booking_id' => $booking->id,
+                            'old_total' => $oldTotal,
+                            'new_total' => $newTotal,
+                        ],
+                    ]);
+                });
+
+            if (Schema::hasTable('audit_logs')) {
+                AuditLog::create([
+                    'user_id' => Auth::id(),
+                    'username' => $request->user()?->username,
+                    'role' => $request->user()?->role,
+                    'action' => 'Menu updated by customer',
+                    'method' => $request->method(),
+                    'path' => '/' . ltrim($request->path(), '/'),
+                    'status_code' => 200,
+                    'ip_address' => $request->ip(),
+                    'user_agent' => substr((string) $request->userAgent(), 0, 500),
+                    'metadata' => [
+                        'target_type' => 'booking',
+                        'target_id' => $booking->id,
+                        'old_total' => $oldTotal,
+                        'new_total' => $newTotal,
+                    ],
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Unable to record customer menu update activity.', [
+                'booking_id' => $booking->id,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -615,6 +783,7 @@ class BookingController extends Controller
             }
         }
 
+        $pricingChange = null;
         if (!empty($updates)) {
             try {
                 if (array_key_exists('event_date', $updates) || array_key_exists('pax', $updates)) {
@@ -630,10 +799,26 @@ class BookingController extends Controller
                 return response()->json(['error' => $e->getMessage()], 500);
             }
 
+            $oldPax = (int) $booking->pax;
+            $oldTotal = (float) ($booking->total_cost ?? $booking->budget ?? 0);
+
             $booking->update($updates);
+
+            $pricingChange = null;
+            if (array_key_exists('pax', $updates)) {
+                $booking->refresh();
+                $pricingChange = $this->recalculateMenuPricingForBooking($booking, $oldPax, $oldTotal);
+            }
         }
 
-        return response()->json(['message' => 'Booking updated successfully.']);
+        $booking->load(['user', 'assignee', 'reviewTasks', 'preparationTasks', 'payments']);
+
+        return response()->json([
+            'message' => 'Booking updated successfully.',
+            'pricing_change' => $pricingChange ?? null,
+            'booking' => new BookingSummaryResource($booking),
+            'payments' => \App\Http\Resources\PaymentResource::collection($booking->payments),
+        ]);
     }
 
     /**

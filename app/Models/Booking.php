@@ -174,6 +174,13 @@ class Booking extends Model
 
     // ─── Helpers ───
 
+    public function getEventDisplayNameAttribute(): string
+    {
+        return $this->event_name
+            ?: $this->event_type
+            ?: "Booking #{$this->id}";
+    }
+
     /**
      * Get decoded selected_menu as array.
      */

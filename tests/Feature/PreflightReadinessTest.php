@@ -7,7 +7,7 @@ use Tests\TestCase;
 
 class PreflightReadinessTest extends TestCase
 {
-    public function test_security_headers_are_sent_without_hsts_in_local_requests(): void
+    public function test_security_headers_are_sent_without_hsts_or_csp_noise_in_local_requests(): void
     {
         $response = $this->get('/');
 
@@ -15,10 +15,21 @@ class PreflightReadinessTest extends TestCase
         $response->assertHeader('X-Content-Type-Options', 'nosniff');
         $response->assertHeader('X-Frame-Options', 'SAMEORIGIN');
         $response->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-        $response->assertHeader('Content-Security-Policy-Report-Only');
-        $this->assertStringContainsString('http://[::1]:5173', $response->headers->get('Content-Security-Policy-Report-Only'));
-        $this->assertStringNotContainsString('upgrade-insecure-requests', $response->headers->get('Content-Security-Policy-Report-Only'));
+        $this->assertFalse($response->headers->has('Content-Security-Policy-Report-Only'));
+        $this->assertFalse($response->headers->has('Content-Security-Policy'));
         $this->assertFalse($response->headers->has('Strict-Transport-Security'));
+    }
+
+    public function test_local_csp_report_can_be_enabled_for_debugging(): void
+    {
+        config(['security.headers.csp_report_in_local' => true]);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertHeader('Content-Security-Policy-Report-Only');
+        $this->assertStringContainsString('http://[::1]:*', $response->headers->get('Content-Security-Policy-Report-Only'));
+        $this->assertStringNotContainsString('upgrade-insecure-requests', $response->headers->get('Content-Security-Policy-Report-Only'));
     }
 
     public function test_hsts_and_enforced_csp_are_sent_for_secure_production_requests(): void
@@ -35,7 +46,7 @@ class PreflightReadinessTest extends TestCase
         $response->assertHeader('Strict-Transport-Security');
         $response->assertHeader('Content-Security-Policy');
         $this->assertStringContainsString('upgrade-insecure-requests', $response->headers->get('Content-Security-Policy'));
-        $this->assertStringNotContainsString('http://[::1]:5173', $response->headers->get('Content-Security-Policy'));
+        $this->assertStringNotContainsString('http://[::1]:*', $response->headers->get('Content-Security-Policy'));
         $this->assertFalse($response->headers->has('Content-Security-Policy-Report-Only'));
     }
 

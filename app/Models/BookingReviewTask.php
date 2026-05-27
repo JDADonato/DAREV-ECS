@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class BookingReviewTask extends Model
 {
-    use HasFactory;
+    use HasFactory, StoresPostgresBooleans;
 
     protected $fillable = [
         'booking_id',
@@ -31,7 +32,7 @@ class BookingReviewTask extends Model
 
     public function setCustomerVisibleAttribute($value): void
     {
-        $this->attributes['customer_visible'] = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+        $this->storeBooleanAttribute('customer_visible', $value);
     }
 
     public function booking()

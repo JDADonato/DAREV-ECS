@@ -2,7 +2,6 @@ import React, { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'rea
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { router } from '@inertiajs/react';
-import NotificationBell from '../Components/common/NotificationBell';
 import FlashToast from '../Components/common/FlashToast';
 import ConfirmModal from '../Components/common/ConfirmModal';
 import PromptModal from '../Components/common/PromptModal';
@@ -46,12 +45,25 @@ const SECURITY_OPTIONS = [
 
 const MARKETING_BOOKINGS_URL = '/api/marketing/bookings';
 const BOOKING_BACKED_TABS = ['calendar', 'intake', 'documents'];
-const ACTIVE_CALENDAR_STATUSES = ['pending', 'confirmed', 'reserved'];
+const ACTIVE_CALENDAR_STATUSES = ['pending', 'confirmed'];
 const REVIEW_QUEUE_VIEWS = [
     { id: 'claim', label: 'Claim Queue' },
     { id: 'mine', label: 'My Bookings' },
     { id: 'all', label: 'All Bookings' },
 ];
+
+const csrfHeaders = (headers = {}) => ({
+    Accept: 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+    ...headers,
+});
+
+const csrfFetch = (url, options = {}) => fetch(url, {
+    ...options,
+    credentials: 'same-origin',
+    headers: csrfHeaders(options.headers || {}),
+});
 
 const emptyPackageForm = (defaultType = '') => ({
     name: '',
@@ -85,7 +97,7 @@ const emptyEventTypeForm = () => ({
 const linesToText = (value) => Array.isArray(value) ? value.join('\n') : (value || '');
 const getCategoryLabel = (value) => PACKAGE_CATEGORY_OPTIONS.find(option => option.value === value)?.label || value || 'Standard Events';
 const getSecurityLabel = (value) => SECURITY_OPTIONS.find(option => option.value === value)?.label || value || 'Cash Bond';
-const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
+const eventDisplayName = (booking) => booking?.event_display_name || booking?.event_name || booking?.event_type || booking?.package_name || (booking?.id ? `Booking #${booking.id}` : 'Eloquente event');
 const isActiveCalendarBooking = (booking) => (
     Boolean(booking?.event_date) && ACTIVE_CALENDAR_STATUSES.includes(String(booking.status || '').toLowerCase())
 );
@@ -97,9 +109,19 @@ const normalizeCalendarEvent = (event) => ({
     event_type: event.type || event.name,
     client_full_name: event.client,
     pax: event.pax,
-    status: event.status,
+    status: event.status === 'Reserved' ? 'Confirmed' : event.status,
     venue_city: event.city,
     owner: event.owner,
+    assigned_to: event.assigned_to,
+    owner_id: event.owner_id ?? event.assigned_to,
+    owner_name: event.owner_name ?? event.owner,
+    assigned_name: event.owner_name ?? event.owner,
+    can_claim: event.can_claim,
+    can_edit: event.can_edit,
+    total_cost: event.total_cost,
+    totalCost: event.totalCost,
+    budget: event.budget,
+    selected_menu: event.selected_menu,
     payment_state: event.payment_state,
     preparation_state: event.preparation_state,
 });
@@ -144,7 +166,7 @@ const DashboardMarketing = () => {
     const [inquirySearch, setInquirySearch] = useState('');
     const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
     const [bookingReviewView, setBookingReviewView] = useState('claim');
-    const [inquirySort, setInquirySort] = useState('eventDateAsc');
+    const [inquirySort, setInquirySort] = useState('newest');
     const [inquiryDateFrom, setInquiryDateFrom] = useState('');
     const [inquiryDateTo, setInquiryDateTo] = useState('');
     const [inquiryPage, setInquiryPage] = useState(1);
@@ -466,12 +488,9 @@ const DashboardMarketing = () => {
         setBookings(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
 
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/status`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/status`, {
                 method: 'PUT',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus })
             });
 
@@ -505,9 +524,8 @@ const DashboardMarketing = () => {
 
     const assignBooking = async (id) => {
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/claim`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/claim`, {
                 method: 'POST',
-                headers: { 'Accept': 'application/json' },
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Claim failed');
@@ -531,9 +549,9 @@ const DashboardMarketing = () => {
     const transferBooking = async (id, staffId) => {
         if (!staffId) return;
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/transfer`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/transfer`, {
                 method: 'POST',
-                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ new_staff_id: staffId }),
             });
             const data = await response.json().catch(() => ({}));
@@ -549,9 +567,8 @@ const DashboardMarketing = () => {
 
     const respondToTransfer = async (id, action) => {
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/transfer/${action}`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/transfer/${action}`, {
                 method: 'POST',
-                headers: { 'Accept': 'application/json' },
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Transfer response failed');
@@ -565,9 +582,8 @@ const DashboardMarketing = () => {
 
     const releaseBooking = async (id) => {
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/release`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/release`, {
                 method: 'POST',
-                headers: { 'Accept': 'application/json' },
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Release failed');
@@ -587,12 +603,9 @@ const DashboardMarketing = () => {
         const id = clarificationPrompt.bookingId;
         if (!id) return;
         try {
-            const response = await fetch(`/api/marketing/bookings/${id}/clarification`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/clarification`, {
                 method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message }),
             });
             const data = await response.json().catch(() => ({}));
@@ -609,12 +622,9 @@ const DashboardMarketing = () => {
     const toggleReviewTask = async (bookingId, task) => {
         const nextStatus = task.status === 'Done' ? 'Pending' : 'Done';
         try {
-            const response = await fetch(`/api/marketing/bookings/${bookingId}/review-tasks/${task.id}`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${bookingId}/review-tasks/${task.id}`, {
                 method: 'PATCH',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: nextStatus }),
             });
             const data = await response.json().catch(() => ({}));
@@ -629,12 +639,9 @@ const DashboardMarketing = () => {
     const updateLiveStatus = async (id, newLiveStatus) => {
         try {
             // Session auth - no token needed
-            const response = await fetch(`/api/marketing/bookings/${id}/livestatus`, {
+            const response = await csrfFetch(`/api/marketing/bookings/${id}/livestatus`, {
                 method: 'PUT',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ live_status: newLiveStatus })
             });
 
@@ -686,14 +693,18 @@ const DashboardMarketing = () => {
     const handleDishPricingUpdate = async (item, cost, adj) => {
         setSettingsSaving(true);
         try {
-            const response = await fetch(`/api/settings/menu-items/${item.id}/pricing`, {
+            const response = await csrfFetch(`/api/settings/menu-items/${item.id}/pricing`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cost_per_head: cost, price_adj: adj }),
             });
-            if (response.ok) fetchMarketingSettings();
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || data.message || 'Could not update dish pricing.');
+            toast.success(data.message || 'Dish pricing updated.');
+            fetchMarketingSettings();
         } catch (error) {
             console.error('Error updating dish pricing:', error);
+            toast.error(error.message || 'Could not update dish pricing.');
         } finally {
             setSettingsSaving(false);
         }
@@ -703,19 +714,21 @@ const DashboardMarketing = () => {
         e.preventDefault();
         setSettingsSaving(true);
         try {
-            const response = await fetch(editingPackageId ? `/api/settings/packages/${editingPackageId}` : '/api/settings/packages', {
+            const response = await csrfFetch(editingPackageId ? `/api/settings/packages/${editingPackageId}` : '/api/settings/packages', {
                 method: editingPackageId ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(packageForm),
             });
-            if (response.ok) {
-                setEditingPackageId(null);
-                setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
-                setCatalogDrawer(null);
-                fetchMarketingSettings();
-            }
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || data.message || 'Could not save package.');
+            toast.success(data.message || (editingPackageId ? 'Package updated.' : 'Package created.'));
+            setEditingPackageId(null);
+            setPackageForm(emptyPackageForm(eventTypes[0]?.slug || ''));
+            setCatalogDrawer(null);
+            fetchMarketingSettings();
         } catch (error) {
             console.error('Error creating package:', error);
+            toast.error(error.message || 'Could not save package.');
         } finally {
             setSettingsSaving(false);
         }
@@ -762,18 +775,20 @@ const DashboardMarketing = () => {
         setSettingsSaving(true);
         try {
             const url = editingEventTypeId ? `/api/settings/event-types/${editingEventTypeId}` : '/api/settings/event-types';
-            const response = await fetch(url, {
+            const response = await csrfFetch(url, {
                 method: editingEventTypeId ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(eventTypeForm),
             });
-            if (response.ok) {
-                resetEventTypeForm();
-                setCatalogDrawer(null);
-                fetchMarketingSettings();
-            }
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || data.message || 'Could not save event type.');
+            toast.success(data.message || (editingEventTypeId ? 'Event type updated.' : 'Event type created.'));
+            resetEventTypeForm();
+            setCatalogDrawer(null);
+            fetchMarketingSettings();
         } catch (error) {
             console.error('Error saving event type:', error);
+            toast.error(error.message || 'Could not save event type.');
         } finally {
             setSettingsSaving(false);
         }
@@ -804,13 +819,15 @@ const DashboardMarketing = () => {
         if (!eventType) return;
         setSettingsSaving(true);
         try {
-            const response = await fetch(`/api/settings/event-types/${eventType.id}`, { method: 'DELETE' });
-            if (response.ok) {
-                setDeleteEventTypeConfirm({ isOpen: false, eventType: null });
-                fetchMarketingSettings();
-            }
+            const response = await csrfFetch(`/api/settings/event-types/${eventType.id}`, { method: 'DELETE' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || data.message || 'Could not delete event type.');
+            toast.success(data.message || 'Event type deleted.');
+            setDeleteEventTypeConfirm({ isOpen: false, eventType: null });
+            fetchMarketingSettings();
         } catch (error) {
             console.error('Error deleting event type:', error);
+            toast.error(error.message || 'Could not delete event type.');
         } finally {
             setSettingsSaving(false);
         }
@@ -925,7 +942,7 @@ const DashboardMarketing = () => {
         const marketingSummary = useMemo(() => {
             const pending = bookings.filter(b => !['Completed', 'completed', 'Cancelled', 'cancelled'].includes(b.status) && (b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status)));
             const needsDetails = pending.filter(b => String(b.review_status || '').toLowerCase() === 'needs customer details' || b.clarification_request);
-            const upcoming = bookings.filter(b => b.event_date && ['Confirmed', 'Reserved'].includes(b.status));
+            const upcoming = bookings.filter(b => b.event_date && b.status === 'Confirmed');
             const now = new Date();
         const nextSeven = new Date();
         nextSeven.setDate(now.getDate() + 7);
@@ -1027,7 +1044,7 @@ const DashboardMarketing = () => {
                     </div>
                 </div>
                 {marketingSummary.upcomingRows.length === 0 ? (
-                    <StaffEmptyState title="No upcoming approved events" message="Confirmed or reserved events will appear here for preparation follow-up." />
+                    <StaffEmptyState title="No upcoming approved events" message="Confirmed events will appear here for preparation follow-up." />
                 ) : (
                     <div className="p-4 staff-priority-list">
                         {marketingSummary.upcomingRows.slice(0, 6).map((booking) => (
@@ -1913,7 +1930,7 @@ const DashboardMarketing = () => {
                                                 </p>
                                                 <p className="flex items-center text-sm text-gray-600">
                                                     <svg className="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                    PHP {formatMoney(booking.budget)}
+                                                    PHP {formatMoney(booking.totalCost ?? booking.total_cost ?? booking.budget)}
                                                 </p>
                                             </div>
                                             <div className="mt-4 flex items-center text-sm sm:mt-0 space-x-3">
@@ -2307,7 +2324,8 @@ const DashboardMarketing = () => {
                                         <th className="px-6 py-4 text-left">Menu Item</th>
                                         <th className="px-6 py-4 text-left">Category</th>
                                         <th className="px-6 py-4 text-right">Cost / Head</th>
-                                        <th className="px-6 py-4 text-right">Price Adj</th>
+                                        <th className="px-6 py-4 text-right">Per-head adjustment</th>
+                                        <th className="px-6 py-4 text-right">Final / Head</th>
                                         <th className="px-6 py-4 text-right">Action</th>
                                     </tr>
                                 </thead>
@@ -2320,7 +2338,11 @@ const DashboardMarketing = () => {
                                             </td>
                                             <td className="px-6 py-4 capitalize text-gray-600">{item.category}</td>
                                             <td className="px-6 py-4 text-right"><input id={`marketing_cost_${item.id}`} type="number" defaultValue={item.cost_per_head} className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-right text-sm font-bold outline-none focus:ring-2 focus:ring-primary-100" /></td>
-                                            <td className="px-6 py-4 text-right"><input id={`marketing_adj_${item.id}`} type="number" defaultValue={item.price_adj || 0} className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-right text-sm font-bold outline-none focus:ring-2 focus:ring-primary-100" /></td>
+                                            <td className="px-6 py-4 text-right">
+                                                <input id={`marketing_adj_${item.id}`} type="number" defaultValue={item.price_adj || 0} className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-right text-sm font-bold outline-none focus:ring-2 focus:ring-primary-100" />
+                                                <p className="mt-1 text-[11px] font-semibold text-gray-400">Added per guest during customer recalculation.</p>
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-black text-gray-900">{formatMoney(Number(item.cost_per_head || 0) + Number(item.price_adj || 0))}</td>
                                             <td className="px-6 py-4 text-right"><button onClick={() => handleDishPricingUpdate(item, document.getElementById(`marketing_cost_${item.id}`).value, document.getElementById(`marketing_adj_${item.id}`).value)} disabled={settingsSaving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-bold text-white hover:bg-primary-700 disabled:opacity-60">Save</button></td>
                                         </tr>
                                     ))}
@@ -2641,7 +2663,6 @@ const DashboardMarketing = () => {
                                 <option value="">All statuses</option>
                                 <option value="Pending">Pending</option>
                                 <option value="Confirmed">Confirmed</option>
-                                <option value="Reserved">Reserved</option>
                                 <option value="Completed">Completed</option>
                             </select>
                             <input value={calendarFilters.event_type} onChange={(event) => setCalendarFilters(prev => ({ ...prev, event_type: event.target.value }))} placeholder="Event type" className="staff-control" />

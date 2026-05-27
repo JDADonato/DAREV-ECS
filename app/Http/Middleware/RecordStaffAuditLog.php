@@ -68,6 +68,10 @@ class RecordStaffAuditLog
             return false;
         }
 
+        if (!$request->isMethod('GET') && $request->is('api/admin/employees*', 'api/admin/customers*')) {
+            return false;
+        }
+
         if ($request->is('dashboard/admin', 'dashboard/marketing', 'dashboard/accounting')) {
             return true;
         }

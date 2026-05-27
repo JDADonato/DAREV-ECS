@@ -549,8 +549,11 @@ const AnnouncementManager = ({ variant = 'marketing', user }) => {
                                 <input type="datetime-local" value={form.starts_at} onChange={(event) => updateField('starts_at', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
                             </label>
                             <label className="text-xs font-black uppercase tracking-widest text-slate-500">
-                                Hide after
+                                Hide after (optional)
                                 <input type="datetime-local" value={form.ends_at} onChange={(event) => updateField('ends_at', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold normal-case tracking-normal outline-none" />
+                                <span className="mt-2 block text-[11px] font-semibold normal-case leading-5 tracking-normal text-slate-500">
+                                    Leave blank to keep it visible until staff manually archives it.
+                                </span>
                             </label>
                         </div>
 

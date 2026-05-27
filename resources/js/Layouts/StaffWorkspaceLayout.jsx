@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from '@inertiajs/react';
+import NotificationBell from '../Components/common/NotificationBell';
 
 const StaffWorkspaceLayout = ({
     brand = 'Eloquente',
@@ -53,6 +54,9 @@ const StaffWorkspaceLayout = ({
             </aside>
 
             <div className="staff-workspace-main">
+                <div className="staff-workspace-tools">
+                    <NotificationBell variant="dark" placement="fixed-right" />
+                </div>
                 <main>{children}</main>
             </div>
         </div>

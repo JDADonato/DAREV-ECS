@@ -19,6 +19,7 @@ class BookingSummaryResource extends JsonResource
             'package_id' => $this->package_id,
             'event_type' => $this->event_type,
             'event_name' => $this->event_name,
+            'event_display_name' => $this->event_display_name,
             'client_full_name' => $this->client_full_name,
             'client_email' => $this->client_email,
             'client_phone' => $this->client_phone,
@@ -42,7 +43,7 @@ class BookingSummaryResource extends JsonResource
             'discount_type' => $this->discount_type,
             'total_cost' => $this->total_cost,
             'totalCost' => (float) ($this->total_cost ?? $this->budget ?? 0),
-            'status' => $this->status,
+            'status' => $this->normalizedBookingStatus(),
             'review_status' => $this->review_status ?? 'Submitted',
             'assigned_to' => $this->assigned_to,
             'assigned_name' => $this->assignee?->full_name ?: ($this->assignee->username ?? null),
@@ -92,6 +93,14 @@ class BookingSummaryResource extends JsonResource
                 'due_at' => $task->due_at,
                 'completed_at' => $task->completed_at,
             ])->values()),
+            'history_notes' => $this->whenLoaded('historyNotes', fn () => $this->historyNotes
+                ->sortByDesc('created_at')
+                ->take(5)
+                ->map(fn ($note) => [
+                    'id' => $note->id,
+                    'body' => $note->body,
+                    'created_at' => $note->created_at,
+                ])->values()),
         ];
     }
 
@@ -136,5 +145,10 @@ class BookingSummaryResource extends JsonResource
         }
 
         return 'Owned by another staff member';
+    }
+
+    private function normalizedBookingStatus(): ?string
+    {
+        return $this->status === 'Reserved' ? 'Confirmed' : $this->status;
     }
 }

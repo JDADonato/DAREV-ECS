@@ -155,7 +155,7 @@ const EventHistoryPanel = ({ role = 'staff', onToast }) => {
                 <div className="space-y-4">
                     <div className="rounded-lg border border-amber-100 bg-[#fffaf3] p-4">
                         <p className="text-xs font-black uppercase tracking-widest text-[#a16207]">Archived event</p>
-                        <h3 className="mt-1 text-xl font-black text-slate-950">{selectedEvent.event_name || selectedEvent.event_type || 'Completed event'}</h3>
+                        <h3 className="mt-1 text-xl font-black text-slate-950">{selectedEvent.event_display_name || selectedEvent.event_name || selectedEvent.event_type || selectedEvent.package_name || `Booking #${selectedEvent.id}`}</h3>
                         <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{selectedEvent.locked_message}</p>
                     </div>
 
@@ -313,7 +313,7 @@ const EventHistoryPanel = ({ role = 'staff', onToast }) => {
                                     <tr key={event.id}>
                                         <td className="font-black text-[#720101]">#{event.id}</td>
                                         <td>
-                                            <p className="font-black text-slate-950">{event.event_name || event.event_type || 'Completed event'}</p>
+                                            <p className="font-black text-slate-950">{event.event_display_name || event.event_name || event.event_type || event.package_name || `Booking #${event.id}`}</p>
                                             <p className="text-xs font-bold text-slate-400">{formatDate(event.event_date)} / {event.pax || 0} guests</p>
                                         </td>
                                         <td>

@@ -101,7 +101,7 @@ export const bookingStatusLabel = (status) => {
     if (normalized === 'under review') return { label: 'Under review', tone: 'warning' };
     if (normalized === 'needs customer details') return { label: 'Needs customer details', tone: 'danger' };
     if (normalized === 'clarification received') return { label: 'Customer replied', tone: 'warning' };
-    if (normalized === 'confirmed' || normalized === 'reserved') return { label: 'Approved', tone: 'success' };
+    if (normalized === 'confirmed' || normalized === 'reserved') return { label: 'Confirmed', tone: 'success' };
     if (normalized === 'completed') return { label: 'Completed', tone: 'neutral' };
     if (normalized === 'cancelled' || normalized === 'canceled' || normalized === 'rejected') return { label: 'Cancelled', tone: 'danger' };
 

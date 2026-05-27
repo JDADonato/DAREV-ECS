@@ -46,6 +46,9 @@ class CalendarAvailabilityController extends Controller
                 'pax',
                 'status',
                 'venue_city',
+                'budget',
+                'total_cost',
+                'selected_menu',
                 'assigned_to',
             ])
             ->whereBetween('event_date', [$start->toDateString(), $end->toDateString()])
@@ -65,21 +68,35 @@ class CalendarAvailabilityController extends Controller
             ->orderBy('event_date')
             ->orderBy('event_time')
             ->get()
-            ->map(function (Booking $booking) {
+            ->map(function (Booking $booking) use ($request) {
                 $taskCount = $booking->preparationTasks->count();
                 $doneTasks = $booking->preparationTasks->where('status', 'Done')->count();
+                $user = $request->user();
+                $canClaim = $user && in_array($user->role, ['Marketing', 'Admin'], true) && is_null($booking->assigned_to);
+                $canEdit = $user && in_array($user->role, ['Marketing', 'Admin'], true)
+                    && ($user->role === 'Admin' || (int) $booking->assigned_to === (int) $user->id);
 
                 return [
                     'id' => $booking->id,
                     'date' => optional($booking->event_date)->toDateString(),
                     'time' => $booking->event_time,
-                    'name' => $booking->event_name ?: $booking->event_type ?: 'Booked event',
+                    'name' => $booking->event_display_name,
+                    'event_display_name' => $booking->event_display_name,
                     'type' => $booking->event_type,
                     'client' => $booking->client_full_name,
                     'pax' => $booking->pax,
-                    'status' => $booking->status,
+                    'status' => $booking->status === 'Reserved' ? 'Confirmed' : $booking->status,
                     'city' => $booking->venue_city,
+                    'budget' => $booking->budget,
+                    'total_cost' => $booking->total_cost,
+                    'totalCost' => (float) ($booking->total_cost ?? $booking->budget ?? 0),
+                    'selected_menu' => $booking->selected_menu,
+                    'assigned_to' => $booking->assigned_to,
+                    'owner_id' => $booking->assigned_to,
+                    'owner_name' => $booking->assignee?->full_name ?: $booking->assignee?->username,
                     'owner' => $booking->assignee?->full_name ?: $booking->assignee?->username,
+                    'can_claim' => $canClaim,
+                    'can_edit' => $canEdit,
                     'payment_state' => $booking->payments->whereIn('status', ['Paid', 'Verified'])->count() . '/' . $booking->payments->count() . ' paid',
                     'preparation_state' => $taskCount ? "{$doneTasks}/{$taskCount} ready" : 'No tasks yet',
                 ];

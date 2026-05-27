@@ -17,6 +17,12 @@ import StaffSkeleton from '../staff/StaffSkeleton';
  *
  * Preserves existing UI design and Tailwind classes from original StaffMessaging.
  */
+const sortMessagesOldestFirst = (items = []) => [...items].sort((a, b) => {
+    const left = Number(a.id) || new Date(a.created_at || 0).getTime();
+    const right = Number(b.id) || new Date(b.created_at || 0).getTime();
+    return left - right;
+});
+
 const StaffMessaging = () => {
     const { user } = useAuth();
     const hasRealtime = typeof window !== 'undefined' && Boolean(window.Echo);
@@ -37,6 +43,7 @@ const StaffMessaging = () => {
     const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false);
     const [errorModal, setErrorModal] = useState({ isOpen: false, message: '' });
     const messagesEndRef = useRef(null);
+    const shouldScrollToBottomRef = useRef(false);
     const echoChannelsRef = useRef({});
     const selectedConvRef = useRef(null);
 
@@ -59,11 +66,11 @@ const StaffMessaging = () => {
 
     const normalizeMessagesResponse = (payload) => {
         if (Array.isArray(payload)) {
-            return { data: payload, pagination: { has_more: false } };
+            return { data: sortMessagesOldestFirst(payload), pagination: { has_more: false } };
         }
 
         return {
-            data: Array.isArray(payload?.data) ? payload.data : [],
+            data: sortMessagesOldestFirst(Array.isArray(payload?.data) ? payload.data : []),
             pagination: payload?.pagination || { has_more: false },
         };
     };
@@ -73,6 +80,7 @@ const StaffMessaging = () => {
             const res = await fetch(`/api/chat/conversations/${conversationId}/messages?limit=30`);
             if (res.ok) {
                 const d = normalizeMessagesResponse(await res.json());
+                shouldScrollToBottomRef.current = true;
                 setMessages(d.data);
                 setHasOlderMessages(Boolean(d.pagination?.has_more));
             }
@@ -87,7 +95,7 @@ const StaffMessaging = () => {
             const res = await fetch(`/api/chat/conversations/${selectedConv.id}/messages?limit=30&before_id=${messages[0].id}`);
             if (res.ok) {
                 const d = normalizeMessagesResponse(await res.json());
-                setMessages(prev => [...d.data, ...prev]);
+                setMessages(prev => sortMessagesOldestFirst([...d.data, ...prev]));
                 setHasOlderMessages(Boolean(d.pagination?.has_more));
             }
         } catch (e) { /* silent */ }
@@ -149,7 +157,8 @@ const StaffMessaging = () => {
                     if (selectedConvRef.current?.id === e.conversationId) {
                         setMessages(prev => {
                             if (prev.find(m => m.id === e.messageData.id)) return prev;
-                            return [...prev, { ...e.messageData, is_mine: false }];
+                            shouldScrollToBottomRef.current = true;
+                            return sortMessagesOldestFirst([...prev, { ...e.messageData, is_mine: false }]);
                         });
                     }
                     fetchConversations();
@@ -164,6 +173,8 @@ const StaffMessaging = () => {
 
     // Auto-scroll
     useEffect(() => {
+        if (!shouldScrollToBottomRef.current) return;
+        shouldScrollToBottomRef.current = false;
         if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
@@ -305,7 +316,8 @@ const StaffMessaging = () => {
             });
             if (res.ok) {
                 const msg = await res.json();
-                setMessages(prev => [...prev, msg]);
+                shouldScrollToBottomRef.current = true;
+                setMessages(prev => sortMessagesOldestFirst([...prev, msg]));
                 setNewMessage('');
                 fetchConversations();
             }

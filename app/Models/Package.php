@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Model;
 
 class Package extends Model
 {
+    use StoresPostgresBooleans;
+
     protected $fillable = [
         'name',
         'type',
@@ -35,5 +38,10 @@ class Package extends Model
             'menu_structure'      => 'array',
             'is_active'           => 'boolean',
         ];
+    }
+
+    public function setIsActiveAttribute($value): void
+    {
+        $this->storeBooleanAttribute('is_active', $value);
     }
 }

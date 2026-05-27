@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 class User extends Authenticatable
 {
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, StoresPostgresBooleans;
 
     /**
      * The attributes that are mass assignable.
@@ -70,6 +71,11 @@ class User extends Authenticatable
     }
 
     // ─── Relationships ───
+
+    public function setMustChangePasswordAttribute($value): void
+    {
+        $this->storeBooleanAttribute('must_change_password', $value);
+    }
 
     public function bookings()
     {

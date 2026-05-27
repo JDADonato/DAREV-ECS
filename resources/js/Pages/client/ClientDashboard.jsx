@@ -19,7 +19,7 @@ const menuCategories = [
     { id: 'drink', label: 'Refreshments' },
 ];
 const dashboardSections = ['details', 'menu', 'payments', 'history'];
-const eventDisplayName = (booking) => booking?.event_name || booking?.event_type || booking?.client_full_name || 'Eloquente event';
+const eventDisplayName = (booking) => booking?.event_display_name || booking?.event_name || booking?.event_type || booking?.package_name || (booking?.id ? `Booking #${booking.id}` : 'Eloquente event');
 const sharedSelectedBookingKey = 'ecs_selected_booking_id';
 const formatEventDate = (date, options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) => (
     date ? new Date(date).toLocaleDateString('en-US', options) : 'Date pending'
@@ -205,7 +205,7 @@ const buildJourneySteps = (booking, payments) => {
     const paid = bookingPayments
         .filter((payment) => isSettledPaymentStatus(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const isApproved = ['Confirmed', 'Reserved', 'Completed'].includes(booking.status);
+    const isApproved = ['Confirmed', 'Completed'].includes(booking.status);
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettledPaymentStatus(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettledPaymentStatus(payment.status));
@@ -584,6 +584,7 @@ const ClientDashboard = () => {
     const [submittingPayment, setSubmittingPayment] = useState(false);
     const [coreForm, setCoreForm] = useState({ event_date: '', pax: '' });
     const [savingCore, setSavingCore] = useState(false);
+    const [corePricePreview, setCorePricePreview] = useState(null);
     const [pendingScrollTarget, setPendingScrollTarget] = useState(null);
     const autoSelectedInitialSection = React.useRef(false);
 
@@ -1186,13 +1187,29 @@ const ClientDashboard = () => {
         });
     };
 
-    const handleCoreUpdate = async (event) => {
-        event.preventDefault();
+    const handleCoreUpdate = async (event, confirmedPricingChange = false) => {
+        event?.preventDefault();
         if (!activeBooking?.id || savingCore) return;
 
         const nextPax = Number(coreForm.pax);
         if (!coreForm.event_date || !nextPax || nextPax < 1) {
             setToast({ message: 'Choose a valid event date and guest count.', type: 'error' });
+            return;
+        }
+
+        const paxChanged = nextPax !== Number(activeBooking.pax || 0);
+        const hasMenu = Object.values(menuSelections || {}).some((items) => Array.isArray(items) && items.length > 0);
+        if (paxChanged && hasMenu && !confirmedPricingChange) {
+            const oldTotal = Number(activeBooking.total_cost || 0);
+            const newTotal = calculateMenuTotal(menuSelections, nextPax);
+            const paid = activePayments.filter(isSettledPayment).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+            setCorePricePreview({
+                oldPax: Number(activeBooking.pax || 0),
+                newPax: nextPax,
+                oldTotal,
+                newTotal,
+                remainingBalance: Math.max(newTotal - paid, 0),
+            });
             return;
         }
 
@@ -1215,8 +1232,12 @@ const ClientDashboard = () => {
                 throw new Error(firstValidationMessage || result.error || 'Unable to update date and guest count.');
             }
 
-            setToast({ message: result.message || 'Date and guest count updated.', type: 'success' });
+            const pricingMessage = result.pricing_change
+                ? ` New balance: ${peso(result.pricing_change.remaining_balance || 0)}.`
+                : '';
+            setToast({ message: `${result.message || 'Date and guest count updated.'}${pricingMessage}`, type: 'success' });
             setEditCoreModalOpen(false);
+            setCorePricePreview(null);
             fetchData();
         } catch (error) {
             setToast({ message: error.message || 'Unable to update date and guest count.', type: 'error' });
@@ -2366,9 +2387,41 @@ const ClientDashboard = () => {
             </main>
             
             {/* MODALS */}
+            {corePricePreview && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={() => setCorePricePreview(null)}></div>
+                    <div className="relative w-full max-w-lg animate-fadeIn rounded-3xl bg-white p-7 shadow-2xl">
+                        <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Guest count affects pricing</p>
+                        <h3 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">Review the updated balance</h3>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-gray-500">
+                            Your menu is priced per guest. Changing guests from {corePricePreview.oldPax} to {corePricePreview.newPax} may update your event total and unpaid payment schedule.
+                        </p>
+                        <div className="mt-5 grid gap-3 rounded-2xl border border-[#720101]/10 bg-[#fffaf3] p-4 sm:grid-cols-3">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">Old total</p>
+                                <p className="mt-1 text-lg font-black text-gray-900">{peso(corePricePreview.oldTotal)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">New total</p>
+                                <p className="mt-1 text-lg font-black text-[#720101]">{peso(corePricePreview.newTotal)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-gray-500">Balance</p>
+                                <p className="mt-1 text-lg font-black text-[#720101]">{peso(corePricePreview.remainingBalance)}</p>
+                            </div>
+                        </div>
+                        <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button type="button" onClick={() => setCorePricePreview(null)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Review again</button>
+                            <button type="button" disabled={savingCore} onClick={() => handleCoreUpdate(null, true)} className="rounded-xl bg-[#720101] px-6 py-3 text-sm font-black text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-60">
+                                {savingCore ? 'Saving...' : 'Confirm changes'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {editCoreModalOpen && activeBooking && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditCoreModalOpen(false)}></div>
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setEditCoreModalOpen(false); setCorePricePreview(null); }}></div>
                     <form onSubmit={handleCoreUpdate} className="relative w-full max-w-lg animate-fadeIn rounded-3xl bg-white p-7 shadow-2xl">
                         <p className="text-xs font-black uppercase tracking-widest text-[#720101]">Update event schedule</p>
                         <h3 className="mt-2 text-2xl font-display font-bold text-[#1a1a1a]">Change date or guest count</h3>
@@ -2399,7 +2452,7 @@ const ClientDashboard = () => {
                             </label>
                         </div>
                         <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                            <button type="button" onClick={() => setEditCoreModalOpen(false)} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>
+                            <button type="button" onClick={() => { setEditCoreModalOpen(false); setCorePricePreview(null); }} className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>
                             <button type="submit" disabled={savingCore} className="rounded-xl bg-[#720101] px-6 py-3 text-sm font-black text-white shadow-sm hover:bg-[#5a0101] disabled:opacity-60">
                                 {savingCore ? 'Checking...' : 'Save Changes'}
                             </button>

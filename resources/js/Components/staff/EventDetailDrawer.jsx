@@ -76,6 +76,7 @@ const EventDetailDrawer = ({
     const dishes = normalizeDishes(booking.selected_menu);
     const payments = booking.payments || [];
     const tasks = booking.preparation_tasks || [];
+    const historyNotes = booking.history_notes || [];
 
     return (
         <StaffDrawer
@@ -90,7 +91,7 @@ const EventDetailDrawer = ({
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                             <p className="marketing-kicker">Booking #{String(booking.id || '').padStart(4, '0')}</p>
-                            <h3 className="mt-1 text-xl font-black text-slate-950">{booking.event_name || booking.event_type || 'Eloquente event'}</h3>
+                            <h3 className="mt-1 text-xl font-black text-slate-950">{booking.event_display_name || booking.event_name || booking.event_type || booking.package_name || `Booking #${booking.id}`}</h3>
                             <div className="mt-3 flex flex-wrap gap-2">
                                 <StaffStatusBadge tone={bookingStatus.tone === 'success' ? 'good' : bookingStatus.tone === 'danger' ? 'danger' : bookingStatus.tone === 'warning' ? 'warn' : 'muted'}>{bookingStatus.label}</StaffStatusBadge>
                                 <StaffStatusBadge tone={reviewStatus.tone === 'success' ? 'good' : reviewStatus.tone === 'danger' ? 'danger' : reviewStatus.tone === 'warning' ? 'warn' : 'muted'}>{reviewStatus.label}</StaffStatusBadge>
@@ -174,6 +175,19 @@ const EventDetailDrawer = ({
                         </div>
                     )}
                 </DetailCard>
+
+                {historyNotes.length > 0 && (
+                    <DetailCard label="Staff notes and activity">
+                        <div className="mt-3 grid gap-2">
+                            {historyNotes.map((note) => (
+                                <div key={note.id} className="rounded-lg border border-amber-100 bg-[#fffaf3] px-3 py-2">
+                                    <p className="text-sm font-semibold text-slate-700">{note.body}</p>
+                                    {note.created_at && <p className="mt-1 text-[11px] font-bold text-slate-400">{formatDate(note.created_at)}</p>}
+                                </div>
+                            ))}
+                        </div>
+                    </DetailCard>
+                )}
 
                 {children}
 

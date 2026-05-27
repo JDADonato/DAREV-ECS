@@ -27,6 +27,9 @@ export const useAuth = () => {
 
     const logout = () => {
         localStorage.removeItem('ecs_booking_draft');
+        localStorage.removeItem('ecs_selected_booking_id');
+        localStorage.removeItem('ecs_home_journey_tracker_cache');
+        localStorage.removeItem('ecs_home_journey_tracker_collapsed');
         sessionStorage.removeItem('ecs_booking_active');
         router.post('/logout');
     };

@@ -4395,7 +4395,23 @@
   }
 
   .staff-workspace-main {
+    position: relative;
     min-width: 0;
+  }
+
+  .staff-workspace-tools {
+    position: sticky;
+    top: .75rem;
+    z-index: 30;
+    display: flex;
+    justify-content: flex-end;
+    height: 0;
+    padding-right: 1rem;
+    pointer-events: none;
+  }
+
+  .staff-workspace-tools > * {
+    pointer-events: auto;
   }
 
   .staff-workspace-main main {

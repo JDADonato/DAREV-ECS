@@ -50,6 +50,8 @@ class AccountingController extends Controller
                 'client_full_name',
                 'client_email',
                 'client_phone',
+                'event_name',
+                'event_type',
                 'created_at',
             ])
             ->with(['user:id,username', 'payments' => function ($q) {
@@ -74,6 +76,10 @@ class AccountingController extends Controller
             }])
             ->where('status', '!=', 'Cancelled')
             ->where('status', '!=', 'Pending'); // Do not show pending (unapproved) bookings
+
+        if (!$request->boolean('include_completed') && $request->query('payment_status') !== 'complete') {
+            $query->whereNotIn('status', ['Completed', 'completed']);
+        }
 
         if ($request->filled('search')) {
             $search = trim((string) $request->query('search'));
@@ -105,8 +111,9 @@ class AccountingController extends Controller
         $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
         $bookings = $query->paginate($perPage)->through(function ($b) {
                 return array_merge($b->toArray(), [
-                    'totalCost' => $b->total_cost ?? $b->budget ?? 0,
-                    'username'  => $b->user->username ?? null,
+                'totalCost' => $b->total_cost ?? $b->budget ?? 0,
+                'event_display_name' => $b->event_display_name,
+                'username'  => $b->user->username ?? null,
                 ]);
             });
 
@@ -115,7 +122,7 @@ class AccountingController extends Controller
 
     public function summary()
     {
-        $approvedBookings = fn ($query) => $query->whereNotIn('status', ['Pending', 'Cancelled']);
+        $approvedBookings = fn ($query) => $query->whereNotIn('status', ['Pending', 'Cancelled', 'Completed', 'completed']);
 
         $paymentQuery = Payment::query()
             ->whereHas('booking', $approvedBookings);
@@ -142,7 +149,7 @@ class AccountingController extends Controller
             ->count();
 
         return response()->json([
-            'bookings' => Booking::query()->whereNotIn('status', ['Pending', 'Cancelled'])->count(),
+            'bookings' => Booking::query()->whereNotIn('status', ['Pending', 'Cancelled', 'Completed', 'completed'])->count(),
             'pending' => $pending,
             'overdue' => $overdue,
             'refunds' => $refunds,

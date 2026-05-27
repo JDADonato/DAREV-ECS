@@ -31,7 +31,7 @@ class SecurityHeaders
             );
         }
 
-        if (config('security.headers.csp_enabled', true)) {
+        if ($this->shouldSendCsp()) {
             $headers->set($this->cspHeaderName(), $this->contentSecurityPolicy());
         }
 
@@ -52,10 +52,30 @@ class SecurityHeaders
             : 'Content-Security-Policy-Report-Only';
     }
 
+    private function shouldSendCsp(): bool
+    {
+        if (! config('security.headers.csp_enabled', true)) {
+            return false;
+        }
+
+        if (app()->environment('production') || config('app.env') === 'production') {
+            return true;
+        }
+
+        return (bool) config('security.headers.csp_report_in_local', false);
+    }
+
     private function contentSecurityPolicy(): string
     {
         $isProduction = app()->environment('production') || config('app.env') === 'production';
-        $devServer = "http://localhost:5173 http://127.0.0.1:5173 http://[::1]:5173 ws://localhost:5173 ws://127.0.0.1:5173 ws://[::1]:5173";
+        $devServer = implode(' ', [
+            'http://localhost:*',
+            'http://127.0.0.1:*',
+            'http://[::1]:*',
+            'ws://localhost:*',
+            'ws://127.0.0.1:*',
+            'ws://[::1]:*',
+        ]);
 
         $scriptSrc = "'self' 'unsafe-inline' https://js.pusher.com https://checkout.paymongo.com";
         $styleSrc = "'self' 'unsafe-inline' https://fonts.googleapis.com";

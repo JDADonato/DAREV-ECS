@@ -1,0 +1,29 @@
+<?php
+
+namespace App\Models\Concerns;
+
+use Illuminate\Contracts\Database\Query\Expression;
+
+trait StoresPostgresBooleans
+{
+    protected function storeBooleanAttribute(string $key, mixed $value): void
+    {
+        if ($value instanceof Expression) {
+            $this->attributes[$key] = $value;
+            return;
+        }
+
+        $enabled = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+
+        $this->attributes[$key] = $this->usesPostgresConnection()
+            ? ($enabled ? 'true' : 'false')
+            : $enabled;
+    }
+
+    private function usesPostgresConnection(): bool
+    {
+        $connection = $this->getConnectionName() ?: config('database.default');
+
+        return config("database.connections.{$connection}.driver") === 'pgsql';
+    }
+}

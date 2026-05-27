@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\StoresPostgresBooleans;
 use Illuminate\Database\Eloquent\Model;
 
 class MenuItem extends Model
 {
+    use StoresPostgresBooleans;
+
     protected $fillable = [
         'dish_id',
         'name',
@@ -41,6 +44,16 @@ class MenuItem extends Model
     }
 
     // ─── Accessors ───
+
+    public function setIsBestSellerAttribute($value): void
+    {
+        $this->storeBooleanAttribute('is_best_seller', $value);
+    }
+
+    public function setIsActiveAttribute($value): void
+    {
+        $this->storeBooleanAttribute('is_active', $value);
+    }
 
     public function getTotalPricePerHeadAttribute(): int
     {

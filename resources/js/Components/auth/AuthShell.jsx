@@ -22,6 +22,8 @@ const AuthShell = ({
     footer,
     compact = false,
     simple = false,
+    hideAuthSwitch = false,
+    hideHomeLink = false,
 }) => {
     const isLogin = mode === 'login';
     const [transitionTarget, setTransitionTarget] = useState(null);
@@ -50,25 +52,27 @@ const AuthShell = ({
     const authCard = (
         <section className={`auth-card auth-card-${mode} ${transitionTarget ? `auth-card-exit auth-card-exit-to-${transitionTarget}` : ''} overflow-hidden rounded-[28px] border border-white/70 bg-white/[.88] shadow-[0_24px_80px_rgba(15,23,42,.16)] backdrop-blur-xl`}>
             <div className={`border-b border-slate-200/70 ${headerPadding}`}>
-                <div className="auth-switch relative grid grid-cols-2 rounded-full bg-slate-100 p-1">
-                    <span className={`auth-switch-indicator ${visualIsLogin ? 'translate-x-0' : 'translate-x-full'}`} />
-                    <button
-                        type="button"
-                        onClick={() => handleAuthSwitch('login')}
-                        disabled={isLogin || Boolean(transitionTarget)}
-                        className={`relative z-10 rounded-full px-4 py-2.5 text-center text-sm font-bold transition ${visualIsLogin ? 'text-white' : 'text-slate-500 hover:text-slate-900'}`}
-                    >
-                        Sign in
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => handleAuthSwitch('register')}
-                        disabled={!isLogin || Boolean(transitionTarget)}
-                        className={`relative z-10 rounded-full px-4 py-2.5 text-center text-sm font-bold transition ${!visualIsLogin ? 'text-white' : 'text-slate-500 hover:text-slate-900'}`}
-                    >
-                        Register
-                    </button>
-                </div>
+                {!hideAuthSwitch && (
+                    <div className="auth-switch relative grid grid-cols-2 rounded-full bg-slate-100 p-1">
+                        <span className={`auth-switch-indicator ${visualIsLogin ? 'translate-x-0' : 'translate-x-full'}`} />
+                        <button
+                            type="button"
+                            onClick={() => handleAuthSwitch('login')}
+                            disabled={isLogin || Boolean(transitionTarget)}
+                            className={`relative z-10 rounded-full px-4 py-2.5 text-center text-sm font-bold transition ${visualIsLogin ? 'text-white' : 'text-slate-500 hover:text-slate-900'}`}
+                        >
+                            Sign in
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleAuthSwitch('register')}
+                            disabled={!isLogin || Boolean(transitionTarget)}
+                            className={`relative z-10 rounded-full px-4 py-2.5 text-center text-sm font-bold transition ${!visualIsLogin ? 'text-white' : 'text-slate-500 hover:text-slate-900'}`}
+                        >
+                            Register
+                        </button>
+                    </div>
+                )}
 
                 <div key={`${mode}-heading`} className={`auth-heading ${simple ? 'mt-5' : headingMargin}`}>
                     {!simple && (
@@ -85,9 +89,11 @@ const AuthShell = ({
                 {children}
             </div>
 
-            <div className={`border-t border-slate-200/70 bg-slate-50/80 text-center ${footerPadding}`}>
-                {footer}
-            </div>
+            {footer && (
+                <div className={`border-t border-slate-200/70 bg-slate-50/80 text-center ${footerPadding}`}>
+                    {footer}
+                </div>
+            )}
         </section>
     );
 
@@ -103,10 +109,12 @@ const AuthShell = ({
                 <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-white via-white/82 to-transparent" />
 
                 <header className="absolute inset-x-0 top-0 z-30 mx-auto flex max-w-6xl items-center justify-between px-5 py-5 sm:px-8">
-                    <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/75 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm backdrop-blur transition hover:border-red-200 hover:text-red-900">
-                        <ArrowLeft className="h-4 w-4" />
-                        Home
-                    </Link>
+                    {hideHomeLink ? <span /> : (
+                        <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/75 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm backdrop-blur transition hover:border-red-200 hover:text-red-900">
+                            <ArrowLeft className="h-4 w-4" />
+                            Home
+                        </Link>
+                    )}
                     <img src={logoImg} alt="Eloquente Catering" className="h-11 w-auto drop-shadow-sm" />
                 </header>
 
@@ -143,10 +151,12 @@ const AuthShell = ({
                     <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/55 via-black/18 to-transparent" />
 
                     <div className="relative z-10 flex h-full w-full flex-col justify-between p-12">
-                        <Link href="/" prefetch="mount" className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur transition hover:bg-white/20 hover:text-white">
-                            <ArrowLeft className="h-4 w-4" />
-                            Home
-                        </Link>
+                        {hideHomeLink ? <span /> : (
+                            <Link href="/" prefetch="mount" className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur transition hover:bg-white/20 hover:text-white">
+                                <ArrowLeft className="h-4 w-4" />
+                                Home
+                            </Link>
+                        )}
 
                         <div className="auth-brand-copy max-w-xl">
                             <div className="mb-7 inline-flex h-10 items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur">
@@ -178,10 +188,12 @@ const AuthShell = ({
                 <main className={`flex h-screen items-center justify-center overflow-hidden ${mainPadding}`}>
                     <div className="w-full max-w-[460px]">
                         <div className="mb-4 flex items-center justify-between lg:hidden">
-                            <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-red-900">
-                                <ArrowLeft className="h-4 w-4" />
-                                Home
-                            </Link>
+                            {hideHomeLink ? <span /> : (
+                                <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-red-900">
+                                    <ArrowLeft className="h-4 w-4" />
+                                    Home
+                                </Link>
+                            )}
                             <img src={logoImg} alt="Eloquente Catering" className="h-10 w-auto" />
                         </div>
 

@@ -109,9 +109,11 @@ const OTPModal = () => {
         const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const response = await fetch('/resend-otp', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: {
                 Accept: 'application/json',
                 'X-CSRF-TOKEN': token,
+                'X-Requested-With': 'XMLHttpRequest',
             },
         });
         const payload = await response.json().catch(() => ({}));

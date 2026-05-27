@@ -192,7 +192,7 @@ class AdminReportService
             'collectionRate' => $summary['collectionRate'],
             'averageBookingValue' => $this->memo('averageBookingValue', $filters, fn () => $this->averageBookingValue($filters)),
             'pendingBookings' => $this->memo('pendingBookings', $filters, fn () => $this->countBookings($filters, ['Pending'])),
-            'activeBookings' => $this->memo('activeBookings', $filters, fn () => $this->countBookings($filters, ['Confirmed', 'Reserved'])),
+            'activeBookings' => $this->memo('activeBookings', $filters, fn () => $this->countBookings($filters, ['Confirmed'])),
             'completedBookings' => $this->memo('completedBookings', $filters, fn () => $this->countBookings($filters, ['Completed'])),
             'totalPax' => $this->memo('totalPax', $filters, fn () => $this->bookingQuery($filters)->sum('pax') ?: 0),
         ];
@@ -367,7 +367,7 @@ class AdminReportService
     {
         $rows = $this->bookingQuery($filters)
             ->whereDate('event_date', '>=', today())
-            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved'])
+            ->whereIn('status', ['Pending', 'Confirmed'])
             ->orderBy('event_date')
             ->limit(10)
             ->get(['id', 'client_full_name', 'event_date', 'event_type', 'status', 'pax', 'venue_city'])
@@ -611,7 +611,7 @@ class AdminReportService
         $periodExpression = $this->periodExpression('event_date', $period);
 
         $rows = $this->bookingQuery($filters)
-            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
+            ->whereIn('status', ['Pending', 'Confirmed', 'Completed'])
             ->whereDate('event_date', '<=', today())
             ->whereDate('event_date', '>=', $start->toDateString())
             ->whereDate('event_date', '<', $this->shiftPeriod($end, 1, $period)->toDateString())
@@ -650,7 +650,7 @@ class AdminReportService
             ->values();
 
         $smaBasis = $this->bookingQuery($filters)
-            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
+            ->whereIn('status', ['Pending', 'Confirmed', 'Completed'])
             ->whereDate('event_date', '<=', today())
             ->whereDate('event_date', '>=', $start->toDateString())
             ->whereDate('event_date', '<', $this->shiftPeriod($end, 1, $period)->toDateString())
@@ -731,7 +731,7 @@ class AdminReportService
         $monthExpression = $this->calendarMonthExpression('event_date');
 
         return $this->bookingQuery($filters)
-            ->whereIn('status', ['Pending', 'Confirmed', 'Reserved', 'Completed'])
+            ->whereIn('status', ['Pending', 'Confirmed', 'Completed'])
             ->selectRaw("$monthExpression as month")
             ->selectRaw('COUNT(*) as events')
             ->selectRaw('SUM(pax) as pax')
@@ -754,7 +754,7 @@ class AdminReportService
         $pendingOld = $this->bookingQuery($filters)->where('status', 'Pending')->where('created_at', '<=', now()->subHours(48))->count();
         $overduePayments = $this->paymentQuery($filters)->whereNotIn('payments.status', ['Paid', 'Verified', 'Refunded'])->where('payments.due_date', '<', today())->count();
         $upcomingMissing = $this->bookingQuery($filters)
-            ->whereIn('status', ['Confirmed', 'Reserved'])
+            ->whereIn('status', ['Confirmed'])
             ->whereBetween('event_date', [today(), today()->addDays(7)])
             ->where(function ($q) {
                 $q->whereNull('venue_address_line')->orWhereNull('event_time');

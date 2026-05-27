@@ -118,6 +118,7 @@ class StaffEventHistoryController extends Controller
             'event_time' => $booking->event_time,
             'event_type' => $booking->event_type,
             'event_name' => $booking->event_name,
+            'event_display_name' => $booking->event_display_name,
             'client_full_name' => $booking->client_full_name ?: $booking->user?->full_name ?: $booking->user?->username,
             'client_email' => $booking->client_email ?: $booking->user?->email,
             'client_phone' => $booking->client_phone ?: $booking->user?->phone,

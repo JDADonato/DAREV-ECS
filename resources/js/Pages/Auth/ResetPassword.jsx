@@ -27,6 +27,7 @@ const ResetPassword = ({ token, email: initialEmail = '' }) => {
             title="Reset password"
             subtitle="Choose a new password for your Eloquente account."
             features={[]}
+            hideAuthSwitch
             footer={<Link href="/login" className="text-sm font-bold text-red-900 hover:text-amber-700">Back to sign in</Link>}
         >
             <form className="space-y-5" onSubmit={submit}>

@@ -21,6 +21,7 @@ const ConfirmModal = ({
     onCancel,
     onConfirm,
     busy = false,
+    children,
 }) => {
     if (!isOpen) return null;
 
@@ -37,6 +38,7 @@ const ConfirmModal = ({
                     </div>
                     <h3 className="font-display text-xl font-bold text-slate-950">{title}</h3>
                     <p className="mt-3 text-sm font-medium leading-6 text-slate-500">{message}</p>
+                    {children && <div className="mt-4 text-left">{children}</div>}
                 </div>
                 <div className="grid grid-cols-2 gap-3 p-6">
                     <button

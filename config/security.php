@@ -4,6 +4,7 @@ return [
     'headers' => [
         'enabled' => env('SECURITY_HEADERS_ENABLED', true),
         'csp_enabled' => env('SECURITY_CSP_ENABLED', true),
+        'csp_report_in_local' => env('SECURITY_CSP_REPORT_IN_LOCAL', false),
         'csp_enforce' => env('SECURITY_CSP_ENFORCE', false),
         'hsts_enabled' => env('SECURITY_HSTS_ENABLED', true),
         'hsts_max_age' => (int) env('SECURITY_HSTS_MAX_AGE', 31536000),

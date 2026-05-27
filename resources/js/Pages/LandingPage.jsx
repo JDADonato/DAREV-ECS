@@ -188,7 +188,7 @@ const buildFloatingJourneySteps = (booking, payments) => {
         .filter((payment) => isSettled(payment.status))
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     
-    const isApproved = ['Confirmed', 'Reserved', 'Completed'].includes(booking.status);
+    const isApproved = ['Confirmed', 'Completed'].includes(booking.status);
     const hasReservation = bookingPayments.some((payment) => payment.payment_type === 'Reservation' && isSettled(payment.status)) || (total > 0 && paid / total >= 0.1);
     const eventDetailsDone = Boolean(booking.venue_address_line && booking.event_time && (booking.event_timeline || booking.special_instructions || booking.color_motif));
     const paymentsDone = bookingPayments.length > 0 && bookingPayments.every((payment) => isSettled(payment.status));
@@ -665,6 +665,8 @@ const LandingPage = () => {
                 })
                 .catch(err => console.error(err))
                 .finally(() => setJourneyLoading(false));
+        } else {
+            setJourneyData({ bookings: [], payments: [] });
         }
     }, [user]);
 

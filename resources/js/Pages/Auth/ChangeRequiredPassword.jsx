@@ -39,6 +39,8 @@ const ChangeRequiredPassword = () => {
             title="Change password"
             subtitle="Use at least 8 characters. Choose something only you know."
             features={[]}
+            hideAuthSwitch
+            hideHomeLink
         >
             <form className="space-y-5" onSubmit={submit}>
                 {['password', 'password_confirmation'].map((field) => (
