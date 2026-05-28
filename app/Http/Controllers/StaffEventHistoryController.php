@@ -51,14 +51,14 @@ class StaffEventHistoryController extends Controller
             })
             ->when($request->filled('search'), function ($q) use ($request) {
                 $raw = trim((string) $request->query('search'));
-                $term = '%' . $raw . '%';
+                $term = '%' . mb_strtolower($raw) . '%';
                 $q->where(function ($inner) use ($term, $raw) {
                     $inner
-                    ->where('client_full_name', 'like', $term)
-                    ->orWhere('client_email', 'like', $term)
-                    ->orWhere('event_name', 'like', $term)
-                    ->orWhere('event_type', 'like', $term)
-                    ->orWhere('venue_city', 'like', $term);
+                    ->whereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(client_email) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_type) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(venue_city) LIKE ?', [$term]);
 
                     if (ctype_digit($raw)) {
                         $inner->orWhere('id', (int) $raw);

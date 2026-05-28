@@ -78,13 +78,13 @@ class OperationsController extends Controller
             ->orderBy('event_time');
 
         if ($request->filled('search')) {
-            $search = '%' . trim((string) $request->query('search')) . '%';
+            $search = '%' . mb_strtolower(trim((string) $request->query('search'))) . '%';
             $query->where(function ($inner) use ($search) {
-                $inner->where('client_full_name', 'like', $search)
-                    ->orWhere('client_email', 'like', $search)
-                    ->orWhere('event_name', 'like', $search)
-                    ->orWhere('event_type', 'like', $search)
-                    ->orWhere('status', 'like', $search);
+                $inner->whereRaw('LOWER(client_full_name) LIKE ?', [$search])
+                    ->orWhereRaw('LOWER(client_email) LIKE ?', [$search])
+                    ->orWhereRaw('LOWER(event_name) LIKE ?', [$search])
+                    ->orWhereRaw('LOWER(event_type) LIKE ?', [$search])
+                    ->orWhereRaw('LOWER(status) LIKE ?', [$search]);
             });
         }
 

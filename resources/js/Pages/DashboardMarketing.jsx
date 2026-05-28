@@ -17,6 +17,7 @@ import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/Staff
 import { bookingStatusLabel, reviewStatusLabel } from '../utils/statusLabels';
 import useSmartRefresh from '../hooks/useSmartRefresh';
 import useStaffWorkspaceState from '../hooks/useStaffWorkspaceState';
+import AssistedBookingWizard from '../Components/marketing/AssistedBookingWizard';
 import {
     formatDate,
     formatMoney,
@@ -197,6 +198,7 @@ const DashboardMarketing = () => {
     const [feedbackSummary, setFeedbackSummary] = useState({ followUps: 0, testimonials: 0, recent: [] });
     const [bookingTransferStaff, setBookingTransferStaff] = useState([]);
     const [showBookingTransfer, setShowBookingTransfer] = useState(false);
+    const [showAssistedBooking, setShowAssistedBooking] = useState(false);
 
     // PDF Export State
     const [showExportModal, setShowExportModal] = useState(false);
@@ -531,6 +533,19 @@ const DashboardMarketing = () => {
         setBookings(prev => prev.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item));
         setCalendarBookings(prev => prev.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item));
         setSelectedBooking(prev => prev?.id === updatedBooking.id ? { ...prev, ...updatedBooking } : prev);
+    };
+
+    const addCreatedBooking = (createdBooking) => {
+        if (!createdBooking?.id) return;
+        setBookings(prev => [createdBooking, ...prev.filter(item => item.id !== createdBooking.id)]);
+        setCalendarBookings(prev => isActiveCalendarBooking(createdBooking)
+            ? [createdBooking, ...prev.filter(item => item.id !== createdBooking.id)]
+            : prev);
+        setBookingsScope(prev => prev || 'all');
+    };
+
+    const openAssistedBookingModal = () => {
+        setShowAssistedBooking(true);
     };
 
     const assignBooking = async (id) => {
@@ -1092,6 +1107,16 @@ const DashboardMarketing = () => {
 
         return (
             <div className="space-y-5">
+                <div className="marketing-panel flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p className="marketing-kicker">Walk-in and phone support</p>
+                        <h3 className="mt-1 text-xl font-black text-slate-950">Create booking for customer</h3>
+                        <p className="mt-1 text-sm font-semibold text-slate-500">Link an existing customer or create a walk-in client account while preparing the booking.</p>
+                    </div>
+                    <button type="button" onClick={openAssistedBookingModal} className="marketing-primary-btn px-5 py-3 text-sm">
+                        Create booking for customer
+                    </button>
+                </div>
                 <NextActionPanel
                     title="Marketing work needing action"
                     actions={marketingNextActions}
@@ -1787,6 +1812,16 @@ const DashboardMarketing = () => {
         const pagedPendingBookings = pendingBookings.slice((inquiryPage - 1) * inquiryPerPage, inquiryPage * inquiryPerPage);
         return (
             <div className="space-y-4">
+                <div className="marketing-panel flex flex-col gap-3 p-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p className="marketing-kicker">Assisted intake</p>
+                        <h3 className="text-lg font-black text-slate-950">Booking for a walk-in, call, or direct customer?</h3>
+                        <p className="text-sm font-semibold text-slate-500">Create the customer account and booking together so payments, chat, receipts, and feedback still work.</p>
+                    </div>
+                    <button type="button" onClick={openAssistedBookingModal} className="marketing-primary-btn px-5 py-3 text-sm">
+                        Create booking for customer
+                    </button>
+                </div>
                 <div className="marketing-panel flex flex-wrap gap-2 p-2">
                     {BOOKING_WORK_VIEWS.map(option => (
                         <button
@@ -2574,6 +2609,21 @@ const DashboardMarketing = () => {
                     </Suspense>
                 )}
             {renderBookingModal()}
+            <AssistedBookingWizard
+                isOpen={showAssistedBooking}
+                onClose={() => setShowAssistedBooking(false)}
+                onCreated={(data) => {
+                    addCreatedBooking(data.booking);
+                    fetchMarketingSummary({ silent: true });
+                }}
+                onOpenBooking={(booking) => {
+                    if (!booking?.id) return;
+                    setSelectedBooking(booking);
+                    setShowAssistedBooking(false);
+                    setActiveTab('bookings');
+                }}
+                toast={toast}
+            />
             {renderExportModal()}
             <PromptModal
                 isOpen={clarificationPrompt.isOpen}

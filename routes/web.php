@@ -254,6 +254,8 @@ Route::middleware(['auth', 'role:Marketing,Admin'])->group(function () {
     Route::get('/dashboard/marketing', fn () => Inertia::render('DashboardMarketing'))->name('dashboard.marketing');
     Route::get('/api/marketing/summary', [MarketingController::class, 'summary']);
     Route::get('/api/marketing/bookings', [MarketingController::class, 'getAllBookings']);
+    Route::get('/api/marketing/customers', [MarketingController::class, 'searchCustomers']);
+    Route::post('/api/marketing/bookings/assisted', [MarketingController::class, 'createAssistedBooking']);
     Route::get('/api/marketing/contact-inquiries', [ContactInquiryController::class, 'index']);
     Route::patch('/api/marketing/contact-inquiries/{inquiry}', [ContactInquiryController::class, 'update']);
     Route::put('/api/marketing/bookings/{id}/status', [MarketingController::class, 'updateStatus']);

@@ -3,15 +3,25 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\BookingSummaryResource;
+use App\Models\AuditLog;
 use App\Models\Booking;
 use App\Models\BookingReviewTask;
+use App\Models\Payment;
 use App\Models\User;
+use App\Notifications\CustomerAssistedBookingInviteNotification;
+use App\Notifications\NewBookingNotification;
+use App\Services\BookingValidationService;
+use App\Services\EmailDeliveryService;
 use App\Services\EventPreparationService;
+use App\Services\PaymentCalculationService;
 use App\Services\PostEventLifecycleService;
 use App\Support\ApiResponse;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 /**
@@ -41,17 +51,17 @@ class MarketingController extends Controller
      */
     public function getAllBookings(Request $request)
     {
-        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks', 'historyNotes:id,booking_id,user_id,body,created_at'])
+        $query = Booking::with(['user:id,full_name,username,email,phone,role', 'assignee:id,full_name,username', 'createdByStaff:id,full_name,username', 'transferRequestedTo:id,full_name,username', 'transferRequestedBy:id,full_name,username', 'reviewTasks', 'preparationTasks', 'historyNotes:id,booking_id,user_id,body,created_at'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('date_from'), fn ($q, $date) => $q->whereDate('event_date', '>=', $date))
             ->when($request->query('date_to'), fn ($q, $date) => $q->whereDate('event_date', '<=', $date))
             ->when($request->query('search'), function ($q, $search) {
-                $term = '%' . trim((string) $search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('client_full_name', 'like', $term)
-                    ->orWhere('event_name', 'like', $term)
-                    ->orWhere('venue_city', 'like', $term)
-                    ->orWhere('event_type', 'like', $term));
+                    ->whereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(venue_city) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_type) LIKE ?', [$term]));
             });
 
         match ($request->query('sort', 'eventDateSoonest')) {
@@ -73,6 +83,346 @@ class MarketingController extends Controller
         $bookings = BookingSummaryResource::collection($query->get())->resolve();
 
         return response()->json($bookings);
+    }
+
+    public function searchCustomers(Request $request)
+    {
+        $search = trim((string) $request->query('search', ''));
+        $limit = min(max((int) $request->query('limit', 8), 1), 12);
+        $page = max((int) $request->query('page', 1), 1);
+
+        if (mb_strlen($search) < 2) {
+            return response()->json([
+                'data' => [],
+                'meta' => [
+                    'total' => 0,
+                    'limit' => $limit,
+                    'page' => 1,
+                    'last_page' => 1,
+                    'has_more' => false,
+                    'search' => $search,
+                ],
+            ]);
+        }
+
+        $normalizedSearch = mb_strtolower($search);
+        $term = '%' . $normalizedSearch . '%';
+        $startsWithTerm = $normalizedSearch . '%';
+
+        $query = User::query()
+            ->where('role', 'Client')
+            ->where(fn ($query) => $query
+                ->whereRaw('LOWER(full_name) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(username) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(phone) LIKE ?', [$term]));
+
+        $total = (clone $query)->count();
+        $lastPage = max((int) ceil($total / $limit), 1);
+        $page = min($page, $lastPage);
+
+        $customers = $query
+            ->orderByRaw('case when account_status = ? then 0 else 1 end', ['active'])
+            ->orderByRaw(
+                "case when LOWER(COALESCE(email, '')) = ? or LOWER(COALESCE(phone, '')) = ? or LOWER(COALESCE(username, '')) = ? then 0 else 1 end",
+                [$normalizedSearch, $normalizedSearch, $normalizedSearch]
+            )
+            ->orderByRaw(
+                "case when LOWER(COALESCE(full_name, '')) like ? or LOWER(COALESCE(username, '')) like ? then 0 else 1 end",
+                [$startsWithTerm, $startsWithTerm]
+            )
+            ->orderBy('full_name')
+            ->offset(($page - 1) * $limit)
+            ->limit($limit)
+            ->get(['id', 'full_name', 'username', 'email', 'phone', 'account_status']);
+
+        return response()->json([
+            'data' => $customers->map(fn (User $customer) => [
+                'id' => $customer->id,
+                'full_name' => $customer->full_name,
+                'username' => $customer->username,
+                'email' => $customer->email,
+                'phone' => $customer->phone,
+                'account_status' => $customer->account_status ?? 'active',
+                'label' => $customer->full_name ?: $customer->username,
+            ])->values(),
+            'meta' => [
+                'total' => $total,
+                'limit' => $limit,
+                'page' => $page,
+                'last_page' => $lastPage,
+                'from' => $total > 0 ? (($page - 1) * $limit) + 1 : 0,
+                'to' => min($page * $limit, $total),
+                'has_more' => $page < $lastPage,
+                'search' => $search,
+            ],
+        ]);
+    }
+
+    public function createAssistedBooking(Request $request, EmailDeliveryService $emailDelivery)
+    {
+        $actor = Auth::user();
+
+        if (!$actor || !in_array($actor->role, ['Marketing', 'Admin'], true)) {
+            return response()->json(['error' => 'Only Marketing or Admin can create assisted bookings.'], 403);
+        }
+
+        $data = $request->validate([
+            'customer_mode' => ['required', 'in:existing,new'],
+            'customer_id' => ['nullable', 'required_if:customer_mode,existing', 'exists:users,id'],
+            'customer.full_name' => ['required_if:customer_mode,new', 'nullable', 'string', 'max:255'],
+            'customer.email' => ['nullable', 'email', 'max:255'],
+            'customer.phone' => ['nullable', 'string', 'max:40'],
+            'customer.username' => ['nullable', 'string', 'max:80'],
+            'send_invite' => ['nullable', 'boolean'],
+            'event_date' => ['required', 'date'],
+            'event_time' => ['required', 'string', 'max:30'],
+            'event_type' => ['nullable', 'string', 'max:120'],
+            'event_name' => ['required', 'string', 'max:255'],
+            'pax' => ['required', 'integer', 'min:1'],
+            'budget' => ['nullable', 'numeric', 'min:0'],
+            'package_id' => ['nullable', 'string', 'max:120'],
+            'selected_menu' => ['nullable', 'array'],
+            'menu_items' => ['nullable', 'array'],
+            'menu_items.*' => ['integer', 'exists:menu_items,id'],
+            'total_cost' => ['nullable', 'numeric', 'min:0'],
+            'client_full_name' => ['nullable', 'string', 'max:255'],
+            'client_email' => ['nullable', 'email', 'max:255'],
+            'client_phone' => ['nullable', 'string', 'max:40'],
+            'venue_address_line' => ['nullable', 'string', 'max:255'],
+            'venue_street' => ['nullable', 'string', 'max:255'],
+            'venue_city' => ['nullable', 'string', 'max:120'],
+            'venue_province' => ['nullable', 'string', 'max:120'],
+            'venue_zip_code' => ['nullable', 'string', 'max:20'],
+            'venue_building_details' => ['nullable', 'string', 'max:1000'],
+            'special_instructions' => ['nullable', 'string', 'max:3000'],
+            'transport_fee' => ['nullable', 'numeric', 'min:0'],
+            'labor_surcharge' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        try {
+            BookingValidationService::validateBookingConstraints([
+                'event_date' => $data['event_date'],
+                'pax' => $data['pax'],
+            ]);
+
+            if (!empty($data['menu_items']) && isset($data['total_cost'])) {
+                $expectedTotal = BookingValidationService::calculateTotalCost($data['menu_items'], (int) $data['pax'])
+                    + (float) ($data['transport_fee'] ?? 0)
+                    + (float) ($data['labor_surcharge'] ?? 0);
+
+                if (abs($expectedTotal - (float) $data['total_cost']) > max(1, $expectedTotal * 0.01)) {
+                    return response()->json([
+                        'error' => 'Price calculation mismatch. Please refresh pricing and try again.',
+                        'recalculated_total' => $expectedTotal,
+                    ], 422);
+                }
+            }
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $temporaryPassword = null;
+        $createdNewCustomer = false;
+
+        try {
+            [$booking, $customer, $createdNewCustomer, $temporaryPassword] = DB::transaction(function () use ($data, $actor, &$temporaryPassword, &$createdNewCustomer) {
+                $customer = $this->resolveAssistedCustomer($data, $temporaryPassword, $createdNewCustomer);
+
+                $booking = Booking::create([
+                    'user_id' => $customer->id,
+                    'booking_source' => $actor->role === 'Admin' ? 'admin_assisted' : 'marketing_assisted',
+                    'created_by_staff_id' => $actor->id,
+                    'assigned_to' => $actor->role === 'Marketing' ? $actor->id : null,
+                    'event_date' => $data['event_date'],
+                    'event_time' => $data['event_time'],
+                    'pax' => (int) $data['pax'],
+                    'budget' => $data['budget'] ?? null,
+                    'package_id' => $data['package_id'] ?? 'custom',
+                    'event_type' => $data['event_type'] ?? null,
+                    'event_name' => $data['event_name'],
+                    'client_full_name' => $data['client_full_name'] ?? $customer->full_name ?? $customer->username,
+                    'client_email' => $data['client_email'] ?? $customer->email,
+                    'client_phone' => $data['client_phone'] ?? $customer->phone,
+                    'venue_address_line' => $data['venue_address_line'] ?? null,
+                    'venue_street' => $data['venue_street'] ?? null,
+                    'venue_city' => $data['venue_city'] ?? null,
+                    'venue_province' => $data['venue_province'] ?? null,
+                    'venue_zip_code' => $data['venue_zip_code'] ?? null,
+                    'venue_building_details' => $data['venue_building_details'] ?? null,
+                    'special_instructions' => $data['special_instructions'] ?? null,
+                    'transport_fee' => $data['transport_fee'] ?? 0,
+                    'labor_surcharge' => $data['labor_surcharge'] ?? 0,
+                    'total_cost' => $data['total_cost'] ?? $data['budget'] ?? 0,
+                    'selected_menu' => $data['selected_menu'] ?? null,
+                    'review_status' => 'Submitted',
+                    'expires_at' => now()->addHours(24),
+                ]);
+
+                foreach ([
+                    'Confirm date and capacity',
+                    'Review package and menu fit',
+                    'Check venue location and access',
+                    'Confirm payment schedule',
+                    'Check customer invite and account access',
+                ] as $label) {
+                    $booking->reviewTasks()->create([
+                        'task_type' => 'review',
+                        'label' => $label,
+                        'status' => 'Pending',
+                        'customer_visible' => false,
+                    ]);
+                }
+
+                $cost = (float) ($booking->total_cost ?? 0);
+                if ($cost > 0) {
+                    $paymentService = new PaymentCalculationService();
+                    foreach ($paymentService->calculateTranches($booking) as $tranche) {
+                        Payment::create([
+                            'booking_id' => $booking->id,
+                            'amount' => round((float) $tranche['amount'], 2),
+                            'payment_method' => 'Pending',
+                            'status' => 'Pending',
+                            'payment_type' => $tranche['name'],
+                            'due_date' => Carbon::parse($tranche['due_date'])->toDateString(),
+                        ]);
+                    }
+                }
+
+                AuditLog::create([
+                    'user_id' => $actor->id,
+                    'username' => $actor->username,
+                    'role' => $actor->role,
+                    'action' => 'Booking created by staff for customer',
+                    'method' => 'POST',
+                    'path' => '/api/marketing/bookings/assisted',
+                    'status_code' => 201,
+                    'ip_address' => request()->ip(),
+                    'user_agent' => request()->userAgent(),
+                    'metadata' => [
+                        'booking_id' => $booking->id,
+                        'customer_id' => $customer->id,
+                        'customer_mode' => $data['customer_mode'],
+                        'booking_source' => $booking->booking_source,
+                    ],
+                ]);
+
+                return [$booking, $customer, $createdNewCustomer, $temporaryPassword];
+            });
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $inviteDelivery = ['status' => 'skipped_by_admin', 'message' => 'Customer invite was not requested.'];
+        if ($request->boolean('send_invite', true)) {
+            $inviteDelivery = $emailDelivery->sendToNotifiable(
+                $customer,
+                new CustomerAssistedBookingInviteNotification($booking, $temporaryPassword),
+                'assisted_booking_customer_invite'
+            );
+        }
+
+        try {
+            $staff = User::whereIn('role', ['Admin', 'Marketing', 'Accounting'])->get();
+            Notification::send($staff, new NewBookingNotification($booking));
+        } catch (\Throwable) {
+            // Notifications should not undo the booking that was already created.
+        }
+
+        return response()->json([
+            'message' => 'Assisted booking created successfully.',
+            'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'createdByStaff', 'reviewTasks', 'preparationTasks', 'payments'])),
+            'customer' => [
+                'id' => $customer->id,
+                'full_name' => $customer->full_name,
+                'username' => $customer->username,
+                'email' => $customer->email,
+                'phone' => $customer->phone,
+                'created' => $createdNewCustomer,
+            ],
+            'temporary_password' => $temporaryPassword,
+            'temporary_password_expires_at' => $customer->temporary_password_expires_at,
+            'invite_delivery' => $inviteDelivery,
+            'invite_delivery_status' => $inviteDelivery,
+        ], 201);
+    }
+
+    private function resolveAssistedCustomer(array $data, ?string &$temporaryPassword, bool &$createdNewCustomer): User
+    {
+        if ($data['customer_mode'] === 'existing') {
+            $customer = User::where('role', 'Client')->find($data['customer_id']);
+
+            if (!$customer) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'customer_id' => 'Choose an existing customer account.',
+                ]);
+            }
+
+            return $customer;
+        }
+
+        $customerData = $data['customer'] ?? [];
+        $email = filled($customerData['email'] ?? null) ? strtolower(trim($customerData['email'])) : null;
+        $phone = filled($customerData['phone'] ?? null) ? trim($customerData['phone']) : null;
+
+        if ($email || $phone) {
+            $duplicate = User::where('role', 'Client')
+                ->where(fn ($query) => $query
+                    ->when($email, fn ($q) => $q->orWhere('email', $email))
+                    ->when($phone, fn ($q) => $q->orWhere('phone', $phone)))
+                ->first();
+
+            if ($duplicate) {
+                $duplicateName = $duplicate->full_name ?: $duplicate->username;
+
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'customer' => "A customer account already exists for {$duplicateName}. Select that customer instead.",
+                ]);
+            }
+        }
+
+        $temporaryPassword = Str::password(12);
+        $username = $this->uniqueClientUsername($customerData['username'] ?? null, $customerData['full_name'] ?? null, $email);
+        $createdNewCustomer = true;
+
+        return User::create([
+            'full_name' => $customerData['full_name'] ?? $username,
+            'username' => $username,
+            'email' => $email,
+            'phone' => $phone,
+            'password' => $temporaryPassword,
+            'role' => 'Client',
+            'account_status' => 'active',
+            'must_change_password' => true,
+            'temporary_password_expires_at' => now()->addHours(24),
+            'temporary_password_secret' => $temporaryPassword,
+        ]);
+    }
+
+    private function uniqueClientUsername(?string $requested, ?string $name, ?string $email): string
+    {
+        $base = $requested
+            ?: ($email ? Str::before($email, '@') : $name);
+        $base = Str::of($base ?: 'client')
+            ->ascii()
+            ->lower()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->limit(32, '')
+            ->value() ?: 'client';
+
+        $candidate = $base;
+        $counter = 1;
+
+        while (User::where('username', $candidate)->exists()) {
+            $candidate = $base . '_' . (++$counter);
+        }
+
+        return $candidate;
     }
 
     public function summary()

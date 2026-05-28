@@ -83,9 +83,10 @@ class AccountingController extends Controller
 
         if ($request->filled('search')) {
             $search = trim((string) $request->query('search'));
-            $query->where(function ($inner) use ($search) {
-                $inner->where('client_full_name', 'like', "%{$search}%")
-                    ->orWhereHas('user', fn ($userQuery) => $userQuery->where('username', 'like', "%{$search}%"));
+            $term = '%' . mb_strtolower($search) . '%';
+            $query->where(function ($inner) use ($search, $term) {
+                $inner->whereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereHas('user', fn ($userQuery) => $userQuery->whereRaw('LOWER(username) LIKE ?', [$term]));
                 if (ctype_digit($search)) {
                     $inner->orWhere('id', (int) $search);
                 }
@@ -458,10 +459,11 @@ class AccountingController extends Controller
 
         if ($request->filled('clientSearch')) {
             $search = trim((string) $request->query('clientSearch'));
-            $query->whereHas('booking', function ($bookingQuery) use ($search) {
-                $bookingQuery->where('client_full_name', 'like', "%{$search}%")
-                    ->orWhere('event_name', 'like', "%{$search}%")
-                    ->orWhereHas('user', fn ($userQuery) => $userQuery->where('username', 'like', "%{$search}%"));
+            $term = '%' . mb_strtolower($search) . '%';
+            $query->whereHas('booking', function ($bookingQuery) use ($search, $term) {
+                $bookingQuery->whereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_name) LIKE ?', [$term])
+                    ->orWhereHas('user', fn ($userQuery) => $userQuery->whereRaw('LOWER(username) LIKE ?', [$term]));
                 if (ctype_digit($search)) {
                     $bookingQuery->orWhere('id', (int) $search);
                 }
@@ -469,8 +471,8 @@ class AccountingController extends Controller
         }
 
         if ($request->filled('method') && $request->query('method') !== 'All') {
-            $method = trim((string) $request->query('method'));
-            $query->where('payment_method', 'like', "%{$method}%");
+            $method = '%' . mb_strtolower(trim((string) $request->query('method'))) . '%';
+            $query->whereRaw('LOWER(payment_method) LIKE ?', [$method]);
         }
 
         if ($request->filled('payment_type') && $request->query('payment_type') !== 'All') {

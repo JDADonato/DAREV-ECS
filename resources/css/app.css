@@ -2514,7 +2514,10 @@
 
   .booking-primary-btn:disabled {
     cursor: not-allowed;
-    opacity: .48;
+    background: #e9e2d9 !important;
+    color: #475569 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
   }
 
   .booking-secondary-btn {

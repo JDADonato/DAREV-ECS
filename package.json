@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "refresh": "powershell -ExecutionPolicy Bypass -File .\\refresh.ps1"
     },
     "devDependencies": {
         "@laravel/echo-react": "^2.3.3",

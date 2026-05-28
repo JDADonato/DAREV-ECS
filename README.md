@@ -104,8 +104,7 @@ npm.cmd run build
 Use one PowerShell window from the repo root:
 
 ```powershell
-.\php\php.exe artisan optimize:clear
-.\composer.bat run dev
+.\refresh.ps1
 ```
 
 This starts:
@@ -119,6 +118,16 @@ This starts:
 
 Keep the terminal open while testing.
 
+Press `Ctrl+C` in that same terminal to stop Laravel, Vite, the queue listener, and Reverb together.
+
+You can also run the same refresh script through npm:
+
+```powershell
+npm.cmd run refresh
+```
+
+Use `http://127.0.0.1:8080` consistently while testing. Avoid mixing `localhost`, `[::1]`, and `127.0.0.1`, because switching hosts can make browser session cookies and CSRF tokens look stale.
+
 If Vite asset requests fail with `ERR_CONNECTION_REFUSED`, the Vite dev server is not running. Start the app with `.\composer.bat run dev`, or build static assets with:
 
 ```powershell
@@ -129,7 +138,15 @@ npm.cmd run build
 
 ### Restart Laravel/Vite/Reverb Cleanly
 
-If the app gets stuck after code changes, stop running PHP and Node processes, then restart:
+If the app gets stuck after code changes, use the one-command refresh:
+
+```powershell
+.\refresh.ps1
+```
+
+The script stops the usual local dev ports for this app, clears Laravel caches, and restarts Laravel, Vite, the queue listener, and Reverb in one terminal.
+
+Fallback manual commands:
 
 ```powershell
 Get-Process php -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -138,7 +155,7 @@ Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
 .\composer.bat run dev
 ```
 
-If PowerShell asks for confirmation when stopping Node, press `A` for "Yes to All".
+If PowerShell asks for confirmation when stopping Node during the fallback flow, press `A` for "Yes to All".
 
 ### Reset Laravel Caches Only
 

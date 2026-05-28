@@ -58,12 +58,12 @@ class CalendarAvailabilityController extends Controller
             ->when($data['city'] ?? null, fn ($q, $city) => $q->where('venue_city', $city))
             ->when($data['owner'] ?? null, fn ($q, $owner) => $q->where('assigned_to', $owner))
             ->when($data['search'] ?? null, function ($q, $search) {
-                $term = '%' . trim($search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('event_name', 'like', $term)
-                    ->orWhere('event_type', 'like', $term)
-                    ->orWhere('client_full_name', 'like', $term)
-                    ->orWhere('venue_city', 'like', $term));
+                    ->whereRaw('LOWER(event_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_type) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(venue_city) LIKE ?', [$term]));
             })
             ->orderBy('event_date')
             ->orderBy('event_time')

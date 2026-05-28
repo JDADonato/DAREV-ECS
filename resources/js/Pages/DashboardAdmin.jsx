@@ -220,6 +220,7 @@ const DashboardAdmin = () => {
     const [bookingsLoading, setBookingsLoading] = useState(false);
     const [bookingSearch, setBookingSearch] = useState('');
     const [bookingStatusFilter, setBookingStatusFilter] = useState('All');
+    const [bookingSourceFilter, setBookingSourceFilter] = useState('all');
     const [bookingSort, setBookingSort] = useState('latest');
     const [approvingBookingId, setApprovingBookingId] = useState(null);
     const [discountModal, setDiscountModal] = useState({ open: false, data: null });
@@ -797,6 +798,11 @@ const DashboardAdmin = () => {
                 const status = normalizeStatus(booking.status);
                 if (bookingStatusFilter === 'Pending' && status !== 'pending') return false;
                 if (bookingStatusFilter === 'Active' && status !== 'confirmed') return false;
+                if (bookingSourceFilter !== 'all') {
+                    const source = booking.booking_source || 'customer';
+                    if (bookingSourceFilter === 'assisted' && !['marketing_assisted', 'admin_assisted'].includes(source)) return false;
+                    if (bookingSourceFilter !== 'assisted' && source !== bookingSourceFilter) return false;
+                }
 
                 if (!query) return true;
 
@@ -825,7 +831,7 @@ const DashboardAdmin = () => {
                 const rightDate = new Date(b.created_at || b.event_date || 0).getTime();
                 return bookingSort === 'oldest' ? leftDate - rightDate : rightDate - leftDate;
             });
-    }, [bookings, bookingSearch, bookingStatusFilter, bookingSort]);
+    }, [bookings, bookingSearch, bookingStatusFilter, bookingSourceFilter, bookingSort]);
 
     const getAuditWorkspace = (audit) => {
         const path = String(audit.path || '').toLowerCase();
@@ -1020,7 +1026,7 @@ const DashboardAdmin = () => {
 
     useEffect(() => {
         setBookingPage(1);
-    }, [bookingSearch, bookingStatusFilter, bookingSort]);
+    }, [bookingSearch, bookingStatusFilter, bookingSourceFilter, bookingSort]);
 
     useEffect(() => {
         setAuditPage(1);
@@ -4811,6 +4817,17 @@ const DashboardAdmin = () => {
                                                 <option value="az">A-Z</option>
                                                 <option value="za">Z-A</option>
                                             </select>
+                                            <select
+                                                value={bookingSourceFilter}
+                                                onChange={(e) => setBookingSourceFilter(e.target.value)}
+                                                className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                            >
+                                                <option value="all">All sources</option>
+                                                <option value="customer">Customer submitted</option>
+                                                <option value="assisted">Any assisted</option>
+                                                <option value="marketing_assisted">Marketing assisted</option>
+                                                <option value="admin_assisted">Admin assisted</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </div>
@@ -4846,6 +4863,11 @@ const DashboardAdmin = () => {
                                                         <td className="px-6 py-4">
                                                             <div className="text-sm font-black text-gray-900">{formatBookingRef(booking.id)}</div>
                                                             <div className="text-xs font-medium text-gray-500">Submitted {formatDate(booking.created_at)}</div>
+                                                            {booking.booking_source && booking.booking_source !== 'customer' && (
+                                                                <div className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-amber-700">
+                                                                    {booking.created_by_staff_label || 'Created by staff'}
+                                                                </div>
+                                                            )}
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <div className="text-sm font-bold text-gray-900">{eventDisplayName(booking)}</div>

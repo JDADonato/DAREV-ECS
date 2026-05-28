@@ -11,6 +11,8 @@ class Booking extends Model
 
     protected $fillable = [
         'user_id',
+        'booking_source',
+        'created_by_staff_id',
         'event_date',
         'event_time',
         'pax',
@@ -90,6 +92,11 @@ class Booking extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function createdByStaff()
+    {
+        return $this->belongsTo(User::class, 'created_by_staff_id');
     }
 
     public function eventType()

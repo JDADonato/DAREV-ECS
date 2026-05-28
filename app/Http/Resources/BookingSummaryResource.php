@@ -12,6 +12,10 @@ class BookingSummaryResource extends JsonResource
         return [
             'id' => $this->id,
             'user_id' => $this->user_id,
+            'booking_source' => $this->booking_source ?? 'customer',
+            'created_by_staff_id' => $this->created_by_staff_id,
+            'created_by_staff_name' => $this->createdByStaff?->full_name ?: ($this->createdByStaff->username ?? null),
+            'created_by_staff_label' => $this->created_by_staff_id ? 'Created by staff' : 'Customer submitted',
             'event_date' => $this->event_date,
             'event_time' => $this->event_time,
             'pax' => (int) $this->pax,

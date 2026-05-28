@@ -64,12 +64,12 @@ class AdminController extends Controller
                     : $q->where(fn ($inner) => $inner->whereNull('must_change_password')->orWhereRaw('must_change_password is false'));
             })
             ->when($request->query('search'), function ($q, $search) {
-                $term = '%' . trim((string) $search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('full_name', 'like', $term)
-                    ->orWhere('username', 'like', $term)
-                    ->orWhere('email', 'like', $term)
-                    ->orWhere('phone', 'like', $term));
+                    ->whereRaw('LOWER(full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(username) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(phone) LIKE ?', [$term]));
             })
             ->orderBy('created_at', 'desc');
 
@@ -376,12 +376,12 @@ class AdminController extends Controller
                     ->orWhere('account_status', 'active'));
             })
             ->when($request->query('search'), function ($q, $search) {
-                $term = '%' . trim((string) $search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('full_name', 'like', $term)
-                    ->orWhere('username', 'like', $term)
-                    ->orWhere('email', 'like', $term)
-                    ->orWhere('phone', 'like', $term));
+                    ->whereRaw('LOWER(full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(username) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(phone) LIKE ?', [$term]));
             })
             ->when($request->filled('booking_activity') && $request->query('booking_activity') !== 'all', function ($q) use ($request) {
                 match ($request->query('booking_activity')) {
@@ -562,6 +562,8 @@ class AdminController extends Controller
             ->select([
                 'id',
                 'user_id',
+                'booking_source',
+                'created_by_staff_id',
                 'event_date',
                 'event_time',
                 'pax',
@@ -595,6 +597,7 @@ class AdminController extends Controller
             ->with([
                 'user:id,full_name,username,email,phone,role',
                 'assignee:id,full_name,username',
+                'createdByStaff:id,full_name,username',
                 'transferRequestedTo:id,full_name,username',
                 'transferRequestedBy:id,full_name,username',
                 'reviewTasks',
@@ -603,13 +606,21 @@ class AdminController extends Controller
             ])
             ->when(!$request->boolean('include_history'), fn ($q) => $q->whereNotIn('status', ['Cancelled', 'cancelled', 'Completed', 'completed']))
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
+            ->when($request->query('source'), function ($q, $source) {
+                if ($source === 'customer') {
+                    $q->where(fn ($inner) => $inner->whereNull('booking_source')->orWhere('booking_source', 'customer'));
+                    return;
+                }
+
+                $q->where('booking_source', $source);
+            })
             ->when($request->query('search'), function ($q, $search) {
-                $term = '%' . trim((string) $search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(fn ($inner) => $inner
-                    ->where('client_full_name', 'like', $term)
-                    ->orWhere('event_name', 'like', $term)
-                    ->orWhere('client_email', 'like', $term)
-                    ->orWhere('venue_city', 'like', $term));
+                    ->whereRaw('LOWER(client_full_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(event_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(client_email) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(venue_city) LIKE ?', [$term]));
             })
             ->orderBy('created_at', 'desc');
 
@@ -834,11 +845,11 @@ class AdminController extends Controller
             ->when($request->query('role'), fn ($q, $role) => $q->where('role', $role))
             ->when($request->query('method'), fn ($q, $method) => $q->where('method', strtoupper($method)))
             ->when($request->query('search'), function ($q, $search) {
-                $term = '%' . trim($search) . '%';
+                $term = '%' . mb_strtolower(trim((string) $search)) . '%';
                 $q->where(function ($inner) use ($term) {
-                    $inner->where('username', 'like', $term)
-                        ->orWhere('action', 'like', $term)
-                        ->orWhere('path', 'like', $term);
+                    $inner->whereRaw('LOWER(username) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(action) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(path) LIKE ?', [$term]);
                 });
             })
             ->orderByDesc('created_at');

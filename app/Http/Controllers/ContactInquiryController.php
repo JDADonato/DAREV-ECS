@@ -53,12 +53,13 @@ class ContactInquiryController extends Controller
         $inquiries = ContactInquiry::query()
             ->with('assignee:id,full_name,username')
             ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($inner) use ($search) {
-                    $inner->where('full_name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%")
-                        ->orWhere('subject', 'like', "%{$search}%")
-                        ->orWhere('message', 'like', "%{$search}%");
+                $term = '%' . mb_strtolower($search) . '%';
+                $query->where(function ($inner) use ($term) {
+                    $inner->whereRaw('LOWER(full_name) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(phone) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(subject) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(message) LIKE ?', [$term]);
                 });
             })
             ->when($status !== '', fn ($query) => $query->where('status', $status))

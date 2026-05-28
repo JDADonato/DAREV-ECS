@@ -106,10 +106,11 @@ class AnnouncementController extends Controller
             ->select('id', 'username', 'email', 'role')
             ->whereNotNull('email')
             ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('username', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('role', 'like', "%{$search}%");
+                $term = '%' . mb_strtolower($search) . '%';
+                $query->where(function ($q) use ($term) {
+                    $q->whereRaw('LOWER(username) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(role) LIKE ?', [$term]);
                 });
             })
             ->orderByRaw("CASE WHEN role = 'Client' THEN 0 ELSE 1 END")

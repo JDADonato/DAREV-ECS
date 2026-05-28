@@ -41,7 +41,7 @@ const CITY_OPTIONS = [
     { value: 'teresa', label: 'Teresa', zone: 'outside-31-50', fee: 3000 },
 ];
 
-const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) => {
+const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user, requireEmail = true }) => {
     const [formData, setFormData] = useState({
         client_full_name: bookingData.client_full_name || '',
         client_email: bookingData.client_email || user?.email || '',
@@ -105,8 +105,15 @@ const EventSurcharges = ({ bookingData, updateBooking, onNext, onBack, user }) =
             setModal({ isOpen: true, type: 'error', title: 'Missing Information', message: 'Please enter your full name.' });
             return;
         }
-        if (!formData.client_email.trim() || !formData.client_phone.trim()) {
-            setModal({ isOpen: true, type: 'error', title: 'Contact details needed', message: 'Please add the email and mobile number we should use for booking updates.' });
+        if ((requireEmail && !formData.client_email.trim()) || !formData.client_phone.trim()) {
+            setModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Contact details needed',
+                message: requireEmail
+                    ? 'Please add the email and mobile number we should use for booking updates.'
+                    : 'Please add the mobile number we should use for booking updates.',
+            });
             return;
         }
         if (!formData.venue_address_line.trim() || !formData.venue_city) {
