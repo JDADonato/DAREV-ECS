@@ -13,6 +13,7 @@ import StaffPageHeader from '../Components/staff/StaffPageHeader';
 import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import NextActionPanel from '../Components/staff/NextActionPanel';
+import AssistedBookingWizard from '../Components/marketing/AssistedBookingWizard';
 import { getListData } from '../utils/apiResponses';
 import csrfFetch from '../utils/csrf';
 import {
@@ -33,6 +34,7 @@ import { paymentTypeLabel, staffPaymentStatus } from '../utils/statusLabels';
 const AnnouncementManager = lazy(() => import('../Components/content/AnnouncementManager'));
 const PaymentTermEditorModal = lazy(() => import('../Components/finance/PaymentTermEditorModal'));
 const PreparationBoard = lazy(() => import('../Components/operations/PreparationBoard'));
+const StaffMessaging = lazy(() => import('../Components/common/StaffMessaging'));
 
 const paymentLabel = paymentTypeLabel;
 
@@ -96,7 +98,30 @@ const DEFAULT_ANALYTICS_FILTERS = {
 const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=25';
 const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=25';
 const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=25';
-const ADMIN_WORKSPACE_TABS = ['dashboard', 'bookings', 'preparation', 'refunds', 'analytics', 'reports', 'content', 'availability', 'users', 'configuration', 'history', 'audits', 'profile'];
+const ADMIN_WORKSPACE_TABS = ['today', 'bookings-intake', 'calendar-handoff', 'finance', 'messages-inquiries', 'public-content', 'availability', 'accounts', 'analytics-reports', 'system-audit', 'history', 'profile'];
+const ADMIN_TAB_ALIASES = {
+    dashboard: 'today',
+    overview: 'today',
+    bookings: 'bookings-intake',
+    intake: 'bookings-intake',
+    preparation: 'calendar-handoff',
+    calendar: 'calendar-handoff',
+    handoff: 'calendar-handoff',
+    refunds: 'finance',
+    accounting: 'finance',
+    ledger: 'finance',
+    messages: 'messages-inquiries',
+    inquiries: 'messages-inquiries',
+    content: 'public-content',
+    configuration: 'public-content',
+    settings: 'public-content',
+    users: 'accounts',
+    people: 'accounts',
+    reports: 'analytics-reports',
+    analytics: 'analytics-reports',
+    audits: 'system-audit',
+    system: 'system-audit',
+};
 const adminEmployeesUrl = (filters = {}) => {
     const params = new URLSearchParams({ paginated: '1', per_page: '100' });
     Object.entries(filters).forEach(([key, value]) => {
@@ -160,8 +185,9 @@ const DashboardAdmin = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useStaffWorkspaceState({
         storageKey: 'ecs:staff-workspace:admin',
-        defaultTab: 'dashboard',
+        defaultTab: 'today',
         allowedTabs: ADMIN_WORKSPACE_TABS,
+        tabAliases: ADMIN_TAB_ALIASES,
     });
     const [profileForm, setProfileForm] = useState({
         username: user?.username || '',
@@ -223,6 +249,7 @@ const DashboardAdmin = () => {
     const [bookingSourceFilter, setBookingSourceFilter] = useState('all');
     const [bookingSort, setBookingSort] = useState('latest');
     const [approvingBookingId, setApprovingBookingId] = useState(null);
+    const [assistedBookingOpen, setAssistedBookingOpen] = useState(false);
     const [discountModal, setDiscountModal] = useState({ open: false, data: null });
     const [discountForm, setDiscountForm] = useState({ discount_type: 'fixed', discount_value: 0 });
     const [discountLoading, setDiscountLoading] = useState(false);
@@ -420,7 +447,7 @@ const DashboardAdmin = () => {
     }, [employeeFilters]);
 
     useEffect(() => {
-        if (activeTab === 'users') {
+        if (activeTab === 'accounts' || activeTab === 'system-audit') {
             fetchDeliveryDiagnostics({ silent: true });
         }
     }, [activeTab]);
@@ -574,35 +601,35 @@ const DashboardAdmin = () => {
     };
 
     const refreshCurrentTab = ({ silent = false } = {}) => {
-        if (activeTab === 'users') {
+        if (activeTab === 'accounts') {
             bustAdminCache(ADMIN_EMPLOYEES_URL, ADMIN_CUSTOMERS_URL, adminCustomersUrl('active'), adminCustomersUrl('deactivated'), adminCustomersUrl('all'));
             fetchEmployees({ silent });
             fetchCustomers({ silent });
-        } else if (activeTab === 'configuration') {
+        } else if (activeTab === 'public-content') {
             bustAdminCache('/api/pricing', '/api/menu-items', '/api/packages?per_page=100', '/api/event-types?per_page=100');
             fetchPricingOverrides({ silent });
             fetchCustomMenuItems();
             fetchPackages();
-        } else if (activeTab === 'dashboard') {
+        } else if (activeTab === 'today') {
             bustAdminCache('/api/admin/analytics/summary');
             fetchAnalyticsSummary({ silent });
-        } else if (activeTab === 'analytics') {
+        } else if (activeTab === 'analytics-reports') {
             bustAdminCache('/api/admin/analytics');
             fetchAnalytics({ silent });
-        } else if (activeTab === 'reports') {
             fetchReportBuilder({ silent });
             fetchReportPreview({ silent });
-        } else if (activeTab === 'bookings') {
+        } else if (activeTab === 'bookings-intake') {
             bustAdminCache(ADMIN_BOOKINGS_URL);
             fetchBookings({ silent });
-        } else if (activeTab === 'refunds') {
+        } else if (activeTab === 'finance') {
             bustAdminCache('/api/admin/refunds/queue');
             fetchRefundQueue({ silent });
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides({ silent });
-        } else if (activeTab === 'audits') {
+        } else if (activeTab === 'system-audit') {
             bustAdminCache('/api/admin/audits?per_page=25');
             fetchAudits({ silent });
+            fetchDeliveryDiagnostics({ silent: true });
         }
     };
 
@@ -611,65 +638,60 @@ const DashboardAdmin = () => {
         confirmed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     };
     const pageMeta = {
-        dashboard: {
+        today: {
             eyebrow: 'Daily work',
-            title: 'Overview',
-            description: 'Priority bookings, payments, refunds, and activity that need attention.',
+            title: 'Owner Today',
+            description: 'Priority bookings, finance blockers, account issues, and system activity that need attention.',
         },
-        analytics: {
+        'analytics-reports': {
             eyebrow: 'Business insight',
-            title: 'Analytics',
-            description: 'Understand revenue, bookings, menu demand, and operational workload.',
-        },
-        configuration: {
-            eyebrow: 'Management',
-            title: 'Business Setup',
-            description: 'Maintain packages, event types, pricing, and operating rules.',
-        },
-        reports: {
-            eyebrow: 'Reports',
-            title: 'Report Builder',
-            description: 'Choose the exact information to preview, save, or export.',
+            title: 'Analytics & Reports',
+            description: 'Understand performance, preview reports, and export business-ready summaries.',
         },
         profile: {
             eyebrow: 'Admin profile',
             title: 'My Account',
             description: 'Update your admin contact details and password.',
         },
-        content: {
-            eyebrow: 'Customer communications',
-            title: 'Announcements',
-            description: 'Publish customer announcements, advisories, promos, and email-ready updates.',
+        'public-content': {
+            eyebrow: 'Customer-facing setup',
+            title: 'Public Content',
+            description: 'Manage announcements, packages, event types, menu pricing, and customer-facing previews.',
         },
         availability: {
             eyebrow: 'Calendar control',
-            title: 'Date Availability',
+            title: 'Availability',
             description: 'Close dates or control remaining event slots and guest capacity.',
         },
-        users: {
+        accounts: {
             eyebrow: 'Access control',
             title: 'Account Management',
             description: 'Manage staff access, customer account status, and password recovery actions.',
         },
-        bookings: {
-            eyebrow: 'Daily work',
-            title: 'Bookings',
-            description: 'Approve requests, review payment exposure, and manage adjustments.',
+        'bookings-intake': {
+            eyebrow: 'Marketing override',
+            title: 'Bookings & Intake',
+            description: 'Review, approve, adjust, and create customer bookings without switching accounts.',
         },
-        refunds: {
-            eyebrow: 'Finance control',
-            title: 'Refund Queue',
-            description: 'Process cancelled booking refunds while retaining reservation fees.',
+        finance: {
+            eyebrow: 'Accounting override',
+            title: 'Finance',
+            description: 'Review payment exposure, process refunds, and open finance records from one place.',
         },
-        preparation: {
+        'calendar-handoff': {
             eyebrow: 'Operations handoff',
-            title: 'Event Preparation',
-            description: 'Track readiness and event preparation tasks for upcoming approved bookings.',
+            title: 'Calendar & Handoff',
+            description: 'Track upcoming confirmed events, readiness, and preparation tasks.',
         },
-        audits: {
-            eyebrow: 'Activity history',
-            title: 'Activity Log',
-            description: 'Monitor staff and admin activity across Eloquente operations.',
+        'messages-inquiries': {
+            eyebrow: 'Support desk',
+            title: 'Messages & Inquiries',
+            description: 'Review guest inquiries and route booking-linked communication.',
+        },
+        'system-audit': {
+            eyebrow: 'System control',
+            title: 'System & Audit',
+            description: 'Monitor delivery health, account/session checks, and staff/admin activity.',
         },
         history: {
             eyebrow: 'Shared history',
@@ -679,34 +701,33 @@ const DashboardAdmin = () => {
     };
     const adminNavGroups = [
         {
-            label: 'Daily Work',
+            label: 'Owner Workbench',
             items: [
-                { id: 'dashboard', label: 'Overview' },
-                { id: 'bookings', label: 'Bookings' },
-                { id: 'preparation', label: 'Event Preparation' },
-                { id: 'refunds', label: 'Refund Queue' },
+                { id: 'today', label: 'Today' },
+                { id: 'bookings-intake', label: 'Bookings & Intake' },
+                { id: 'calendar-handoff', label: 'Calendar & Handoff' },
+                { id: 'finance', label: 'Finance' },
+                { id: 'messages-inquiries', label: 'Messages & Inquiries' },
             ],
         },
         {
-            label: 'Business Insight',
+            label: 'Business Control',
             items: [
-                { id: 'analytics', label: 'Analytics' },
-                { id: 'reports', label: 'Reports' },
+                { id: 'public-content', label: 'Public Content' },
+                { id: 'availability', label: 'Availability' },
+                { id: 'accounts', label: 'Accounts' },
             ],
         },
         {
-            label: 'Management',
+            label: 'Insight & Governance',
             items: [
-                { id: 'content', label: 'Announcements' },
-                { id: 'availability', label: 'Date Availability' },
-                { id: 'users', label: 'Accounts' },
-                { id: 'configuration', label: 'Business Setup' },
+                { id: 'analytics-reports', label: 'Analytics & Reports' },
+                { id: 'system-audit', label: 'System & Audit' },
                 { id: 'history', label: 'Event History' },
-                { id: 'audits', label: 'Activity Log' },
             ],
         },
     ];
-    const currentPage = pageMeta[activeTab] || pageMeta.dashboard;
+    const currentPage = pageMeta[activeTab] || pageMeta.today;
     const bookingStats = useMemo(() => {
         const activeBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'confirmed');
         const pendingBookings = bookings.filter((booking) => normalizeStatus(booking.status) === 'pending');
@@ -731,6 +752,35 @@ const DashboardAdmin = () => {
         }, { count: 0, paid: 0, fees: 0, refundable: 0 });
     }, [refundQueue]);
 
+    const financeStats = useMemo(() => {
+        return bookings.reduce((stats, booking) => {
+            const bookingTotal = getBookingTotal(booking);
+            const payments = Array.isArray(booking.payments) ? booking.payments : [];
+            const paid = payments.reduce((sum, payment) => {
+                const status = String(payment.status || '').toLowerCase();
+                return ['paid', 'verified'].includes(status) ? sum + Number(payment.amount || 0) : sum;
+            }, 0);
+
+            stats.totalExposure += bookingTotal;
+            stats.paid += paid;
+            stats.remaining += Math.max(bookingTotal - paid, 0);
+            stats.pendingPayments += payments.filter(payment => ['pending', 'submitted', 'for review'].includes(String(payment.status || '').toLowerCase())).length;
+            stats.overdue += payments.filter(payment => String(payment.status || '').toLowerCase() === 'overdue').length;
+            return stats;
+        }, { totalExposure: 0, paid: 0, remaining: 0, pendingPayments: 0, overdue: 0 });
+    }, [bookings]);
+
+    const upcomingConfirmedEvents = useMemo(() => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        return bookings
+            .filter((booking) => normalizeStatus(booking.status) === 'confirmed' && booking.event_date)
+            .filter((booking) => new Date(booking.event_date) >= today)
+            .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
+            .slice(0, 6);
+    }, [bookings]);
+
     const adminNextActions = useMemo(() => {
         const failedAudits = audits.filter((audit) => Number(audit.status_code || 0) >= 400).length;
         const blockedStaff = employees.filter((employee) => employee.account_status === 'deactivated' || employee.must_change_password).length;
@@ -745,7 +795,7 @@ const DashboardAdmin = () => {
                 badge: bookingStats.pending,
                 primaryLabel: 'Open',
                 tone: bookingStats.pending > 0 ? 'warn' : 'good',
-                onOpen: () => setActiveTab('bookings'),
+                onOpen: () => setActiveTab('bookings-intake'),
             },
             {
                 id: 'refund-oversight',
@@ -755,7 +805,7 @@ const DashboardAdmin = () => {
                 badge: refundQueue.length,
                 primaryLabel: 'Open',
                 tone: refundQueue.length > 0 ? 'danger' : 'good',
-                onOpen: () => setActiveTab('refunds'),
+                onOpen: () => setActiveTab('finance'),
             },
             {
                 id: 'people-accounts',
@@ -765,7 +815,7 @@ const DashboardAdmin = () => {
                 badge: blockedStaff,
                 primaryLabel: 'Open',
                 tone: blockedStaff > 0 ? 'warn' : 'good',
-                onOpen: () => setActiveTab('users'),
+                onOpen: () => setActiveTab('accounts'),
             },
             {
                 id: 'system-activity',
@@ -775,7 +825,7 @@ const DashboardAdmin = () => {
                 badge: failedAudits,
                 primaryLabel: 'Open',
                 tone: failedAudits > 0 ? 'danger' : 'good',
-                onOpen: () => setActiveTab('audits'),
+                onOpen: () => setActiveTab('system-audit'),
             },
             {
                 id: 'operational-alerts',
@@ -785,7 +835,7 @@ const DashboardAdmin = () => {
                 badge: topAlertCount,
                 primaryLabel: 'Review',
                 tone: topAlertCount > 0 ? 'warn' : 'good',
-                onOpen: () => setActiveTab('dashboard'),
+                onOpen: () => setActiveTab('today'),
             },
         ];
     }, [audits, bookingStats.pending, employees, refundQueue.length, visibleOperationalAlerts]);
@@ -979,37 +1029,36 @@ const DashboardAdmin = () => {
     );
 
     useEffect(() => {
-        if (activeTab === 'users') {
+        if (activeTab === 'accounts') {
             fetchEmployees();
             fetchCustomers();
-        } else if (activeTab === 'configuration') {
+        } else if (activeTab === 'public-content') {
             fetchPricingOverrides();
             fetchCustomMenuItems();
             fetchPackages();
-        } else if (activeTab === 'dashboard') {
+        } else if (activeTab === 'today') {
             fetchAnalyticsSummary();
-        } else if (activeTab === 'analytics') {
-            if (activeTab === 'analytics' && (!packages.length || !eventTypes.length)) {
-                fetchPackages();
-            }
+        } else if (activeTab === 'analytics-reports') {
+            if (!packages.length || !eventTypes.length) fetchPackages();
             fetchAnalytics();
-        } else if (activeTab === 'reports') {
             fetchReportBuilder();
             fetchReportPreview();
-        } else if (activeTab === 'bookings') {
+        } else if (activeTab === 'bookings-intake') {
             fetchBookings();
-        } else if (activeTab === 'refunds') {
+        } else if (activeTab === 'finance') {
+            fetchBookings();
             fetchRefundQueue();
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides();
-        } else if (activeTab === 'audits') {
+        } else if (activeTab === 'system-audit') {
             fetchAudits();
+            fetchDeliveryDiagnostics({ silent: true });
         }
     }, [activeTab, availabilityMonth, customerStatusFilter, employeeFilters, customerFilters]);
 
     useSmartRefresh({
-        enabled: ['dashboard', 'analytics', 'reports', 'bookings', 'preparation', 'refunds', 'users', 'configuration', 'availability', 'audits'].includes(activeTab),
-        interval: activeTab === 'dashboard' || activeTab === 'analytics' ? 120000 : 90000,
+        enabled: ['today', 'analytics-reports', 'bookings-intake', 'calendar-handoff', 'finance', 'accounts', 'public-content', 'availability', 'system-audit'].includes(activeTab),
+        interval: activeTab === 'today' || activeTab === 'analytics-reports' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: refreshCurrentTab,
     });
@@ -1841,7 +1890,7 @@ const DashboardAdmin = () => {
                 value: formatCurrency(analyticsSummary.totalRevenue || 0),
                 context: `Collected ${formatCurrency(analyticsSummary.settledRevenue || 0)} with ${formatCurrency(analyticsSummary.pendingRevenue || 0)} still pending.`,
                 action: 'Review payments',
-                onClick: () => setActiveTab('refunds'),
+                onClick: () => setActiveTab('finance'),
             },
             {
                 key: 'pipeline',
@@ -1849,7 +1898,7 @@ const DashboardAdmin = () => {
                 value: analyticsSummary.activeBookings || 0,
                 context: `${analyticsSummary.pendingBookings || 0} booking requests still need attention.`,
                 action: 'Open bookings',
-                onClick: () => setActiveTab('bookings'),
+                onClick: () => setActiveTab('bookings-intake'),
             },
             {
                 key: 'payments',
@@ -1857,7 +1906,7 @@ const DashboardAdmin = () => {
                 value: `${analyticsSummary.collectionRate || 0}%`,
                 context: 'Collection rate based on verified and pending payment records.',
                 action: 'View finance',
-                onClick: () => setActiveTab('refunds'),
+                onClick: () => setActiveTab('finance'),
             },
             {
                 key: 'demand',
@@ -1988,7 +2037,7 @@ const DashboardAdmin = () => {
                                 <div key={`${alert.label}-${index}`} className="rounded-xl border border-amber-100 bg-[#fffaf3] p-4">
                                     <p className="text-sm font-black text-gray-950">{alert.label || alert.title}</p>
                                     <p className="mt-1 text-sm font-semibold text-gray-500">{alert.detail || alert.message || 'Review this item before the next operations update.'}</p>
-                                    <button onClick={() => alert.label?.toLowerCase().includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-[#720101]">Open queue</button>
+                                    <button onClick={() => alert.label?.toLowerCase().includes('payment') ? setActiveTab('finance') : setActiveTab('bookings-intake')} className="mt-3 text-xs font-black uppercase tracking-widest text-[#720101]">Open queue</button>
                                 </div>
                             ))}
                             {!topAlerts.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No priority alerts for this timeframe.</div>}
@@ -2080,6 +2129,17 @@ const DashboardAdmin = () => {
             showToast(getErrorMessage(error, "Could not load bookings"), 'error');
         } finally {
             if (!silent) setBookingsLoading(false);
+        }
+    };
+
+    const handleAssistedBookingCreated = (booking) => {
+        setAssistedBookingOpen(false);
+        showToast('Admin-assisted booking created.');
+        bustAdminCache(ADMIN_BOOKINGS_URL, '/api/admin/analytics/summary', '/api/admin/analytics');
+        fetchBookings({ silent: true });
+        fetchAnalyticsSummary({ silent: true });
+        if (booking) {
+            setEventDetailsModal({ open: true, data: booking });
         }
     };
 
@@ -2616,16 +2676,16 @@ const DashboardAdmin = () => {
         </div>
     );
 
-    if (analyticsLoading && activeTab === 'dashboard' && !analytics?.summary) {
+    if (analyticsLoading && activeTab === 'today' && !analytics?.summary) {
         return (
             <StaffWorkspaceSkeleton
                 title="Admin Console"
                 roleLabel="Owner operations"
                 label="Preparing admin console"
                 navGroups={[
-                    { label: 'Daily Work', items: ['Overview', 'Bookings', 'Event Preparation', 'Refund Queue'] },
-                    { label: 'Business Insight', items: ['Analytics', 'Reports'] },
-                    { label: 'Management', items: ['Announcements', 'Date Availability', 'Accounts', 'Business Setup', 'Event History', 'Activity Log'] },
+                    { label: 'Owner Workbench', items: ['Today', 'Bookings & Intake', 'Calendar & Handoff', 'Finance', 'Messages & Inquiries'] },
+                    { label: 'Business Control', items: ['Public Content', 'Availability', 'Accounts'] },
+                    { label: 'Insight & Governance', items: ['Analytics & Reports', 'System & Audit', 'Event History'] },
                 ]}
             />
         );
@@ -2654,7 +2714,7 @@ const DashboardAdmin = () => {
                 />
 
                 <div className="space-y-5">
-                    {activeTab === 'dashboard' && (
+                    {activeTab === 'today' && (
                         <div className="animate-fadeIn">
                             <div className="space-y-6">
                                 <section className="admin-panel overflow-hidden">
@@ -2665,6 +2725,9 @@ const DashboardAdmin = () => {
                                             <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-gray-500">A focused view of bookings, collections, refunds, and activity that may need staff action.</p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
+                                            <button onClick={() => setAssistedBookingOpen(true)} className="admin-button-primary inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-black">
+                                                Create assisted booking
+                                            </button>
                                             {renderDashboardFilterButton('dashboardSnapshot', businessSnapshot.label || 'Timeframe')}
                                             <button onClick={() => fetchAnalytics()} disabled={analyticsLoading} className="admin-button-primary inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-black">
                                                 <RefreshCw className={`h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
@@ -2787,7 +2850,7 @@ const DashboardAdmin = () => {
                                                         <p className="text-sm font-black text-gray-900">{alert.label}</p>
                                                         <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-gray-950 shadow-sm">{alert.count}</span>
                                                     </div>
-                                                    <button onClick={() => alert.label.includes('payment') ? setActiveTab('refunds') : setActiveTab('bookings')} className="mt-3 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-gray-900">Open queue</button>
+                                                    <button onClick={() => alert.label.includes('payment') ? setActiveTab('finance') : setActiveTab('bookings-intake')} className="mt-3 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-gray-900">Open queue</button>
                                                 </div>
                                             ))}
                                             {!visibleOperationalAlerts.length && <div className="rounded-xl bg-gray-50 p-6 text-sm font-bold text-gray-400">No alerts match this severity.</div>}
@@ -3139,7 +3202,7 @@ const DashboardAdmin = () => {
                             </div>
                         </div>
                     )}
-                    {activeTab === 'analytics' && (
+                    {activeTab === 'analytics-reports' && (
                         <>
                         {renderAnalyticsWorkbench()}
                         <div className="hidden">
@@ -3542,7 +3605,7 @@ const DashboardAdmin = () => {
                         </div>
                         </>
                     )}
-                    {activeTab === 'configuration' && (
+                    {activeTab === 'public-content' && (
                         <div className="animate-fadeIn">
                             <div className="mb-5 rounded-2xl border border-[#720101]/10 bg-white p-4 shadow-sm">
                                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -3924,7 +3987,7 @@ const DashboardAdmin = () => {
                         </div>
                     )}
                     {
-                        activeTab === 'reports' && (
+                        activeTab === 'analytics-reports' && (
                             <div className="animate-fadeIn admin-report-page">
                                 <section className="admin-report-setup admin-report-setup-compact">
                                     <div className="admin-report-setup-summary">
@@ -4236,7 +4299,21 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
-                    {activeTab === 'content' && (
+                    {activeTab === 'messages-inquiries' && (
+                        <div className="animate-fadeIn space-y-5">
+                            <div className="rounded-2xl border border-[#720101]/10 bg-white p-5 shadow-sm">
+                                <p className="admin-kicker">Support override</p>
+                                <h3 className="mt-1 text-xl font-black text-gray-950">Messages and guest inquiries</h3>
+                                <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">
+                                    Admin can monitor staff chat conversations here. Booking-specific questions can still be opened from the event drawer.
+                                </p>
+                            </div>
+                            <Suspense fallback={<StaffSkeleton variant="panel" rows={6} label="Loading message desk" />}>
+                                <StaffMessaging />
+                            </Suspense>
+                        </div>
+                    )}
+                    {activeTab === 'public-content' && (
                         <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading content tools" />}>
                             <AnnouncementManager variant="admin" user={user} />
                         </Suspense>
@@ -4462,7 +4539,7 @@ const DashboardAdmin = () => {
                         </div>
                     )}
                     {
-                        activeTab === 'users' && (
+                        activeTab === 'accounts' && (
                             <div className="animate-fadeIn">
                                 <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-[#720101]/10 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
                                     <div>
@@ -4496,7 +4573,7 @@ const DashboardAdmin = () => {
                                             <p className="text-sm font-black text-amber-950">Account emails are available as a fallback, and temporary passwords can be shown again until they expire or are changed.</p>
                                             <p className="mt-1 text-xs font-bold text-amber-800">If a password email does not arrive, use Show temporary password or check delivery settings in Business Setup.</p>
                                         </div>
-                                        <button type="button" onClick={() => setActiveTab('configuration')} className="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs font-black text-amber-900 hover:bg-amber-100">
+                                        <button type="button" onClick={() => setActiveTab('public-content')} className="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs font-black text-amber-900 hover:bg-amber-100">
                                             Open delivery settings
                                         </button>
                                     </div>
@@ -4762,9 +4839,16 @@ const DashboardAdmin = () => {
                         )
                     }
                     {
-                        activeTab === 'bookings' && (
+                        activeTab === 'bookings-intake' && (
                             <div className="animate-fadeIn">
-                                <div className="mb-6 flex justify-end">
+                                <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-900">
+                                        <span className="font-black uppercase tracking-widest">Admin override</span>
+                                        <p className="mt-1">Create assisted bookings, approve requests, and review booking adjustments from the owner console.</p>
+                                    </div>
+                                    <button type="button" onClick={() => setAssistedBookingOpen(true)} className="admin-button-primary inline-flex items-center justify-center px-5 py-3 text-sm font-black">
+                                        Create booking for customer
+                                    </button>
                                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                                         {[
                                             { label: 'Current', value: bookingStats.total },
@@ -4930,17 +5014,80 @@ const DashboardAdmin = () => {
                             </div>
                         )
                     }
-                    {activeTab === 'preparation' && (
-                        <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading preparation board" />}>
-                            <PreparationBoard />
-                        </Suspense>
+                    {activeTab === 'calendar-handoff' && (
+                        <div className="animate-fadeIn space-y-5">
+                            <div className="rounded-2xl border border-[#720101]/10 bg-white p-5 shadow-sm">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                    <div>
+                                        <p className="admin-kicker">Calendar and readiness</p>
+                                        <h3 className="mt-1 text-xl font-black text-gray-950">Upcoming confirmed events</h3>
+                                        <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">
+                                            Open any event for owner-level context, then use the handoff board below to check readiness work.
+                                        </p>
+                                    </div>
+                                    <button type="button" onClick={() => setActiveTab('availability')} className="admin-button-secondary px-4 py-2 text-sm font-bold">
+                                        Manage availability
+                                    </button>
+                                </div>
+                                <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-3">
+                                    {upcomingConfirmedEvents.map((booking) => (
+                                        <button
+                                            type="button"
+                                            key={booking.id}
+                                            onClick={() => setEventDetailsModal({ open: true, data: booking })}
+                                            className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition hover:border-[#720101]/20 hover:bg-[#fff7e8]"
+                                        >
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-[#9f6500]">{formatBookingRef(booking.id)}</span>
+                                            <strong className="mt-1 block text-sm font-black text-slate-950">{eventDisplayName(booking)}</strong>
+                                            <span className="mt-1 block text-xs font-semibold text-slate-500">{formatDate(booking.event_date)} / {formatTime(booking.event_time)} / {booking.pax || 0} guests</span>
+                                        </button>
+                                    ))}
+                                    {!upcomingConfirmedEvents.length && (
+                                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-500 xl:col-span-3">
+                                            No upcoming confirmed events are waiting in the Admin calendar view.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading handoff board" />}>
+                                <PreparationBoard />
+                            </Suspense>
+                        </div>
                     )}
                     {activeTab === 'history' && (
                         <EventHistoryPanel role="admin" onToast={showToast} />
                     )}
                     {
-                        activeTab === 'refunds' && (
+                        activeTab === 'finance' && (
                             <div className="animate-fadeIn space-y-5">
+                                <div className="rounded-2xl border border-[#720101]/10 bg-white p-5 shadow-sm">
+                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                        <div>
+                                            <p className="admin-kicker">Accounting override</p>
+                                            <h3 className="mt-1 text-xl font-black text-gray-950">Finance action desk</h3>
+                                            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">
+                                                Review payment exposure here, then open a booking row for payment schedules, term edits, receipts, and refund context.
+                                            </p>
+                                        </div>
+                                        <button type="button" onClick={() => setActiveTab('analytics-reports')} className="admin-button-secondary px-4 py-2 text-sm font-bold">
+                                            Open finance reports
+                                        </button>
+                                    </div>
+                                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
+                                        {[
+                                            { label: 'Expected', value: formatCurrency(financeStats.totalExposure) },
+                                            { label: 'Collected', value: formatCurrency(financeStats.paid) },
+                                            { label: 'Remaining', value: formatCurrency(financeStats.remaining) },
+                                            { label: 'Pending proofs', value: financeStats.pendingPayments },
+                                            { label: 'Overdue terms', value: financeStats.overdue },
+                                        ].map((stat) => (
+                                            <div key={stat.label} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                                                <p className="mt-1 text-lg font-black text-gray-950">{stat.value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                                     {[
                                         { label: 'Queued Cases', value: refundStats.count },
@@ -5037,7 +5184,7 @@ const DashboardAdmin = () => {
                         )
                     }
                     {
-                        activeTab === 'audits' && (
+                        activeTab === 'system-audit' && (
                             <div className="animate-fadeIn space-y-5">
                                 <div className="flex justify-end">
                                     <button onClick={() => { bustAdminCache('/api/admin/audits?per_page=25'); fetchAudits(); }} className="admin-button-secondary px-4 py-2 text-sm font-bold">
@@ -5705,6 +5852,14 @@ const DashboardAdmin = () => {
                     </div>
                 </div>
             )}
+
+            <AssistedBookingWizard
+                isOpen={assistedBookingOpen}
+                onClose={() => setAssistedBookingOpen(false)}
+                onCreated={handleAssistedBookingCreated}
+                onOpenBooking={(booking) => setEventDetailsModal({ open: true, data: booking })}
+                toast={showToast}
+            />
 
             {/* Toast */}
             {
