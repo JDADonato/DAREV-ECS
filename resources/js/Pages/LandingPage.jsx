@@ -703,9 +703,9 @@ const LandingPage = () => {
                 <div className="absolute inset-0 bg-gradient-to-r from-[#15110f] via-[#15110f]/88 to-[#720101]/42"/>
                 <div className="relative z-10 w-full max-w-7xl mx-auto grid gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[1.05fr_0.72fr] lg:items-end">
                     <div className="text-center lg:text-left">
-                        <p className="mb-5 text-xs font-black uppercase tracking-[0.24em] text-[#f0aa0b]" style={{opacity:0,animation:'fadeUp .6s .25s forwards'}}>Eloquente Catering Services</p>
+                        <p className="mb-5 text-sm font-black uppercase tracking-[0.24em] text-[#f0aa0b] md:text-base" style={{opacity:0,animation:'fadeUp .6s .25s forwards'}}>Eloquente Catering Services</p>
                         <h1 className="font-display text-white leading-[1.08] mb-5" style={{fontSize:'clamp(2.6rem,6vw,5.75rem)',opacity:0,animation:'fadeUp .7s .4s forwards'}}>
-                            Catering that makes the whole event feel considered.
+                            Where great food speaks for itself
                         </h1>
                         <p className="hidden">
                             Premium catering for weddings, corporate events, and private celebrations - crafted with precision, served with heart.

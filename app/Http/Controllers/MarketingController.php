@@ -193,6 +193,14 @@ class MarketingController extends Controller
         if (!$updated) {
             $booking->refresh()->load('assignee:id,full_name,username');
 
+            if ((int) $booking->assigned_to === (int) Auth::id()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Booking is already assigned to you.',
+                    'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
+                ]);
+            }
+
             return response()->json([
                 'error' => 'This booking was already claimed by ' . ($booking->assignee?->full_name ?: ($booking->assignee->username ?? 'another staff member')) . '.',
                 'booking' => new BookingSummaryResource($booking->fresh(['user', 'assignee', 'transferRequestedTo', 'transferRequestedBy', 'reviewTasks', 'preparationTasks', 'historyNotes'])),
@@ -513,6 +521,7 @@ class MarketingController extends Controller
     private function ensureCanMutateBooking(Booking $booking)
     {
         $user = Auth::user();
+        $booking->refresh();
 
         if (!$user || !in_array($user->role, ['Marketing', 'Admin'], true)) {
             return response()->json(['error' => 'Only Marketing or Admin can update bookings.'], 403);

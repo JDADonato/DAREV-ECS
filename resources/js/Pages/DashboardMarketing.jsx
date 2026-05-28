@@ -169,6 +169,7 @@ const DashboardMarketing = () => {
     const [editingPackageId, setEditingPackageId] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [updatingBookingIds, setUpdatingBookingIds] = useState({});
+    const [claimingBookingIds, setClaimingBookingIds] = useState({});
     const [inquirySearch, setInquirySearch] = useState('');
     const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
     const [bookingReviewView, setBookingReviewView] = useState('needs-action');
@@ -528,10 +529,13 @@ const DashboardMarketing = () => {
     const mergeUpdatedBooking = (updatedBooking) => {
         if (!updatedBooking?.id) return;
         setBookings(prev => prev.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item));
+        setCalendarBookings(prev => prev.map(item => item.id === updatedBooking.id ? { ...item, ...updatedBooking } : item));
         setSelectedBooking(prev => prev?.id === updatedBooking.id ? { ...prev, ...updatedBooking } : prev);
     };
 
     const assignBooking = async (id) => {
+        if (claimingBookingIds[id]) return;
+        setClaimingBookingIds(prev => ({ ...prev, [id]: true }));
         try {
             const response = await csrfFetch(`/api/marketing/bookings/${id}/claim`, {
                 method: 'POST',
@@ -539,10 +543,12 @@ const DashboardMarketing = () => {
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Claim failed');
             mergeUpdatedBooking(data.booking);
-            toast.success('Booking claimed.');
+            toast.success(data.message || 'Booking claimed.');
         } catch (error) {
             console.error(error);
             toast.error(error.message || 'We could not claim this booking right now.');
+        } finally {
+            setClaimingBookingIds(prev => { const next = { ...prev }; delete next[id]; return next; });
         }
     };
 
@@ -1239,7 +1245,8 @@ const DashboardMarketing = () => {
         const reviewStatus = selectedBooking.review_status || (selectedBooking.status === 'Pending' ? 'Submitted' : selectedBooking.status);
         const reviewStatusInfo = reviewStatusLabel(reviewStatus);
         const canEdit = canEditBooking(selectedBooking);
-        const canClaim = canClaimBooking(selectedBooking);
+        const isClaiming = Boolean(claimingBookingIds[selectedBooking.id]);
+        const canClaim = canClaimBooking(selectedBooking) && !isClaiming;
         const pendingTransferToMe = Boolean(selectedBooking.can_accept_transfer);
         const hasPendingTransfer = Boolean(selectedBooking.transfer_requested_to);
 
@@ -1264,9 +1271,13 @@ const DashboardMarketing = () => {
                                 </button>
                             </>
                         )}
-                        {canClaim && (
-                            <button onClick={() => assignBooking(selectedBooking.id)} className="rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5">
-                                Claim booking
+                        {(canClaim || isClaiming) && (
+                            <button
+                                disabled={isClaiming}
+                                onClick={() => assignBooking(selectedBooking.id)}
+                                className={`rounded-lg border border-[#720101]/15 bg-white px-3 py-2 text-xs font-black text-[#720101] hover:bg-[#720101]/5${isClaiming ? ' cursor-not-allowed opacity-60' : ''}`}
+                            >
+                                {isClaiming ? 'Claiming...' : 'Claim booking'}
                             </button>
                         )}
                         {selectedBooking.assigned_to && (canEdit || user?.role === 'Admin') && (
@@ -1842,8 +1853,9 @@ const DashboardMarketing = () => {
                         <ul className="divide-y divide-amber-100/70">
                             {pendingBookings.length === 0 ? <li className="p-8 text-gray-500 text-center">No bookings match this view.</li> : null}
                             {pagedPendingBookings.map(booking => {
+                                const isClaiming = Boolean(claimingBookingIds[booking.id]);
                                 const canEdit = canEditBooking(booking);
-                                const canClaim = canClaimBooking(booking);
+                                const canClaim = canClaimBooking(booking) && !isClaiming;
                                 const pendingTransferToMe = Boolean(booking.can_accept_transfer);
                                 const hasPendingTransfer = Boolean(booking.transfer_requested_to);
                                 const isClaimQueue = bookingReviewView === 'claim';
@@ -1886,12 +1898,13 @@ const DashboardMarketing = () => {
                                                 </p>
                                             </div>
                                             <div className="mt-4 flex items-center text-sm sm:mt-0 space-x-3">
-                                                        {canClaim && (
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
-                                                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#720101]/15 bg-white px-4 py-1.5 font-bold text-[#720101] transition-colors hover:bg-[#720101]/5"
+                                                {(canClaim || isClaiming) && (
+                                                    <button
+                                                        disabled={isClaiming}
+                                                        onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
+                                                        className={`inline-flex items-center gap-1.5 rounded-lg border border-[#720101]/15 bg-white px-4 py-1.5 font-bold text-[#720101] transition-colors hover:bg-[#720101]/5${isClaiming ? ' cursor-not-allowed opacity-60' : ''}`}
                                                     >
-                                                        Claim booking
+                                                        {isClaiming ? 'Claiming...' : 'Claim booking'}
                                                     </button>
                                                 )}
                                                 {pendingTransferToMe && (
