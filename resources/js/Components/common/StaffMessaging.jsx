@@ -4,6 +4,7 @@ import useSmartRefresh from '../../hooks/useSmartRefresh';
 import ConfirmModal from './ConfirmModal';
 import ErrorModal from './ErrorModal';
 import StaffSkeleton from '../staff/StaffSkeleton';
+import csrfFetch from '../../utils/csrf';
 
 /**
  * Phase 2: Staff Messaging — WebSocket-powered Ticket/Claiming System.
@@ -42,6 +43,9 @@ const StaffMessaging = () => {
     const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
     const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false);
     const [errorModal, setErrorModal] = useState({ isOpen: false, message: '' });
+    const [editingMessageId, setEditingMessageId] = useState(null);
+    const [editingText, setEditingText] = useState('');
+    const [openActionMessageId, setOpenActionMessageId] = useState(null);
     const messagesEndRef = useRef(null);
     const shouldScrollToBottomRef = useRef(false);
     const echoChannelsRef = useRef({});
@@ -190,7 +194,7 @@ const StaffMessaging = () => {
         if (!selectedConv || claiming) return;
         setClaiming(true);
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/claim`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/claim`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             });
@@ -218,7 +222,7 @@ const StaffMessaging = () => {
     const confirmResolve = async () => {
         if (!selectedConv) return;
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/resolve`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/resolve`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             });
@@ -246,7 +250,7 @@ const StaffMessaging = () => {
         if (!selectedConv || transferring) return;
         setTransferring(true);
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/transfer-owner`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/transfer-owner`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ new_staff_id: staffId })
@@ -271,7 +275,7 @@ const StaffMessaging = () => {
         if (!selectedConv || transferring) return;
         setTransferring(true);
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/collaborators`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/collaborators`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ user_id: staffId })
@@ -290,7 +294,7 @@ const StaffMessaging = () => {
     const handleLeave = async () => {
         if (!selectedConv || !user?.id) return;
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/collaborators/${user.id}`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/collaborators/${user.id}`, {
                 method: 'DELETE',
                 headers: { 'Accept': 'application/json' },
             });
@@ -309,7 +313,7 @@ const StaffMessaging = () => {
         if (!newMessage.trim() || sending || !selectedConv) return;
         setSending(true);
         try {
-            const res = await fetch(`/api/chat/conversations/${selectedConv.id}/messages`, {
+            const res = await csrfFetch(`/api/chat/conversations/${selectedConv.id}/messages`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ message: newMessage.trim() }),
@@ -327,22 +331,108 @@ const StaffMessaging = () => {
 
     // ─── Booking Card Rendering (preserved from original) ───
 
-    const isBookingCard = (text) => text && text.startsWith('📋 BOOKING DETAILS');
+    const parseBookingCard = (text) => {
+        if (!text) return null;
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed?.type === 'booking_details' && parsed.booking) return parsed.booking;
+        } catch (e) {
+            // Legacy text cards still render.
+        }
+        if (!text.startsWith('📋 BOOKING DETAILS')) return null;
+        const lines = text.split('\n').filter(l => l.trim() && !l.includes('━'));
+        return {
+            title: lines[3]?.replace(/^.*Event:\s*/, '') || 'Booking details',
+            date: lines[1]?.replace(/^.*Date:\s*/, '') || 'TBD',
+            time: lines[2]?.replace(/^.*Time:\s*/, '') || 'TBD',
+            pax: lines[4]?.replace(/^.*Guests:\s*/, '') || 'TBD',
+            venue: lines[5]?.replace(/^.*Venue:\s*/, '') || 'TBD',
+            total: Number(String(lines[6] || '').replace(/[^\d.]/g, '')) || 0,
+            status: lines[7]?.replace(/^.*Status:\s*/, '') || 'Shared',
+        };
+    };
+
+    const isBookingCard = (text) => Boolean(parseBookingCard(text));
 
     const renderBookingCard = (text, isMine) => {
-        const lines = text.split('\n').filter(l => l.trim() && !l.includes('━'));
+        const booking = parseBookingCard(text);
         return (
-            <div className={`rounded-xl overflow-hidden border ${isMine ? 'border-white/20' : 'border-gray-200'}`}>
-                <div className={`px-3 py-2 text-xs font-bold ${isMine ? 'bg-white/10 text-white' : 'bg-primary-50 text-primary-700'}`}>
-                    {lines[0]}
+            <div className={`overflow-hidden rounded-2xl border ${isMine ? 'border-white/20 bg-white/10' : 'border-amber-100 bg-white shadow-sm'}`}>
+                <div className={`px-4 py-3 ${isMine ? 'bg-white/10 text-white' : 'bg-[#fff7e8] text-[#720101]'}`}>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Booking details</p>
+                    <p className="mt-1 text-sm font-black">{booking.title || booking.event_type || 'Eloquente event'}</p>
                 </div>
-                <div className={`px-3 py-2 space-y-1 text-xs ${isMine ? 'bg-white/5' : 'bg-white'}`}>
-                    {lines.slice(1).map((line, i) => (
-                        <p key={i} className={`leading-relaxed ${isMine ? 'text-white/90' : 'text-gray-700'}`}>{line}</p>
-                    ))}
+                <div className={`grid grid-cols-2 gap-2 px-4 py-3 text-xs ${isMine ? 'text-white/85' : 'text-slate-600'}`}>
+                    <p><span className="block font-black uppercase opacity-60">Date</span>{booking.date || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Time</span>{booking.time || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Guests</span>{booking.pax || 'TBD'}{Number(booking.pax) ? ' pax' : ''}</p>
+                    <p><span className="block font-black uppercase opacity-60">Venue</span>{booking.venue || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Total</span>PHP {Number(booking.total || 0).toLocaleString()}</p>
+                    <p><span className="block font-black uppercase opacity-60">Status</span>{booking.status || 'Shared'}</p>
                 </div>
             </div>
         );
+    };
+
+    const canEditMessage = (msg) => {
+        if (!msg?.is_mine || msg.deleted_at || isBookingCard(msg.message)) return false;
+        return Date.now() - new Date(msg.created_at || 0).getTime() <= 15 * 60 * 1000;
+    };
+
+    const canDeleteMessage = (msg) => {
+        if (!msg || msg.deleted_at) return false;
+        const ownRecent = msg.is_mine && Date.now() - new Date(msg.created_at || 0).getTime() <= 15 * 60 * 1000;
+        return ownRecent || user?.role === 'Admin' || (user?.role === 'Marketing' && selectedConv?.staff_id === user?.id);
+    };
+
+    const startEditMessage = (msg) => {
+        setOpenActionMessageId(null);
+        setEditingMessageId(msg.id);
+        setEditingText(msg.message);
+    };
+
+    const cancelEditMessage = () => {
+        setOpenActionMessageId(null);
+        setEditingMessageId(null);
+        setEditingText('');
+    };
+
+    const saveEditedMessage = async (msg) => {
+        if (!editingText.trim()) return;
+        try {
+            const res = await csrfFetch(`/api/chat/messages/${msg.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: editingText.trim() }),
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(payload.error || 'Could not edit message.');
+            setMessages(prev => prev.map(item => item.id === msg.id ? payload : item));
+            cancelEditMessage();
+            fetchConversations();
+        } catch (e) {
+            setErrorModal({ isOpen: true, message: e.message || 'Could not edit message.' });
+        }
+    };
+
+    const deleteMessage = async (msg) => {
+        setOpenActionMessageId(null);
+        const reason = msg.is_mine ? '' : window.prompt('Reason for moderation delete?') || '';
+        if (!msg.is_mine && !reason.trim()) return;
+        if (msg.is_mine && !window.confirm('Delete this message?')) return;
+        try {
+            const res = await csrfFetch(`/api/chat/messages/${msg.id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason }),
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(payload.error || 'Could not delete message.');
+            setMessages(prev => prev.map(item => item.id === msg.id ? payload.data : item));
+            fetchConversations();
+        } catch (e) {
+            setErrorModal({ isOpen: true, message: e.message || 'Could not delete message.' });
+        }
     };
 
     // ─── Sidebar Helpers ───
@@ -526,15 +616,53 @@ const StaffMessaging = () => {
                                     </div>
                                 ) : (
                                     messages.map(msg => (
-                                        <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[60%] rounded-2xl px-4 py-2.5 ${msg.is_mine ? 'bg-primary-600 text-white rounded-br-md' : 'bg-white text-gray-800 rounded-bl-md shadow-sm border border-gray-100'}`}>
+                                        <div key={msg.id} className={`group flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
+                                            <div className={`relative max-w-[60%] rounded-2xl px-4 py-2.5 ${msg.is_mine ? 'bg-primary-600 text-white rounded-br-md' : 'bg-white text-gray-800 rounded-bl-md shadow-sm border border-gray-100'}`}>
                                                 {!msg.is_mine && <p className="text-[10px] font-bold text-primary-600 mb-0.5">{msg.sender_name}</p>}
-                                                {isBookingCard(msg.message) ? renderBookingCard(msg.message, msg.is_mine) : (
+                                                {editingMessageId === msg.id ? (
+                                                    <div className="space-y-2">
+                                                        <textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} rows={3} className="w-72 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none" />
+                                                        <div className="flex justify-end gap-2">
+                                                            <button type="button" onClick={cancelEditMessage} className={`text-[11px] font-black ${msg.is_mine ? 'text-white/70' : 'text-slate-500'}`}>Cancel</button>
+                                                            <button type="button" onClick={() => saveEditedMessage(msg)} className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-primary-700 shadow-sm">Save</button>
+                                                        </div>
+                                                    </div>
+                                                ) : isBookingCard(msg.message) ? renderBookingCard(msg.message, msg.is_mine) : (
                                                     <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.message}</p>
                                                 )}
                                                 <p className={`text-[10px] mt-1 ${msg.is_mine ? 'text-white/50' : 'text-gray-400'}`}>
-                                                    {msg.time}{msg.is_mine && msg.read_at && ' • Read'}
+                                                    {msg.time}{msg.edited_at && !msg.deleted_at ? ' / edited' : ''}{msg.is_mine && msg.read_at && ' / Read'}
                                                 </p>
+                                                {(canEditMessage(msg) || canDeleteMessage(msg)) && editingMessageId !== msg.id && (
+                                                    <div className={`absolute top-2 z-30 ${msg.is_mine ? '-left-10' : '-right-10'} ${openActionMessageId === msg.id ? 'block' : 'hidden group-hover:block group-focus-within:block'}`}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                setOpenActionMessageId(openActionMessageId === msg.id ? null : msg.id);
+                                                            }}
+                                                            className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-black leading-none text-slate-600 shadow-md shadow-slate-950/10 transition hover:border-primary-300 hover:text-primary-700"
+                                                            aria-label="Message actions"
+                                                            aria-expanded={openActionMessageId === msg.id}
+                                                        >
+                                                            ...
+                                                        </button>
+                                                        {openActionMessageId === msg.id && (
+                                                            <div className={`absolute top-9 min-w-[8.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl shadow-slate-950/15 ${msg.is_mine ? 'right-0' : 'left-0'}`}>
+                                                                {canEditMessage(msg) && (
+                                                                    <button type="button" onClick={() => startEditMessage(msg)} className="block w-full px-3 py-2 text-left text-xs font-black text-slate-700 transition hover:bg-slate-50">
+                                                                        Edit message
+                                                                    </button>
+                                                                )}
+                                                                {canDeleteMessage(msg) && (
+                                                                    <button type="button" onClick={() => deleteMessage(msg)} className="block w-full px-3 py-2 text-left text-xs font-black text-red-700 transition hover:bg-red-50">
+                                                                        Delete message
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     ))

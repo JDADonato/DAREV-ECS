@@ -110,6 +110,8 @@ class OperationsController extends Controller
         $taskTotal = $tasks->count();
         $readiness = $this->readinessFor($booking);
 
+        $currentUser = Auth::user();
+
         return [
             'booking' => [
                 'id' => $booking->id,
@@ -127,12 +129,22 @@ class OperationsController extends Controller
                 'total_cost' => $booking->total_cost,
             ],
             'readiness' => $readiness,
+            'readiness_details' => collect($readiness)->map(fn ($ready, $key) => [
+                'key' => $key,
+                'ready' => $ready,
+                'owner_department' => $this->readinessOwner($key),
+                'action_hint' => $this->readinessActionHint($key),
+                'can_update' => $this->canUpdateReadiness($currentUser?->role, $key),
+            ])->values(),
             'tasks' => $tasks->map(fn (EventPreparationTask $task) => [
                 'id' => $task->id,
                 'department' => $task->department,
                 'label' => $task->label,
                 'status' => $task->status,
                 'due_at' => $task->due_at,
+                'due_state' => $this->dueState($task),
+                'can_update' => $currentUser?->role === 'Admin' || $task->department === 'Marketing',
+                'action_hint' => $this->taskActionHint($task),
                 'assigned_to' => $task->assigned_to,
                 'completed_at' => $task->completed_at,
                 'completed_by' => $task->completed_by,
@@ -262,12 +274,12 @@ class OperationsController extends Controller
     private function attentionFlags(array $readiness): array
     {
         $labels = [
-            'payment' => 'Payment clearance needed',
-            'menu' => 'Final menu needed',
-            'venue' => 'Venue details needed',
-            'headcount' => 'Final headcount needed',
-            'tasting' => 'Tasting outcome needed',
-            'customer_messages' => 'Customer messages open',
+            'payment' => 'Accounting: payment clearance pending',
+            'menu' => 'Customer: final menu needed',
+            'venue' => 'Operations: venue access not ready',
+            'headcount' => 'Customer: final headcount needed',
+            'tasting' => 'Marketing: tasting outcome not recorded',
+            'customer_messages' => 'Marketing: customer messages open',
         ];
 
         return collect($readiness)
@@ -297,5 +309,64 @@ class OperationsController extends Controller
     {
         $query->whereNull('selected_menu')
             ->orWhereRaw("\"selected_menu\"::text in ('[]', '{}', 'null', '\"\"')");
+    }
+
+    private function readinessOwner(string $key): string
+    {
+        return match ($key) {
+            'payment' => 'Accounting',
+            'venue' => 'Operations',
+            'menu', 'headcount' => 'Customer',
+            default => 'Marketing',
+        };
+    }
+
+    private function canUpdateReadiness(?string $role, string $key): bool
+    {
+        if ($role === 'Admin') {
+            return true;
+        }
+
+        return in_array($key, ['tasting', 'customer_messages'], true);
+    }
+
+    private function readinessActionHint(string $key): string
+    {
+        return match ($key) {
+            'payment' => 'Accounting clears this after payment verification.',
+            'menu' => 'Ask the customer to complete or confirm their menu.',
+            'venue' => 'Operations confirms venue access and logistics.',
+            'headcount' => 'Ask the customer to confirm final pax.',
+            'tasting' => 'Record or confirm the tasting outcome.',
+            'customer_messages' => 'Resolve or reply to the linked customer conversation.',
+            default => 'Review this handoff item.',
+        };
+    }
+
+    private function taskActionHint(EventPreparationTask $task): string
+    {
+        return match ($task->department) {
+            'Accounting' => 'Accounting owns this task.',
+            'Operations' => 'Operations owns this handoff task.',
+            default => 'Marketing can update this task.',
+        };
+    }
+
+    private function dueState(EventPreparationTask $task): string
+    {
+        if ($task->status === 'Done') {
+            return 'Ready';
+        }
+
+        if (!$task->due_at) {
+            return 'Pending';
+        }
+
+        $due = Carbon::parse($task->due_at);
+        if ($due->isPast()) {
+            return 'Overdue';
+        }
+
+        return $due->diffInDays(now()) <= 3 ? 'Due soon' : 'Pending';
     }
 }

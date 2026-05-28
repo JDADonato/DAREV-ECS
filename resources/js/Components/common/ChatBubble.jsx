@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useSmartRefresh from '../../hooks/useSmartRefresh';
 import { customerBookingStatus } from '../../utils/statusLabels';
+import csrfFetch from '../../utils/csrf';
 
 /**
  * Phase 2: Client Chat Bubble — WebSocket-powered.
@@ -37,6 +38,9 @@ const ChatBubble = ({ user, openOnMount = false }) => {
     const [loadingConv, setLoadingConv] = useState(false);
     const [hasOlderMessages, setHasOlderMessages] = useState(false);
     const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+    const [editingMessageId, setEditingMessageId] = useState(null);
+    const [editingText, setEditingText] = useState('');
+    const [openActionMessageId, setOpenActionMessageId] = useState(null);
     const messagesEndRef = useRef(null);
     const shouldScrollToBottomRef = useRef(false);
     const typingTimeoutRef = useRef(null);
@@ -276,7 +280,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
         try {
             if (conversation) {
                 // Send to existing conversation
-                const res = await fetch(`/api/chat/conversations/${conversation.id}/messages`, {
+                const res = await csrfFetch(`/api/chat/conversations/${conversation.id}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify({ message: newMessage.trim() }),
@@ -295,7 +299,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                     return;
                 }
                 // Start new conversation
-                const res = await fetch('/api/chat/conversations', {
+                const res = await csrfFetch('/api/chat/conversations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify({
@@ -319,11 +323,24 @@ const ChatBubble = ({ user, openOnMount = false }) => {
     const shareBooking = async (booking) => {
         if (sending) return;
         setSending(true);
-        const text = `📋 BOOKING DETAILS\n━━━━━━━━━━━━━━━\n📅 Date: ${booking.event_date}\n⏰ Time: ${booking.event_time || 'TBD'}\n🎉 Event: ${booking.event_type}\n👥 Guests: ${booking.pax} pax\n📍 Venue: ${booking.venue_city || 'TBD'}\n💰 Total: ₱${Number(booking.total_cost || 0).toLocaleString()}\n📌 Status: ${customerBookingStatus(booking.status).label}\n━━━━━━━━━━━━━━━`;
+        const text = JSON.stringify({
+            type: 'booking_details',
+            booking: {
+                id: booking.id,
+                title: booking.event_name || booking.event_type || `Booking #${booking.id}`,
+                date: booking.event_date,
+                time: booking.event_time || 'TBD',
+                event_type: booking.event_type,
+                pax: booking.pax,
+                venue: booking.venue_city || 'TBD',
+                total: Number(booking.total_cost || 0),
+                status: customerBookingStatus(booking.status).label,
+            },
+        });
 
         try {
             if (conversation) {
-                const res = await fetch(`/api/chat/conversations/${conversation.id}/messages`, {
+                const res = await csrfFetch(`/api/chat/conversations/${conversation.id}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify({ message: text }),
@@ -335,7 +352,7 @@ const ChatBubble = ({ user, openOnMount = false }) => {
                     setShowBookingPicker(false);
                 }
             } else {
-                const res = await fetch('/api/chat/conversations', {
+                const res = await csrfFetch('/api/chat/conversations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify({ message: text }),
@@ -354,22 +371,99 @@ const ChatBubble = ({ user, openOnMount = false }) => {
 
     // ─── Rendering Helpers ───
 
-    const isBookingCard = (text) => text && text.startsWith('📋 BOOKING DETAILS');
+    const parseBookingCard = (text) => {
+        if (!text) return null;
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed?.type === 'booking_details' && parsed.booking) return parsed.booking;
+        } catch (e) {
+            // Keep supporting older text-based booking cards.
+        }
+        if (!text.startsWith('📋 BOOKING DETAILS')) return null;
+        const lines = text.split('\n').filter(l => l.trim() && !l.includes('━'));
+        return {
+            title: lines[3]?.replace(/^.*Event:\s*/, '') || 'Booking details',
+            date: lines[1]?.replace(/^.*Date:\s*/, '') || 'TBD',
+            time: lines[2]?.replace(/^.*Time:\s*/, '') || 'TBD',
+            pax: lines[4]?.replace(/^.*Guests:\s*/, '') || 'TBD',
+            venue: lines[5]?.replace(/^.*Venue:\s*/, '') || 'TBD',
+            total: Number(String(lines[6] || '').replace(/[^\d.]/g, '')) || 0,
+            status: lines[7]?.replace(/^.*Status:\s*/, '') || 'Shared',
+        };
+    };
+
+    const isBookingCard = (text) => Boolean(parseBookingCard(text));
 
     const renderBookingCard = (text, isMine) => {
-        const lines = text.split('\n').filter(l => l.trim() && !l.includes('━'));
+        const booking = parseBookingCard(text);
         return (
-            <div className={`rounded-xl overflow-hidden border ${isMine ? 'border-white/20' : 'border-gray-200'}`}>
-                <div className={`px-3 py-2 text-xs font-bold ${isMine ? 'bg-white/10 text-white' : 'bg-primary-50 text-primary-700'}`}>
-                    {lines[0]}
+            <div className={`overflow-hidden rounded-2xl border ${isMine ? 'border-white/20 bg-white/10' : 'border-amber-100 bg-white shadow-sm'}`}>
+                <div className={`px-4 py-3 ${isMine ? 'bg-white/10 text-white' : 'bg-[#fff7e8] text-[#720101]'}`}>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Booking details</p>
+                    <p className="mt-1 text-sm font-black">{booking.title || booking.event_type || 'Eloquente event'}</p>
                 </div>
-                <div className={`px-3 py-2 space-y-1 text-xs ${isMine ? 'bg-white/5' : 'bg-white'}`}>
-                    {lines.slice(1).map((line, i) => (
-                        <p key={i} className={`leading-relaxed ${isMine ? 'text-white/90' : 'text-gray-700'}`}>{line}</p>
-                    ))}
+                <div className={`grid grid-cols-2 gap-2 px-4 py-3 text-xs ${isMine ? 'text-white/85' : 'text-slate-600'}`}>
+                    <p><span className="block font-black uppercase opacity-60">Date</span>{booking.date || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Time</span>{booking.time || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Guests</span>{booking.pax || 'TBD'}{Number(booking.pax) ? ' pax' : ''}</p>
+                    <p><span className="block font-black uppercase opacity-60">Venue</span>{booking.venue || 'TBD'}</p>
+                    <p><span className="block font-black uppercase opacity-60">Total</span>PHP {Number(booking.total || 0).toLocaleString()}</p>
+                    <p><span className="block font-black uppercase opacity-60">Status</span>{booking.status || 'Shared'}</p>
                 </div>
             </div>
         );
+    };
+
+    const canEditMessage = (msg) => {
+        if (!msg?.is_mine || msg.deleted_at || isBookingCard(msg.message)) return false;
+        return Date.now() - new Date(msg.created_at || 0).getTime() <= 15 * 60 * 1000;
+    };
+
+    const canDeleteMessage = (msg) => {
+        if (!msg?.is_mine || msg.deleted_at) return false;
+        return Date.now() - new Date(msg.created_at || 0).getTime() <= 15 * 60 * 1000;
+    };
+
+    const startEditMessage = (msg) => {
+        setOpenActionMessageId(null);
+        setEditingMessageId(msg.id);
+        setEditingText(msg.message);
+    };
+
+    const cancelEditMessage = () => {
+        setOpenActionMessageId(null);
+        setEditingMessageId(null);
+        setEditingText('');
+    };
+
+    const saveEditedMessage = async (msg) => {
+        if (!editingText.trim()) return;
+        try {
+            const res = await csrfFetch(`/api/chat/messages/${msg.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: editingText.trim() }),
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(payload.error || 'Could not edit message.');
+            setMessages(prev => prev.map(item => item.id === msg.id ? payload : item));
+            cancelEditMessage();
+        } catch (e) {
+            setTopicWarning(e.message || 'Could not edit message.');
+        }
+    };
+
+    const deleteMessage = async (msg) => {
+        setOpenActionMessageId(null);
+        if (!window.confirm('Delete this message? It will be replaced with "Message deleted."')) return;
+        try {
+            const res = await csrfFetch(`/api/chat/messages/${msg.id}`, { method: 'DELETE' });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(payload.error || 'Could not delete message.');
+            setMessages(prev => prev.map(item => item.id === msg.id ? payload.data : item));
+        } catch (e) {
+            setTopicWarning(e.message || 'Could not delete message.');
+        }
     };
 
     if (!user) return null;
@@ -482,14 +576,57 @@ const ChatBubble = ({ user, openOnMount = false }) => {
 
                                     {messages.map(msg => (
                                         <div key={msg.id} className={`flex ${msg.is_mine ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[82%] rounded-2xl border px-3.5 py-2.5 ${msg.is_mine ? 'rounded-br-md border-[#720101] bg-[#720101] text-white' : 'rounded-bl-md border-[#ead8cc] bg-white text-slate-800'}`}>
+                                            <div className="group flex max-w-[92%] items-start gap-2">
+                                                {(canEditMessage(msg) || canDeleteMessage(msg)) && editingMessageId !== msg.id && (
+                                                    <div className={`relative mt-2 flex h-7 w-7 flex-shrink-0 transition-opacity ${openActionMessageId === msg.id ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'}`}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                setOpenActionMessageId(openActionMessageId === msg.id ? null : msg.id);
+                                                            }}
+                                                            className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-black leading-none text-slate-600 shadow-md shadow-slate-950/10 transition hover:border-[#720101]/30 hover:text-[#720101]"
+                                                            aria-label="Message actions"
+                                                            aria-expanded={openActionMessageId === msg.id}
+                                                        >
+                                                            ...
+                                                        </button>
+                                                        {openActionMessageId === msg.id && (
+                                                            <div className="absolute right-0 top-9 z-40 min-w-[8.5rem] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl shadow-slate-950/15">
+                                                                {canEditMessage(msg) && (
+                                                                    <button type="button" onClick={() => startEditMessage(msg)} className="block w-full px-3 py-2 text-left text-xs font-black text-slate-700 transition hover:bg-slate-50">
+                                                                        Edit message
+                                                                    </button>
+                                                                )}
+                                                                {canDeleteMessage(msg) && (
+                                                                    <button type="button" onClick={() => deleteMessage(msg)} className="block w-full px-3 py-2 text-left text-xs font-black text-red-700 transition hover:bg-red-50">
+                                                                        Delete message
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                <div className={`relative max-w-full rounded-2xl border px-3.5 py-2.5 ${msg.is_mine ? 'rounded-br-md border-[#720101] bg-[#720101] text-white' : 'rounded-bl-md border-[#ead8cc] bg-white text-slate-800'}`}>
                                                 {!msg.is_mine && msg.sender_name && (
                                                     <p className="text-[10px] font-bold text-[#720101] mb-0.5">{msg.sender_name}</p>
                                                 )}
-                                                {isBookingCard(msg.message) ? renderBookingCard(msg.message, msg.is_mine) : (
+                                                {editingMessageId === msg.id ? (
+                                                    <div className="space-y-2">
+                                                        <textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} rows={3} className="w-64 rounded-xl border border-white/40 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none" />
+                                                        <div className="flex justify-end gap-2">
+                                                            <button type="button" onClick={cancelEditMessage} className="text-[11px] font-black text-white/70">Cancel</button>
+                                                            <button type="button" onClick={() => saveEditedMessage(msg)} className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-[#720101]">Save</button>
+                                                        </div>
+                                                    </div>
+                                                ) : isBookingCard(msg.message) ? renderBookingCard(msg.message, msg.is_mine) : (
                                                     <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.message}</p>
                                                 )}
-                                                <p className={`mt-1 text-[10px] font-semibold ${msg.is_mine ? 'text-white/60' : 'text-slate-400'}`}>{msg.time}</p>
+                                                <div className="mt-1 flex items-center justify-end gap-2">
+                                                    {msg.edited_at && !msg.deleted_at && <span className={`text-[10px] font-semibold ${msg.is_mine ? 'text-white/50' : 'text-slate-400'}`}>edited</span>}
+                                                    <p className={`text-[10px] font-semibold ${msg.is_mine ? 'text-white/60' : 'text-slate-400'}`}>{msg.time}</p>
+                                                </div>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}

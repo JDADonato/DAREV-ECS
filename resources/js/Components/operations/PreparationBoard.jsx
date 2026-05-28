@@ -4,14 +4,15 @@ import StaffPagination from '../staff/StaffPagination';
 import StaffSkeleton from '../staff/StaffSkeleton';
 import { getListData, getPaginationMeta } from '../../utils/apiResponses';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
+import csrfFetch from '../../utils/csrf';
 
 const readinessLabels = {
-    payment: 'Payment',
-    menu: 'Menu',
-    venue: 'Venue',
-    headcount: 'Headcount',
-    tasting: 'Tasting',
-    customer_messages: 'Messages',
+    payment: 'Accounting: payment clearance',
+    menu: 'Customer: final menu',
+    venue: 'Operations: venue access',
+    headcount: 'Customer: final headcount',
+    tasting: 'Marketing: tasting outcome',
+    customer_messages: 'Marketing: customer messages',
 };
 
 const formatDate = (value) => {
@@ -105,9 +106,13 @@ const PreparationBoard = () => {
 
     const toggleTask = async (task) => {
         const nextStatus = task.status === 'Done' ? 'Pending' : 'Done';
+        if (task.can_update === false) {
+            setError(task.action_hint || `${task.department} owns this handoff task.`);
+            return;
+        }
         setUpdatingTaskId(task.id);
         try {
-            const response = await fetch(`/api/operations/preparation-tasks/${task.id}`, {
+            const response = await csrfFetch(`/api/operations/preparation-tasks/${task.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: JSON.stringify({ status: nextStatus }),
@@ -135,9 +140,9 @@ const PreparationBoard = () => {
                         {[
                             ['Upcoming', summary.upcoming],
                             ['Needs attention', summary.needs_attention],
-                            ['Payment not clear', summary.payment_not_clear],
-                            ['Menu missing', summary.menu_missing],
-                            ['Venue missing', summary.venue_missing],
+                            ['Accounting blockers', summary.payment_not_clear],
+                            ['Menu needed', summary.menu_missing],
+                            ['Venue access needed', summary.venue_missing],
                         ].map(([label, value]) => (
                             <div key={label} className="rounded-xl border border-[#ead8cc] bg-[#fbf8f2] px-4 py-3">
                                 <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">{label}</p>
@@ -156,10 +161,10 @@ const PreparationBoard = () => {
                     <select value={attentionFilter} onChange={(event) => setAttentionFilter(event.target.value)} className="staff-control">
                         <option value="all">All readiness</option>
                         <option value="needs_attention">Needs attention</option>
-                        <option value="payment">Payment not clear</option>
-                        <option value="menu">Menu missing</option>
-                        <option value="headcount">Headcount missing</option>
-                        <option value="customer_messages">Open messages</option>
+                        <option value="payment">Accounting: payment pending</option>
+                        <option value="menu">Customer: final menu needed</option>
+                        <option value="headcount">Customer: headcount needed</option>
+                        <option value="customer_messages">Marketing: open messages</option>
                     </select>
                     <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="staff-control">
                         <option value="all">All departments</option>
@@ -181,8 +186,8 @@ const PreparationBoard = () => {
                                     <tr>
                                         <th>Event Date</th>
                                         <th>Booking</th>
-                                        <th>Readiness</th>
-                                        <th>Tasks</th>
+                                        <th>Owner-aware readiness</th>
+                                        <th>Handoff tasks</th>
                                         <th>Attention</th>
                                         <th className="text-right">Action</th>
                                     </tr>
@@ -267,10 +272,15 @@ const PreparationBoard = () => {
                         <section className="rounded-xl border border-amber-100 bg-white p-4">
                             <p className="mb-3 text-xs font-black uppercase text-slate-500">Readiness</p>
                             <div className="grid gap-2 sm:grid-cols-2">
-                                {Object.entries(selectedRow.readiness || {}).map(([key, ready]) => (
-                                    <div key={key} className="flex items-center justify-between rounded-lg bg-[#fffaf3] px-3 py-2">
-                                        <span className="text-sm font-bold text-slate-700">{readinessLabels[key] || key}</span>
-                                        <span className={readinessClass(ready)}>{ready ? 'Ready' : 'Needs attention'}</span>
+                                {(selectedRow.readiness_details || Object.entries(selectedRow.readiness || {}).map(([key, ready]) => ({ key, ready }))).map((item) => (
+                                    <div key={item.key} className="rounded-lg bg-[#fffaf3] px-3 py-2">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-sm font-bold text-slate-700">{readinessLabels[item.key] || item.key}</span>
+                                            <span className={readinessClass(item.ready)}>{item.ready ? 'Ready' : 'Needs attention'}</span>
+                                        </div>
+                                        {!item.ready && item.action_hint && (
+                                            <p className="mt-1 text-xs font-semibold text-slate-500">{item.action_hint}</p>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -286,7 +296,7 @@ const PreparationBoard = () => {
                         )}
 
                         <section className="rounded-xl border border-amber-100 bg-white p-4">
-                            <p className="mb-3 text-xs font-black uppercase text-slate-500">Preparation tasks</p>
+                            <p className="mb-3 text-xs font-black uppercase text-slate-500">Handoff tasks</p>
                             <div className="space-y-2">
                                 {(selectedRow.tasks || []).map((task) => {
                                     const done = task.status === 'Done';
@@ -295,19 +305,31 @@ const PreparationBoard = () => {
                                             key={task.id}
                                             type="button"
                                             onClick={() => toggleTask(task)}
-                                            disabled={updatingTaskId === task.id}
-                                            className={`w-full rounded-xl border px-3 py-3 text-left transition disabled:opacity-60 ${done ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-white hover:bg-[#fffaf3]'}`}
+                                            disabled={updatingTaskId === task.id || task.can_update === false}
+                                            className={`w-full rounded-xl border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${done ? 'border-emerald-100 bg-emerald-50' : task.can_update === false ? 'border-slate-100 bg-slate-50' : 'border-amber-100 bg-white hover:bg-[#fffaf3]'}`}
                                         >
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
                                                     <p className="text-sm font-black text-slate-950">{task.label}</p>
-                                                    <p className="mt-1 text-xs font-bold uppercase text-slate-400">{task.department}</p>
+                                                    <p className="mt-1 text-xs font-bold uppercase text-slate-400">{task.department} / {task.due_state || 'Pending'}</p>
+                                                    {task.action_hint && <p className="mt-1 text-xs font-semibold normal-case text-slate-500">{task.action_hint}</p>}
                                                 </div>
                                                 <span className={done ? 'staff-status staff-status-good' : 'staff-status staff-status-muted'}>{done ? 'Done' : 'Pending'}</span>
                                             </div>
                                         </button>
                                     );
                                 })}
+                            </div>
+                        </section>
+                        <section className="rounded-xl border border-amber-100 bg-white p-4">
+                            <p className="mb-3 text-xs font-black uppercase text-slate-500">Handoff actions</p>
+                            <div className="flex flex-wrap gap-2">
+                                <a href={`/documents/bookings/${selectedRow.booking.id}/preparation.pdf`} className="staff-row-action staff-row-action-primary">
+                                    Download prep list
+                                </a>
+                                <a href="/dashboard/marketing?tab=messages" className="staff-row-action">
+                                    Open messages
+                                </a>
                             </div>
                         </section>
                     </div>

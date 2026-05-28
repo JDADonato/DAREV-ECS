@@ -16,6 +16,7 @@ import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import { bookingStatusLabel, reviewStatusLabel } from '../utils/statusLabels';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import useStaffWorkspaceState from '../hooks/useStaffWorkspaceState';
 import {
     formatDate,
     formatMoney,
@@ -45,12 +46,24 @@ const SECURITY_OPTIONS = [
 ];
 
 const MARKETING_BOOKINGS_URL = '/api/marketing/bookings';
-const BOOKING_BACKED_TABS = ['calendar', 'intake', 'documents'];
+const MARKETING_WORKSPACE_TABS = ['today', 'bookings', 'leads', 'calendar', 'handoff', 'messages', 'public-content', 'availability', 'history'];
+const MARKETING_TAB_ALIASES = {
+    intake: 'bookings',
+    inquiries: 'bookings',
+    preparation: 'handoff',
+    content: 'public-content',
+    settings: 'public-content',
+    documents: 'calendar',
+};
+const BOOKING_BACKED_TABS = ['calendar', 'bookings'];
 const ACTIVE_CALENDAR_STATUSES = ['pending', 'confirmed'];
-const REVIEW_QUEUE_VIEWS = [
-    { id: 'claim', label: 'Claim Queue' },
-    { id: 'mine', label: 'My Bookings' },
-    { id: 'all', label: 'All Bookings' },
+const BOOKING_WORK_VIEWS = [
+    { id: 'needs-action', label: 'Needs action' },
+    { id: 'claim', label: 'Available to claim' },
+    { id: 'mine', label: 'My bookings' },
+    { id: 'transfers', label: 'Transfers to me' },
+    { id: 'waiting', label: 'Waiting on customer' },
+    { id: 'all', label: 'All active' },
 ];
 
 const emptyPackageForm = (defaultType = '') => ({
@@ -137,7 +150,12 @@ const DashboardMarketing = () => {
     const calendarRequestRef = useRef(0);
     const [marketingRemoteSummary, setMarketingRemoteSummary] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('today');
+    const [activeTab, setActiveTab] = useStaffWorkspaceState({
+        storageKey: 'ecs:staff-workspace:marketing',
+        defaultTab: 'today',
+        allowedTabs: MARKETING_WORKSPACE_TABS,
+        tabAliases: MARKETING_TAB_ALIASES,
+    });
     const [selectedMonth, setSelectedMonth] = useState(new Date());
     const [menuItems, setMenuItems] = useState([]);
     const [packages, setPackages] = useState([]);
@@ -153,7 +171,7 @@ const DashboardMarketing = () => {
     const [updatingBookingIds, setUpdatingBookingIds] = useState({});
     const [inquirySearch, setInquirySearch] = useState('');
     const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
-    const [bookingReviewView, setBookingReviewView] = useState('claim');
+    const [bookingReviewView, setBookingReviewView] = useState('needs-action');
     const [inquirySort, setInquirySort] = useState('newest');
     const [inquiryDateFrom, setInquiryDateFrom] = useState('');
     const [inquiryDateTo, setInquiryDateTo] = useState('');
@@ -206,16 +224,18 @@ const DashboardMarketing = () => {
             fetchBookings({ scope: 'page' });
             fetchContactLeads({ silent: true });
             fetchFeedbackSummary();
-        } else if (activeTab === 'settings') {
+        } else if (activeTab === 'public-content') {
             fetchMarketingSettings();
         } else if (activeTab === 'availability') {
             fetchAvailabilityOverrides();
         } else if (activeTab === 'leads') {
             fetchContactLeads();
-        } else if (activeTab === 'intake' && bookingsScope !== 'all') {
+        } else if (activeTab === 'bookings' && bookingsScope !== 'all') {
             fetchBookings({ scope: 'all' });
         } else if (BOOKING_BACKED_TABS.includes(activeTab) && bookings.length === 0) {
             fetchBookings({ scope: 'page' });
+        } else {
+            setLoading(false);
         }
     }, [activeTab, availabilityMonth, bookingsScope]);
 
@@ -231,21 +251,21 @@ const DashboardMarketing = () => {
     }, [leadFilters, activeTab]);
 
     useSmartRefresh({
-        enabled: ['today', 'settings', 'availability', ...BOOKING_BACKED_TABS].includes(activeTab),
-        interval: activeTab === 'settings' ? 120000 : 90000,
+        enabled: ['today', 'public-content', 'availability', ...BOOKING_BACKED_TABS].includes(activeTab),
+        interval: activeTab === 'public-content' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
             if (activeTab === 'today') {
                 fetchMarketingSummary({ silent });
                 fetchBookings({ silent, scope: 'page' });
                 fetchFeedbackSummary();
-            } else if (activeTab === 'settings') {
+            } else if (activeTab === 'public-content') {
                 fetchMarketingSettings();
             } else if (activeTab === 'availability') {
                 fetchAvailabilityOverrides({ silent });
             } else if (activeTab === 'calendar') {
                 fetchCalendarBookings({ silent });
-            } else if (activeTab === 'intake') {
+            } else if (activeTab === 'bookings') {
                 fetchBookings({ silent, scope: 'all' });
             } else if (BOOKING_BACKED_TABS.includes(activeTab)) {
                 fetchBookings({ silent, scope: 'page' });
@@ -398,6 +418,7 @@ const DashboardMarketing = () => {
             toast.error('Could not load availability controls.');
         } finally {
             if (!silent) setAvailabilityLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
@@ -487,7 +508,7 @@ const DashboardMarketing = () => {
                 if (data.booking) mergeUpdatedBooking(data.booking);
                 const label = newStatus === 'Confirmed' ? 'approved' : 'declined';
                 toast.success(`Booking #${id} has been ${label} successfully.`);
-                fetchBookings({ scope: activeTab === 'intake' ? 'all' : 'page' }); // sync with server in background
+                fetchBookings({ scope: activeTab === 'bookings' ? 'all' : 'page' }); // sync with server in background
             } else {
                 const data = await response.json().catch(() => ({}));
                 if (data.booking) mergeUpdatedBooking(data.booking);
@@ -638,7 +659,7 @@ const DashboardMarketing = () => {
                 // Update local state to reflect change immediately without closing modal
                 if (data.booking) mergeUpdatedBooking(data.booking);
                 else setSelectedBooking({ ...selectedBooking, live_status: newLiveStatus });
-                fetchBookings({ scope: activeTab === 'intake' ? 'all' : 'page' }); // Refresh background data
+                fetchBookings({ scope: activeTab === 'bookings' ? 'all' : 'page' }); // Refresh background data
             } else {
                 if (data.booking) mergeUpdatedBooking(data.booking);
                 toast.error(data.error || 'Could not update live status.');
@@ -675,6 +696,8 @@ const DashboardMarketing = () => {
             }
         } catch (error) {
             console.error('Error fetching marketing settings:', error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -912,19 +935,16 @@ const DashboardMarketing = () => {
         pipeline: marketingRemoteSummary.pipeline ?? marketingBookingIndexes.pipeline,
     } : marketingBookingIndexes;
 
-        const tabMeta = {
-            today: 'Today',
-            intake: 'Booking Reviews',
-            leads: 'Guest Inquiries',
-            calendar: 'Event Calendar',
-        availability: 'Date Availability',
-        preparation: 'Event Preparation',
-        inquiries: 'Booking Reviews',
-        documents: 'Event Documents',
-        content: 'Announcements',
-        settings: 'Menu & Packages',
+    const tabMeta = {
+        today: 'Today',
+        bookings: 'Bookings',
+        leads: 'Guest Inquiries',
+        calendar: 'Calendar',
+        availability: 'Availability',
+        handoff: 'Event Handoff',
         messages: 'Messages',
         history: 'Event History',
+        'public-content': 'Public Content',
     };
 
         const marketingSummary = useMemo(() => {
@@ -961,7 +981,7 @@ const DashboardMarketing = () => {
             badge: marketingSummary.pending,
             primaryLabel: 'Open',
             tone: marketingSummary.pending > 0 ? 'warn' : 'good',
-            onOpen: () => setActiveTab('intake'),
+            onOpen: () => { setBookingReviewView('needs-action'); setActiveTab('bookings'); },
         },
         {
             id: 'needs-details',
@@ -971,7 +991,7 @@ const DashboardMarketing = () => {
             badge: marketingSummary.needsDetails,
             primaryLabel: 'Open',
             tone: marketingSummary.needsDetails > 0 ? 'danger' : 'good',
-            onOpen: () => setActiveTab('intake'),
+            onOpen: () => { setBookingReviewView('waiting'); setActiveTab('bookings'); },
         },
         {
             id: 'guest-inquiries',
@@ -991,7 +1011,7 @@ const DashboardMarketing = () => {
             badge: marketingSummary.upcoming,
             primaryLabel: 'Open',
             tone: marketingSummary.upcoming > 0 ? 'warn' : 'good',
-            onOpen: () => setActiveTab('preparation'),
+            onOpen: () => setActiveTab('handoff'),
         },
         {
             id: 'messages',
@@ -1015,40 +1035,118 @@ const DashboardMarketing = () => {
         },
     ]), [feedbackSummary.followUps, leadData.summary?.open, marketingSummary.needsDetails, marketingSummary.pending, marketingSummary.upcoming]);
 
-    const renderToday = () => (
-        <div className="staff-today-grid">
-            <NextActionPanel
-                title="Marketing work needing action"
-                actions={marketingNextActions}
-                emptyTitle="No Marketing actions waiting"
-                emptyMessage="Claim requests, customer replies, guest inquiries, and feedback follow-ups will appear here."
-            />
+    const renderToday = () => {
+        const transferRows = bookings.filter(booking => booking.can_accept_transfer);
+        const waitingRows = bookings.filter(booking => String(booking.review_status || '').toLowerCase() === 'clarification received' || booking.clarification_response);
+        const urgentRows = [...transferRows, ...waitingRows, ...marketingSummary.urgentRows]
+            .filter((booking, index, list) => list.findIndex(item => item.id === booking.id) === index)
+            .slice(0, 5);
+        const unclaimedRows = marketingSummary.pendingRows.filter(booking => !booking.assigned_to).slice(0, 5);
+        const ownedRows = marketingSummary.pendingRows.filter(booking => Number(booking.owner_id ?? booking.assigned_to) === Number(user?.id)).slice(0, 5);
+        const handoffRows = marketingSummary.upcomingRows.slice(0, 5);
 
+        const openBookingsView = (view) => {
+            setBookingReviewView(view);
+            setActiveTab('bookings');
+        };
+
+        const WorkSection = ({ kicker, title, emptyTitle, emptyMessage, rows, actionLabel, onAction, tone = 'muted' }) => (
             <section className="staff-work-surface">
                 <div className="staff-surface-head">
                     <div>
-                        <p className="marketing-kicker">Next events</p>
-                        <h3 className="mt-1 text-lg font-black text-slate-950">Upcoming approved bookings</h3>
+                        <p className="marketing-kicker">{kicker}</p>
+                        <h3 className="mt-1 text-lg font-black text-slate-950">{title}</h3>
                     </div>
+                    {onAction && (
+                        <button type="button" onClick={onAction} className="staff-row-action">
+                            {actionLabel || 'Open'}
+                        </button>
+                    )}
                 </div>
-                {marketingSummary.upcomingRows.length === 0 ? (
-                    <StaffEmptyState title="No upcoming approved events" message="Confirmed events will appear here for preparation follow-up." />
+                {rows.length === 0 ? (
+                    <StaffEmptyState title={emptyTitle} message={emptyMessage} />
                 ) : (
                     <div className="p-4 staff-priority-list">
-                        {marketingSummary.upcomingRows.slice(0, 6).map((booking) => (
-                            <button key={booking.id} type="button" onClick={() => setSelectedBooking(booking)} className="staff-priority-item">
-                                <div>
-                                    <h3>{eventDisplayName(booking)}</h3>
-                                    <p>{formatDate(booking.event_date)} / {booking.pax || 0} guests / {booking.client_full_name || booking.username || 'Customer'}</p>
-                                </div>
-                                <StaffStatusBadge tone="good">{bookingStatusLabel(booking.status).label}</StaffStatusBadge>
-                            </button>
-                        ))}
+                        {rows.map((booking) => {
+                            const status = bookingStatusLabel(booking.status);
+                            return (
+                                <button key={booking.id} type="button" onClick={() => setSelectedBooking(booking)} className="staff-priority-item">
+                                    <div>
+                                        <h3>{eventDisplayName(booking)}</h3>
+                                        <p>{formatDate(booking.event_date)} / {booking.pax || 0} guests / {booking.client_full_name || booking.username || 'Customer'}</p>
+                                    </div>
+                                    <StaffStatusBadge tone={tone === 'danger' ? 'danger' : status.tone === 'success' ? 'good' : status.tone === 'warning' ? 'warn' : 'muted'}>{status.label}</StaffStatusBadge>
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
             </section>
-        </div>
-    );
+        );
+
+        return (
+            <div className="space-y-5">
+                <NextActionPanel
+                    title="Marketing work needing action"
+                    actions={marketingNextActions}
+                    emptyTitle="No Marketing actions waiting"
+                    emptyMessage="Claim requests, customer replies, guest inquiries, and feedback follow-ups will appear here."
+                />
+                <div className="grid gap-5 xl:grid-cols-2">
+                    <WorkSection
+                        kicker="Urgent"
+                        title="Transfers, replies, and near events"
+                        emptyTitle="No urgent blockers"
+                        emptyMessage="Transfers, customer replies, and near-date blockers will appear here."
+                        rows={urgentRows}
+                        actionLabel="Open needs action"
+                        onAction={() => openBookingsView('needs-action')}
+                        tone="danger"
+                    />
+                    <WorkSection
+                        kicker="Booking intake"
+                        title="Available and owned reviews"
+                        emptyTitle="No booking intake waiting"
+                        emptyMessage="New submissions and owned reviews are clear."
+                        rows={[...unclaimedRows, ...ownedRows].slice(0, 6)}
+                        actionLabel="Open bookings"
+                        onAction={() => openBookingsView('needs-action')}
+                    />
+                    <WorkSection
+                        kicker="Upcoming handoff"
+                        title="Confirmed events to coordinate"
+                        emptyTitle="No upcoming approved events"
+                        emptyMessage="Confirmed events will appear here for handoff follow-up."
+                        rows={handoffRows}
+                        actionLabel="Open handoff"
+                        onAction={() => setActiveTab('handoff')}
+                    />
+                    <section className="staff-work-surface">
+                        <div className="staff-surface-head">
+                            <div>
+                                <p className="marketing-kicker">Follow-up</p>
+                                <h3 className="mt-1 text-lg font-black text-slate-950">Leads, messages, and feedback</h3>
+                            </div>
+                        </div>
+                        <div className="grid gap-3 p-4 sm:grid-cols-3">
+                            <button type="button" onClick={() => setActiveTab('leads')} className="rounded-xl border border-amber-100 bg-white p-4 text-left hover:bg-[#fffaf3]">
+                                <p className="text-2xl font-black text-slate-950">{leadData.summary?.open || 0}</p>
+                                <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-500">Guest inquiries</p>
+                            </button>
+                            <button type="button" onClick={() => setActiveTab('messages')} className="rounded-xl border border-amber-100 bg-white p-4 text-left hover:bg-[#fffaf3]">
+                                <p className="text-2xl font-black text-slate-950">Inbox</p>
+                                <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-500">Customer messages</p>
+                            </button>
+                            <button type="button" onClick={() => setActiveTab('history')} className="rounded-xl border border-amber-100 bg-white p-4 text-left hover:bg-[#fffaf3]">
+                                <p className="text-2xl font-black text-slate-950">{feedbackSummary.followUps || 0}</p>
+                                <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-500">Feedback follow-ups</p>
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        );
+    };
 
     const renderCalendar = () => {
         const daysInMonth = getDaysInMonth(selectedMonth);
@@ -1200,6 +1298,24 @@ const DashboardMarketing = () => {
                                 Request details
                             </button>
                         )}
+                        {canEdit && selectedBooking.status === 'Pending' && (
+                            <>
+                                <button onClick={() => updateStatus(selectedBooking.id, 'Confirmed')} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100">
+                                    Approve
+                                </button>
+                                <button onClick={() => updateStatus(selectedBooking.id, 'Cancelled')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-100">
+                                    Reject
+                                </button>
+                            </>
+                        )}
+                        {selectedBooking.status === 'Confirmed' && (
+                            <a href={`/documents/bookings/${selectedBooking.id}/preparation.pdf`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                                Prep list PDF
+                            </a>
+                        )}
+                        <button onClick={() => setActiveTab('messages')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                            Open messages
+                        </button>
                     </>
                 )}
             >
@@ -1304,168 +1420,6 @@ const DashboardMarketing = () => {
 
         const params = new URLSearchParams({ start, end });
         window.location.href = `/documents/calendar.pdf?${params.toString()}`;
-        setShowExportModal(false);
-        return;
-
-        const filteredBookings = bookings.filter(b => {
-            const dateKey = getDateKey(b.event_date);
-            return dateKey >= start && dateKey <= end;
-        });
-
-        // Group bookings by date
-        const grouped = {};
-        filteredBookings.forEach(b => {
-            const dateKey = getDateKey(b.event_date);
-            if (!grouped[dateKey]) grouped[dateKey] = [];
-            grouped[dateKey].push(b);
-        });
-
-        const sortedDates = Object.keys(grouped).sort();
-
-        // Build month calendars for the range
-        const startDate = new Date(start + 'T00:00:00');
-        const endDate = new Date(end + 'T00:00:00');
-        let calendarHTML = '';
-
-        let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-        const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-        while (current <= endMonth) {
-            const year = current.getFullYear();
-            const month = current.getMonth();
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            const firstDay = new Date(year, month, 1).getDay();
-            const monthName = current.toLocaleString('default', { month: 'long', year: 'numeric' });
-
-            calendarHTML += `
-                <div class="month-block">
-                    <h3 class="month-title">${monthName}</h3>
-                    <table class="calendar-table">
-                        <thead>
-                            <tr>
-                                <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-
-            let dayCount = 1;
-            for (let week = 0; week < 6; week++) {
-                if (dayCount > daysInMonth) break;
-                calendarHTML += '<tr>';
-                for (let dow = 0; dow < 7; dow++) {
-                    if ((week === 0 && dow < firstDay) || dayCount > daysInMonth) {
-                        calendarHTML += '<td class="empty"></td>';
-                    } else {
-                        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayCount).padStart(2, '0')}`;
-                        const dayEvents = grouped[dateStr] || [];
-                        const eventsHTML = dayEvents.map(ev =>
-                            `<div class="event ${ev.status === 'Confirmed' ? 'confirmed' : ev.status === 'Pending' ? 'pending' : 'other'}">${ev.client_full_name || ev.username} (${ev.pax} guests)</div>`
-                        ).join('');
-                        calendarHTML += `<td><div class="day-num">${dayCount}</div>${eventsHTML}</td>`;
-                        dayCount++;
-                    }
-                }
-                calendarHTML += '</tr>';
-            }
-
-            calendarHTML += `</tbody></table></div>`;
-            current = new Date(year, month + 1, 1);
-        }
-
-        // Summary table
-        let summaryHTML = '';
-        if (sortedDates.length > 0) {
-            summaryHTML = `
-                <div class="summary-section">
-                    <h3>Event Schedule Summary</h3>
-                    <table class="summary-table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Time</th>
-                                <th>Client</th>
-                                <th>Guests</th>
-                                <th>Venue</th>
-                                <th>Contact</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${filteredBookings.sort((a, b) => getDateKey(a.event_date).localeCompare(getDateKey(b.event_date))).map(b => `
-                                <tr>
-                                    <td>${formatDate(b.event_date)}</td>
-                                    <td>${formatTime(b.event_time)}</td>
-                                    <td>${b.client_full_name || b.username}</td>
-                                    <td>${b.pax}</td>
-                                    <td class="small-text">${[b.venue_address_line, b.venue_street, b.venue_city, b.venue_province].filter(Boolean).join(', ') || '-'}</td>
-                                    <td class="small-text">${[b.client_email, b.client_phone].filter(Boolean).join(' / ') || '-'}</td>
-                                    <td><span class="status-badge ${b.status === 'Confirmed' ? 'confirmed' : b.status === 'Pending' ? 'pending' : 'other'}">${b.status}</span></td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                    <p class="total-line">Total Events: ${filteredBookings.length} | Total Guests: ${filteredBookings.reduce((s, b) => s + (b.pax || 0), 0)}</p>
-                </div>
-            `;
-        } else {
-            summaryHTML = '<p style="text-align:center; color:#666; margin-top:20px;">No events found in the selected date range.</p>';
-        }
-
-        const content = `
-            <html>
-                <head>
-                    <title>Eloquente Calendar Export</title>
-                    <style>
-                        * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 30px; color: #333; font-size: 11px; }
-                        .header { text-align: center; margin-bottom: 25px; border-bottom: 3px solid #d4a843; padding-bottom: 15px; }
-                        .header h1 { font-size: 22px; color: #333; margin-bottom: 4px; }
-                        .header p { color: #666; font-size: 12px; }
-                        .month-block { margin-bottom: 30px; page-break-inside: avoid; }
-                        .month-title { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-                        .calendar-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-                        .calendar-table th { background: #f5f5f5; padding: 6px; text-align: center; font-size: 10px; font-weight: 600; text-transform: uppercase; border: 1px solid #ddd; }
-                        .calendar-table td { border: 1px solid #ddd; padding: 4px; vertical-align: top; height: 70px; }
-                        .calendar-table td.empty { background: #fafafa; }
-                        .day-num { font-weight: bold; font-size: 12px; margin-bottom: 2px; }
-                        .event { font-size: 8px; padding: 2px 4px; margin-bottom: 2px; border-radius: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-                        .event.confirmed { background: #d1fae5; color: #065f46; }
-                        .event.pending { background: #fef3c7; color: #92400e; }
-                        .event.other { background: #f3f4f6; color: #374151; }
-                        .summary-section { margin-top: 30px; page-break-before: always; }
-                        .summary-section h3 { font-size: 16px; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-                        .summary-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-                        .summary-table th { background: #f5f5f5; padding: 8px 6px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; border: 1px solid #ddd; }
-                        .summary-table td { padding: 6px; border: 1px solid #ddd; font-size: 10px; }
-                        .summary-table .small-text { font-size: 9px; }
-                        .status-badge { padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 600; }
-                        .status-badge.confirmed { background: #d1fae5; color: #065f46; }
-                        .status-badge.pending { background: #fef3c7; color: #92400e; }
-                        .status-badge.other { background: #f3f4f6; color: #374151; }
-                        .total-line { margin-top: 10px; font-weight: 600; font-size: 12px; }
-                        .footer { margin-top: 30px; text-align: center; font-size: 9px; color: #999; border-top: 1px solid #eee; padding-top: 10px; }
-                        @media print { body { padding: 15px; } }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>ELOQUENTE CATERING SERVICES</h1>
-                        <p>Event Calendar — ${start} to ${end}</p>
-                        <p>Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-                    </div>
-                    ${calendarHTML}
-                    ${summaryHTML}
-                    <div class="footer">
-                        Generated by Eloquente Marketing Module
-                    </div>
-                    <script>window.print();</script>
-                </body>
-            </html>
-        `;
-
-        const win = window.open('', '_blank');
-        win.document.write(content);
-        win.document.close();
         setShowExportModal(false);
     };
 
@@ -1754,23 +1708,33 @@ const DashboardMarketing = () => {
         </div>
     );
 
-    const renderInquiries = () => {
+    const renderBookings = () => {
         const reviewableBookings = bookings.filter(b => (
             !['Completed', 'completed', 'Cancelled', 'cancelled'].includes(b.status)
             && (b.status === 'Pending' || ['Submitted', 'Under Review', 'Needs Customer Details', 'Clarification Received'].includes(b.review_status))
         ));
         const reviewCounts = reviewableBookings.reduce((counts, booking) => {
             const ownedByMe = Number(booking.owner_id ?? booking.assigned_to) === Number(user?.id);
+            const waitingOnCustomer = String(booking.review_status || '').toLowerCase() === 'needs customer details' || Boolean(booking.clarification_request && !booking.clarification_response);
+            const customerResponded = String(booking.review_status || '').toLowerCase() === 'clarification received' || Boolean(booking.clarification_response);
             if (!booking.assigned_to) counts.claim += 1;
             if (ownedByMe) counts.mine += 1;
+            if (booking.can_accept_transfer) counts.transfers += 1;
+            if (waitingOnCustomer) counts.waiting += 1;
+            if (!booking.assigned_to || booking.can_accept_transfer || (ownedByMe && customerResponded) || (ownedByMe && !waitingOnCustomer)) counts['needs-action'] += 1;
             counts.all += 1;
             return counts;
-        }, { claim: 0, mine: 0, all: 0 });
+        }, { 'needs-action': 0, claim: 0, mine: 0, transfers: 0, waiting: 0, all: 0 });
         const pendingTransferBookings = reviewableBookings.filter(booking => booking.can_accept_transfer);
         const viewBookings = reviewableBookings.filter((booking) => {
             const ownedByMe = Number(booking.owner_id ?? booking.assigned_to) === Number(user?.id);
+            const waitingOnCustomer = String(booking.review_status || '').toLowerCase() === 'needs customer details' || Boolean(booking.clarification_request && !booking.clarification_response);
+            const customerResponded = String(booking.review_status || '').toLowerCase() === 'clarification received' || Boolean(booking.clarification_response);
+            if (bookingReviewView === 'needs-action') return !booking.assigned_to || booking.can_accept_transfer || (ownedByMe && customerResponded) || (ownedByMe && !waitingOnCustomer);
             if (bookingReviewView === 'claim') return !booking.assigned_to;
             if (bookingReviewView === 'mine') return ownedByMe;
+            if (bookingReviewView === 'transfers') return booking.can_accept_transfer;
+            if (bookingReviewView === 'waiting') return waitingOnCustomer;
             return true;
         });
         const pendingBookings = viewBookings
@@ -1813,7 +1777,7 @@ const DashboardMarketing = () => {
         return (
             <div className="space-y-4">
                 <div className="marketing-panel flex flex-wrap gap-2 p-2">
-                    {REVIEW_QUEUE_VIEWS.map(option => (
+                    {BOOKING_WORK_VIEWS.map(option => (
                         <button
                             key={option.id}
                             type="button"
@@ -1922,9 +1886,9 @@ const DashboardMarketing = () => {
                                                 </p>
                                             </div>
                                             <div className="mt-4 flex items-center text-sm sm:mt-0 space-x-3">
-                                                {canClaim && (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
+                                                        {canClaim && (
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); assignBooking(booking.id); }}
                                                         className="inline-flex items-center gap-1.5 rounded-lg border border-[#720101]/15 bg-white px-4 py-1.5 font-bold text-[#720101] transition-colors hover:bg-[#720101]/5"
                                                     >
                                                         Claim booking
@@ -2001,145 +1965,15 @@ const DashboardMarketing = () => {
         );
     };
 
-    const generatePDF = (booking, type) => {
-        if (type === 'Kitchen Prep List') {
-            window.location.href = `/documents/bookings/${booking.id}/preparation.pdf`;
-            return;
-        }
-
-        let menuHTML = '';
-        if (type === 'Kitchen Prep List' && booking.selected_menu) {
-            try {
-                const menu = typeof booking.selected_menu === 'string'
-                    ? JSON.parse(booking.selected_menu)
-                    : booking.selected_menu;
-                const categories = { starters: 'Starters', mains: 'Main Courses', sides: 'Side Dishes', desserts: 'Desserts', drinks: 'Beverages' };
-                let dishList = '';
-                Object.keys(menu).forEach(cat => {
-                    if (menu[cat] && menu[cat].length > 0) {
-                        const items = menu[cat].map(item => {
-                            if (typeof item === 'object' && item !== null) return item.name;
-                            const dish = DISHES[cat]?.find(d => d.id === item);
-                            return dish ? dish.name : item;
-                        }).join(', ');
-                        dishList += `<li><strong>${categories[cat] || cat}:</strong> ${items}</li>`;
-                    }
-                });
-                if (dishList) {
-                    menuHTML = `
-                        <h4 style="margin-top: 20px; text-decoration: underline;">Selected Menu</h4>
-                        <ul style="line-height: 1.6;">${dishList}</ul>
-                    `;
-                }
-            } catch (e) {
-                console.error("Error parsing menu for PDF:", e);
-            }
-        }
-
-        const content = `
-            <html>
-                <head>
-                    <title>${type} - Booking #${booking.id}</title>
-                    <style>
-                        body { font-family: serif; padding: 40px; }
-                        h1 { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
-                        .header { margin-bottom: 30px; }
-                        .details { margin-bottom: 30px; line-height: 1.6; }
-                        .footer { margin-top: 50px; text-align: center; font-size: 0.8em; }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>ELOQUENTE CATERING SERVICES</h1>
-                        <h2 style="text-align:center">${type.toUpperCase()}</h2>
-                    </div>
-
-                    <div class="details">
-                        <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
-                        <p><strong>Event Date:</strong> ${formatDate(booking.event_date)}</p>
-                        <p><strong>Client:</strong> ${booking.client_full_name || booking.username}</p>
-                        <p><strong>Email:</strong> ${booking.client_email || 'N/A'}</p>
-                        <p><strong>Phone:</strong> ${booking.client_phone || 'N/A'}</p>
-                        <p><strong>Guests:</strong> ${booking.pax}</p>
-                        <p><strong>Venue:</strong> ${[booking.venue_address_line, booking.venue_street, booking.venue_city, booking.venue_province, booking.venue_zip_code].filter(Boolean).join(', ') || 'N/A'}</p>
-                        ${booking.special_instructions ? `<p><strong>Special Notes:</strong> ${booking.special_instructions}</p>` : ''}
-                        
-                        ${type === 'Contract' ? `
-                            <p><strong>Total Budget:</strong> PHP {(booking.total_cost || booking.budget || 0).toLocaleString()}</p>
-                            <p><strong>Terms:</strong> 50% Downpayment required to secure date.</p>
-                            <br><br>
-                            <div style="display:flex; justify-content:space-between; margin-top:50px;">
-                                <div>_____________________<br>Client Signature</div>
-                                <div>_____________________<br>Eloquente Representative</div>
-                            </div>
-                        ` : `
-                            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc;">
-                                <h3>Kitchen Preparation</h3>
-                                <ul>
-                                    <li>Prepare service for ${booking.pax} guests</li>
-                                    <li>Suggested service team: ${Math.ceil(booking.pax / 20)} staff</li>
-                                </ul>
-                                ${menuHTML}
-                            </div>
-                        `}
-                    </div>
-
-                    <div class="footer">
-                        Generated by Eloquente Marketing Module
-                    </div>
-                    <script>window.print();</script>
-                </body>
-            </html>
-        `;
-
-        const win = window.open('', '_blank');
-        win.document.write(content);
-        win.document.close();
-    };
-
-    const renderDocuments = () => {
-        const confirmedBookings = bookings.filter(b => b.status === 'Confirmed');
-        return (
-            <div className="marketing-panel overflow-hidden">
-                <ul className="divide-y divide-amber-100/70">
-                    {confirmedBookings.length === 0 ? <li className="p-6 text-gray-500 text-center">No confirmed events for documentation.</li> : null}
-                    {confirmedBookings.map(booking => (
-                        <li key={booking.id} className="block hover:bg-[#fffaf3]">
-                            <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900">
-                                        Booking #{booking.id} - {booking.client_full_name || booking.username}
-                                    </h3>
-                                    <p className="mt-1 text-sm font-medium text-gray-500">
-                                        {formatDate(booking.event_date)} at {formatTime(booking.event_time)}
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap gap-3">
-                                    <button
-                                        onClick={() => generatePDF(booking, 'Contract')}
-                                        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
-                                    >
-                                        Generate Contract
-                                    </button>
-                                    <button
-                                        onClick={() => generatePDF(booking, 'Kitchen Prep List')}
-                                        className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700"
-                                    >
-                                        Generate Prep List
-                                    </button>
-                                </div>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
-            </div>
-        );
-    };
-
-    const renderSettings = () => {
+    const renderPublicContent = () => {
         const categories = ['starter', 'main', 'side', 'dessert', 'drink'];
         const visibleItems = menuItems.filter(item => item.category === activeMenuCategory);
         const catalogMeta = {
+            announcements: {
+                title: 'Announcements',
+                text: 'Publish homepage and customer-dashboard updates without mixing them into booking work.',
+                action: null,
+            },
             packages: {
                 title: 'Packages',
                 text: 'Manage package presets, pricing, connected event types, and customer-facing details.',
@@ -2153,6 +1987,11 @@ const DashboardMarketing = () => {
             menuItems: {
                 title: 'Menu Items',
                 text: 'Review menu items by category and update pricing values quickly.',
+                action: null,
+            },
+            preview: {
+                title: 'Customer Preview',
+                text: 'Open public customer-facing screens to review content changes before customers see them.',
                 action: null,
             },
         };
@@ -2178,6 +2017,10 @@ const DashboardMarketing = () => {
             if (catalogDrawer === 'eventType') resetEventTypeForm();
             setCatalogDrawer(null);
         };
+        const eventTypeLabel = (slug) => eventTypes.find(type => type.slug === slug)?.label || titleCase(slug);
+        const packageEventTypeLabels = (pkg) => [...new Set(pkg.event_type_slugs?.length ? pkg.event_type_slugs : [pkg.type])]
+            .filter(Boolean)
+            .map(eventTypeLabel);
         const togglePackageEventType = (slug) => {
             const current = packageForm.event_type_slugs || [];
             const next = current.includes(slug) ? current.filter(item => item !== slug) : [...current, slug];
@@ -2194,7 +2037,7 @@ const DashboardMarketing = () => {
                         <p className="staff-section-copy">{activeCatalogMeta.text}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <a href={activeConfigTab === 'packages' ? '/preview/packages' : '/preview/menu'} target="_blank" rel="noreferrer" className="staff-button-secondary">Preview as customer</a>
+                        <a href={activeConfigTab === 'announcements' ? '/preview/menu' : activeConfigTab === 'packages' ? '/preview/packages' : '/preview/menu'} target="_blank" rel="noreferrer" className="staff-button-secondary">Preview as customer</a>
                         {activeConfigTab === 'packages' && (
                             <button type="button" onClick={() => openPackageDrawer()} className="staff-button-primary">Create package</button>
                         )}
@@ -2206,9 +2049,11 @@ const DashboardMarketing = () => {
                 <div className="staff-catalog-tabs">
                     <nav className="flex gap-2 overflow-x-auto">
                         {[
+                            ['announcements', 'Announcements'],
                             ['packages', 'Packages'],
                             ['eventTypes', 'Event Types'],
                             ['menuItems', 'Menu Items'],
+                            ['preview', 'Customer Preview'],
                         ].map(([key, label]) => (
                             <button
                                 key={key}
@@ -2221,76 +2066,102 @@ const DashboardMarketing = () => {
                     </nav>
                 </div>
 
+                {activeConfigTab === 'announcements' && (
+                    <div className="p-4">
+                        <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading announcements" />}>
+                            <AnnouncementManager user={user} />
+                        </Suspense>
+                    </div>
+                )}
+
+                {activeConfigTab === 'preview' && (
+                    <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+                        {[
+                            ['Menu', '/preview/menu'],
+                            ['Packages', '/preview/packages'],
+                            ['Booking flow', '/preview/book'],
+                            ['Public homepage', '/'],
+                        ].map(([label, href]) => (
+                            <a key={href} href={href} target="_blank" rel="noreferrer" className="rounded-xl border border-amber-100 bg-white p-4 text-sm font-black text-slate-700 hover:bg-[#fffaf3]">
+                                Preview {label}
+                                <span className="mt-2 block text-xs font-bold text-slate-400">Opens in a new tab</span>
+                            </a>
+                        ))}
+                    </div>
+                )}
+
                 {activeConfigTab === 'packages' && (
-                    <div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
-                                    <tr>
-                                        <th className="px-6 py-4 text-left">Package</th>
-                                        <th className="px-6 py-4 text-left">Event Type</th>
-                                        <th className="px-6 py-4 text-left">Category</th>
-                                        <th className="px-6 py-4 text-left">Connected To</th>
-                                        <th className="px-6 py-4 text-right">Price / Head</th>
-                                        <th className="px-6 py-4 text-right">Minimum Guests</th>
-                                        <th className="px-6 py-4 text-left">Description</th>
-                                        <th className="px-6 py-4 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {packages.map(pkg => (
-                                        <tr key={pkg.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 font-bold text-gray-900">{pkg.name}</td>
-                                            <td className="px-6 py-4"><span className="rounded-md bg-primary-50 px-2.5 py-1 text-xs font-black uppercase text-primary-700">{eventTypes.find(type => type.slug === pkg.type)?.label || pkg.type}</span></td>
-                                            <td className="px-6 py-4 text-gray-600">{getCategoryLabel(pkg.package_category)}</td>
-                                            <td className="px-6 py-4 text-gray-600">{(pkg.event_type_slugs || [pkg.type]).map(slug => eventTypes.find(type => type.slug === slug)?.label || slug).join(', ')}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-gray-900">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-right text-gray-600">{pkg.minimum_pax}</td>
-                                            <td className="px-6 py-4 text-gray-600">{pkg.description || 'No description'}</td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button type="button" onClick={() => openPackageDrawer(pkg)} className="staff-row-action">Edit</button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                    <div className="divide-y divide-amber-100/70">
+                        {packages.map(pkg => {
+                            const labels = packageEventTypeLabels(pkg);
+                            return (
+                                <article key={pkg.id} className="grid gap-4 px-6 py-5 transition-colors hover:bg-[#fffaf3] lg:grid-cols-[minmax(220px,1.1fr)_minmax(260px,1.25fr)_minmax(160px,0.75fr)_auto] lg:items-center">
+                                    <div>
+                                        <p className="text-base font-black text-slate-950">{pkg.name}</p>
+                                        <p className="mt-1 text-sm font-semibold text-slate-500">{pkg.description || 'No description yet.'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Shown for</p>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {labels.map(label => (
+                                                <span key={label} className="rounded-full border border-amber-100 bg-white px-3 py-1 text-xs font-black text-slate-600">
+                                                    {label}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <p className="mt-2 text-xs font-semibold text-slate-400">
+                                            Catalog group: {getCategoryLabel(pkg.package_category)}
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 rounded-xl border border-amber-100 bg-white px-4 py-3 lg:grid-cols-1">
+                                        <div>
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Per guest</p>
+                                            <p className="text-lg font-black text-slate-950">PHP {Number(pkg.base_price_per_head || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Minimum</p>
+                                            <p className="text-lg font-black text-slate-950">{pkg.minimum_pax || 1} guest{Number(pkg.minimum_pax || 1) === 1 ? '' : 's'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <button type="button" onClick={() => openPackageDrawer(pkg)} className="staff-row-action">Edit</button>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                        {packages.length === 0 && (
+                            <div className="p-8 text-center text-sm font-semibold text-slate-500">No packages have been created yet.</div>
+                        )}
                     </div>
                 )}
 
                 {activeConfigTab === 'eventTypes' && (
-                    <div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-gray-50 text-xs font-black uppercase tracking-wider text-gray-500">
-                                    <tr>
-                                        <th className="px-6 py-4 text-left">Event Type</th>
-                                        <th className="px-6 py-4 text-left">Short Name</th>
-                                        <th className="px-6 py-4 text-left">Category</th>
-                                        <th className="px-6 py-4 text-left">Security</th>
-                                        <th className="px-6 py-4 text-left">Icon</th>
-                                        <th className="px-6 py-4 text-left">Description</th>
-                                        <th className="px-6 py-4 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {eventTypes.map(type => (
-                                        <tr key={type.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 font-bold text-gray-900">{type.label}</td>
-                                            <td className="px-6 py-4"><span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black uppercase text-gray-700">{type.slug}</span></td>
-                                            <td className="px-6 py-4 text-gray-600">{getCategoryLabel(type.package_category)}</td>
-                                            <td className="px-6 py-4 text-gray-600">{type.security_label || getSecurityLabel(type.security_type)}</td>
-                                            <td className="px-6 py-4 text-gray-600">{type.icon}</td>
-                                            <td className="px-6 py-4 text-gray-600">{type.description || 'No description'}</td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button type="button" onClick={() => openEventTypeDrawer(type)} className="staff-row-action mr-2">Edit</button>
-                                                <button type="button" onClick={() => handleDeleteEventType(type)} className="staff-row-action staff-row-action-danger">Delete</button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                    <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+                        {eventTypes.map(type => (
+                            <article key={type.id} className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-lg font-black text-slate-950">{type.label}</p>
+                                        <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-400">{type.slug}</p>
+                                    </div>
+                                    <span className="rounded-full bg-[#fff7e8] px-3 py-1 text-xs font-black text-[#9f6500]">
+                                        {getCategoryLabel(type.package_category)}
+                                    </span>
+                                </div>
+                                <p className="mt-4 min-h-12 text-sm font-semibold leading-relaxed text-slate-500">{type.description || 'No customer-facing description yet.'}</p>
+                                <div className="mt-4 rounded-xl bg-[#fbf8f2] px-4 py-3">
+                                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Security term</p>
+                                    <p className="mt-1 text-sm font-black text-slate-700">{type.security_label || getSecurityLabel(type.security_type)}</p>
+                                </div>
+                                <div className="mt-5 flex justify-end gap-2">
+                                    <button type="button" onClick={() => openEventTypeDrawer(type)} className="staff-row-action">Edit</button>
+                                    <button type="button" onClick={() => handleDeleteEventType(type)} className="staff-row-action staff-row-action-danger">Delete</button>
+                                </div>
+                            </article>
+                        ))}
+                        {eventTypes.length === 0 && (
+                            <div className="rounded-xl border border-amber-100 bg-white p-8 text-center text-sm font-semibold text-slate-500 md:col-span-2 xl:col-span-3">No event types have been created yet.</div>
+                        )}
                     </div>
                 )}
 
@@ -2557,8 +2428,8 @@ const DashboardMarketing = () => {
             roleLabel="Marketing team"
             label="Preparing marketing workspace"
             navGroups={[
-                { label: 'Daily work', items: ['Today', 'Booking Reviews', 'Guest Inquiries', 'Event Calendar', 'Event Preparation', 'Messages'] },
-                { label: 'Operations', items: ['Date Availability', 'Event Documents', 'Announcements', 'Menu & Packages', 'Event History'] },
+                { label: 'Daily work', items: ['Today', 'Bookings', 'Guest Inquiries', 'Calendar', 'Event Handoff', 'Messages'] },
+                { label: 'Operations', items: ['Public Content', 'Availability', 'Event History'] },
             ]}
         />
     );
@@ -2576,20 +2447,18 @@ const DashboardMarketing = () => {
                     label: 'Daily work',
                      items: [
                          { id: 'today', label: 'Today', count: marketingSummary.pending + marketingSummary.needsDetails },
-                         { id: 'intake', label: 'Booking Reviews', count: dashboardSummary.pending },
+                         { id: 'bookings', label: 'Bookings', count: dashboardSummary.pending },
                         { id: 'leads', label: 'Guest Inquiries', count: leadData.summary?.open || 0 },
-                         { id: 'calendar', label: 'Event Calendar', count: dashboardSummary.monthEvents },
-                        { id: 'preparation', label: 'Event Preparation', count: marketingSummary.upcoming },
+                         { id: 'calendar', label: 'Calendar', count: dashboardSummary.monthEvents },
+                        { id: 'handoff', label: 'Event Handoff', count: marketingSummary.upcoming },
                         { id: 'messages', label: 'Messages' },
                     ],
                 },
                 {
                     label: 'Operations',
                     items: [
-                        { id: 'availability', label: 'Date Availability' },
-                        { id: 'documents', label: 'Event Documents' },
-                        { id: 'content', label: 'Announcements' },
-                        { id: 'settings', label: 'Menu & Packages' },
+                        { id: 'public-content', label: 'Public Content' },
+                        { id: 'availability', label: 'Availability' },
                         { id: 'history', label: 'Event History' },
                     ],
                 },
@@ -2674,21 +2543,15 @@ const DashboardMarketing = () => {
                     </div>
                 )}
 
-                {activeTab === 'intake' && renderInquiries()}
+                {activeTab === 'bookings' && renderBookings()}
                 {activeTab === 'leads' && renderPublicLeads()}
                 {activeTab === 'availability' && renderAvailability()}
-                {activeTab === 'preparation' && (
+                {activeTab === 'handoff' && (
                     <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading preparation board" />}>
                         <PreparationBoard />
                     </Suspense>
                 )}
-                {activeTab === 'documents' && renderDocuments()}
-                {activeTab === 'content' && (
-                    <Suspense fallback={<StaffSkeleton variant="panel" rows={3} label="Loading content tools" />}>
-                        <AnnouncementManager user={user} />
-                    </Suspense>
-                )}
-                {activeTab === 'settings' && renderSettings()}
+                {activeTab === 'public-content' && renderPublicContent()}
                 {activeTab === 'history' && (
                     <EventHistoryPanel role="marketing" onToast={(message, type) => type === 'error' ? toast.error(message) : toast.success(message)} />
                 )}

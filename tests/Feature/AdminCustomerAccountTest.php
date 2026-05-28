@@ -112,7 +112,7 @@ class AdminCustomerAccountTest extends TestCase
         ]);
     }
 
-    public function test_admin_can_create_admin_account_but_regular_staff_actions_remain_protected(): void
+    public function test_admin_can_create_admin_account_and_reset_temporary_password_but_deactivation_stays_protected(): void
     {
         Notification::fake();
 
@@ -135,6 +135,7 @@ class AdminCustomerAccountTest extends TestCase
         $this->assertSame('Admin', $created->role);
         $this->assertTrue((bool) $created->must_change_password);
         $this->assertNotEmpty($response->json('temporary_password'));
+        $this->assertNotSame($response->json('temporary_password'), $created->getRawOriginal('temporary_password_secret'));
         $this->assertTrue($created->temporary_password_expires_at->between(now()->addHours(23), now()->addHours(25)));
         Notification::assertSentTo($created, StaffAccountAccessNotification::class);
 
@@ -149,7 +150,8 @@ class AdminCustomerAccountTest extends TestCase
 
         $this->actingAs($admin)
             ->postJson("/api/admin/employees/{$created->id}/reset-password")
-            ->assertForbidden();
+            ->assertOk()
+            ->assertJsonStructure(['temporary_password', 'temporary_password_expires_at', 'email_delivery_status']);
     }
 
     public function test_reset_temporary_password_is_emailed_and_expires_within_one_day(): void
@@ -168,13 +170,94 @@ class AdminCustomerAccountTest extends TestCase
         $staff->refresh();
 
         $this->assertNotEmpty($response->json('temporary_password'));
+        $this->assertNotSame($response->json('temporary_password'), $staff->getRawOriginal('temporary_password_secret'));
         $this->assertTrue($staff->temporary_password_expires_at->between(now()->addHours(23), now()->addHours(25)));
         Notification::assertSentTo($staff, StaffAccountAccessNotification::class);
+    }
+
+    public function test_admin_can_reveal_temporary_password_until_it_is_used_or_expired(): void
+    {
+        $admin = $this->user('Admin');
+        $staff = $this->user('Marketing');
+
+        $reset = $this->actingAs($admin)
+            ->postJson("/api/admin/employees/{$staff->id}/reset-password")
+            ->assertOk();
+
+        $temporaryPassword = $reset->json('temporary_password');
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/employees/{$staff->id}/temporary-password/reveal")
+            ->assertOk()
+            ->assertJsonPath('temporary_password', $temporaryPassword);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'Temporary password viewed',
+        ]);
+
+        $this->actingAs($staff)
+            ->postJson('/password/change-required', [
+                'password' => 'NewSecurePassword123!',
+                'password_confirmation' => 'NewSecurePassword123!',
+            ])
+            ->assertOk();
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/employees/{$staff->id}/temporary-password/reveal")
+            ->assertStatus(410)
+            ->assertJsonPath('message', 'Temporary password is no longer available. Reset temporary password to generate a new one.');
+    }
+
+    public function test_expired_temporary_password_cannot_be_revealed(): void
+    {
+        $admin = $this->user('Admin');
+        $staff = $this->user('Marketing', [
+            'must_change_password' => true,
+            'temporary_password_expires_at' => now()->subMinute(),
+            'temporary_password_secret' => 'ExpiredSecret123!',
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/employees/{$staff->id}/temporary-password/reveal")
+            ->assertStatus(410);
+
+        $this->assertNull($staff->fresh()->temporary_password_secret);
+    }
+
+    public function test_temporary_password_secret_is_not_exposed_in_employee_list(): void
+    {
+        $admin = $this->user('Admin');
+        $staff = $this->user('Marketing', [
+            'must_change_password' => true,
+            'temporary_password_expires_at' => now()->addDay(),
+            'temporary_password_secret' => 'SecretToHide123!',
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/api/admin/employees?paginated=1')
+            ->assertOk();
+
+        $row = collect($response->json('data'))->firstWhere('id', $staff->id);
+        $this->assertIsArray($row);
+        $this->assertArrayNotHasKey('temporary_password_secret', $row);
     }
 
     public function test_authenticated_users_can_refresh_csrf_token(): void
     {
         $admin = $this->user('Admin');
+
+        $this->actingAs($admin)
+            ->getJson('/api/session/csrf-token')
+            ->assertOk()
+            ->assertJsonStructure(['token']);
+    }
+
+    public function test_password_change_required_users_can_refresh_csrf_token(): void
+    {
+        $admin = $this->user('Admin', [
+            'must_change_password' => true,
+        ]);
 
         $this->actingAs($admin)
             ->getJson('/api/session/csrf-token')
@@ -218,6 +301,7 @@ class AdminCustomerAccountTest extends TestCase
         $admin = $this->user('Admin', [
             'must_change_password' => true,
             'temporary_password_expires_at' => now()->addDay(),
+            'temporary_password_secret' => 'OldTemporaryPassword123!',
         ]);
 
         $this->actingAs($admin)
@@ -231,6 +315,7 @@ class AdminCustomerAccountTest extends TestCase
 
         $this->assertFalse((bool) $admin->must_change_password);
         $this->assertNull($admin->temporary_password_expires_at);
+        $this->assertNull($admin->temporary_password_secret);
         $this->assertNotSame('NewSecurePassword123!', $admin->password);
         $this->assertTrue(Hash::check('NewSecurePassword123!', $admin->password));
     }

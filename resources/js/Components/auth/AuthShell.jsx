@@ -24,6 +24,9 @@ const AuthShell = ({
     simple = false,
     hideAuthSwitch = false,
     hideHomeLink = false,
+    backLabel = 'Home',
+    backHref = '/',
+    onBack = null,
 }) => {
     const isLogin = mode === 'login';
     const [transitionTarget, setTransitionTarget] = useState(null);
@@ -47,6 +50,31 @@ const AuthShell = ({
                 preserveState: false,
             });
         }, 360);
+    };
+
+    const backControl = (className) => {
+        if (hideHomeLink) return <span />;
+
+        const content = (
+            <>
+                <ArrowLeft className="h-4 w-4" />
+                {backLabel}
+            </>
+        );
+
+        if (onBack) {
+            return (
+                <button type="button" onClick={onBack} className={className}>
+                    {content}
+                </button>
+            );
+        }
+
+        return (
+            <Link href={backHref} prefetch="mount" className={className}>
+                {content}
+            </Link>
+        );
     };
 
     const authCard = (
@@ -109,12 +137,7 @@ const AuthShell = ({
                 <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-white via-white/82 to-transparent" />
 
                 <header className="absolute inset-x-0 top-0 z-30 mx-auto flex max-w-6xl items-center justify-between px-5 py-5 sm:px-8">
-                    {hideHomeLink ? <span /> : (
-                        <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/75 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm backdrop-blur transition hover:border-red-200 hover:text-red-900">
-                            <ArrowLeft className="h-4 w-4" />
-                            Home
-                        </Link>
-                    )}
+                    {backControl("inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/75 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm backdrop-blur transition hover:border-red-200 hover:text-red-900")}
                     <img src={logoImg} alt="Eloquente Catering" className="h-11 w-auto drop-shadow-sm" />
                 </header>
 
@@ -151,12 +174,7 @@ const AuthShell = ({
                     <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/55 via-black/18 to-transparent" />
 
                     <div className="relative z-10 flex h-full w-full flex-col justify-between p-12">
-                        {hideHomeLink ? <span /> : (
-                            <Link href="/" prefetch="mount" className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur transition hover:bg-white/20 hover:text-white">
-                                <ArrowLeft className="h-4 w-4" />
-                                Home
-                            </Link>
-                        )}
+                        {backControl("inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur transition hover:bg-white/20 hover:text-white")}
 
                         <div className="auth-brand-copy max-w-xl">
                             <div className="mb-7 inline-flex h-10 items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 backdrop-blur">
@@ -188,12 +206,7 @@ const AuthShell = ({
                 <main className={`flex h-screen items-center justify-center overflow-hidden ${mainPadding}`}>
                     <div className="w-full max-w-[460px]">
                         <div className="mb-4 flex items-center justify-between lg:hidden">
-                            {hideHomeLink ? <span /> : (
-                                <Link href="/" prefetch="mount" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-red-900">
-                                    <ArrowLeft className="h-4 w-4" />
-                                    Home
-                                </Link>
-                            )}
+                            {backControl("inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-red-900")}
                             <img src={logoImg} alt="Eloquente Catering" className="h-10 w-auto" />
                         </div>
 

@@ -6,6 +6,7 @@ import ConfirmModal from '../Components/common/ConfirmModal';
 import PaymentTermEditorModal from '../Components/finance/PaymentTermEditorModal';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import useStaffWorkspaceState from '../hooks/useStaffWorkspaceState';
 import { getListData, getPaginationMeta } from '../utils/apiResponses';
 import StaffPagination from '../Components/staff/StaffPagination';
 import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
@@ -17,6 +18,7 @@ import NextActionPanel from '../Components/staff/NextActionPanel';
 import StaffStatusBadge from '../Components/staff/StaffStatusBadge';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import { staffPaymentStatus } from '../utils/statusLabels';
+import csrfFetch from '../utils/csrf';
 
 const PAYMENT_TYPE_LABELS = {
     Reservation: { label: 'Reservation Fee', pct: '10%', icon: 'R' },
@@ -25,10 +27,28 @@ const PAYMENT_TYPE_LABELS = {
 };
 
 const eventDisplayName = (booking) => booking?.event_display_name || booking?.event_name || booking?.event_type || booking?.package_name || (booking?.id ? `Booking #${booking.id}` : 'Eloquente event');
+const ACCOUNTING_WORKSPACE_TABS = ['today', 'payments', 'refunds', 'ledger', 'history'];
+const ACCOUNTING_TAB_ALIASES = {
+    bookings: 'payments',
+    reconciliation: 'payments',
+};
+
+const readInitialAccountingSegment = () => {
+    if (typeof window === 'undefined') return 'needs_verification';
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tab') === 'reconciliation' ? 'exceptions' : 'needs_verification';
+};
 
 const DashboardAccounting = () => {
     const { user, logout } = useAuth();
-    const [activeTab, setActiveTab] = useState('today');
+    const [activeTab, setActiveTab] = useStaffWorkspaceState({
+        storageKey: 'ecs:staff-workspace:accounting',
+        defaultTab: 'today',
+        allowedTabs: ACCOUNTING_WORKSPACE_TABS,
+        tabAliases: ACCOUNTING_TAB_ALIASES,
+    });
+    const [paymentSegment, setPaymentSegment] = useState(readInitialAccountingSegment);
+    const [refundSegment, setRefundSegment] = useState('needs_review');
     const [bookings, setBookings] = useState([]);
     const [accountingSummary, setAccountingSummary] = useState(null);
     const [ledgerPayments, setLedgerPayments] = useState([]);
@@ -46,7 +66,7 @@ const DashboardAccounting = () => {
     // Refund Management State
     const [refundQueue, setRefundQueue] = useState([]);
 
-    const [ledgerFilter, setLedgerFilter] = useState({ status: 'All', startDate: '', endDate: '', clientSearch: '', packageFilter: 'All' });
+    const [ledgerFilter, setLedgerFilter] = useState({ status: 'Verified', startDate: '', endDate: '', clientSearch: '', packageFilter: 'All', method: 'All', payment_type: 'All' });
     const [ledgerPage, setLedgerPage] = useState(1);
     const [ledgerPerPage, setLedgerPerPage] = useState(25);
     const [reconciliationSearch, setReconciliationSearch] = useState('');
@@ -66,17 +86,19 @@ const DashboardAccounting = () => {
     useEffect(() => {
         if (activeTab === 'today') {
             fetchAccountingSummary();
+            fetchBookings({ silent: true });
             fetchReconciliation({ silent: true });
-        } else if (activeTab === 'bookings') {
+            fetchRefundQueue({ silent: true });
+            fetchLedger({ silent: true });
+        } else if (activeTab === 'payments') {
             fetchBookings();
+            fetchReconciliation({ silent: true });
         } else if (activeTab === 'ledger') {
             fetchLedger();
-        } else if (activeTab === 'reconciliation') {
-            fetchReconciliation();
         } else if (activeTab === 'refunds') {
             fetchRefundQueue();
         }
-    }, [activeTab, ledgerFilter, bookingPage, debouncedBookingSearchQuery, bookingSortOrder, bookingPaymentFilter]);
+    }, [activeTab, ledgerFilter, bookingPage, debouncedBookingSearchQuery, bookingSortOrder, bookingPaymentFilter, paymentSegment]);
 
     useEffect(() => {
         setBookingPage(1);
@@ -106,15 +128,16 @@ const DashboardAccounting = () => {
         interval: activeTab === 'ledger' ? 120000 : 90000,
         idleAfter: 180000,
         refresh: ({ silent = false } = {}) => {
-            if (activeTab === 'bookings') {
+            if (activeTab === 'payments') {
                 fetchBookings({ silent });
+                fetchReconciliation({ silent: true });
             } else if (activeTab === 'today') {
                 fetchAccountingSummary({ silent });
+                fetchBookings({ silent: true });
                 fetchReconciliation({ silent: true });
+                fetchRefundQueue({ silent: true });
             } else if (activeTab === 'ledger') {
                 fetchLedger({ silent });
-            } else if (activeTab === 'reconciliation') {
-                fetchReconciliation({ silent });
             } else if (activeTab === 'refunds') {
                 fetchRefundQueue({ silent });
             }
@@ -131,6 +154,7 @@ const DashboardAccounting = () => {
                 search: debouncedBookingSearchQuery,
                 sort: bookingSortOrder,
                 payment_status: bookingPaymentFilter,
+                finance_segment: paymentSegment,
             }).toString();
             const res = await fetch('/api/accounting/bookings?' + query, {
                 headers: { }
@@ -180,7 +204,7 @@ const DashboardAccounting = () => {
     const handleVerify = async (id, action) => {
         try {
             // Session auth - no token needed
-            const res = await fetch('/api/accounting/payments/' + id + '/verify', {
+            const res = await csrfFetch('/api/accounting/payments/' + id + '/verify', {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
@@ -261,7 +285,7 @@ const DashboardAccounting = () => {
         if (remindingPaymentId === paymentId) return; // prevent double-click
         setRemindingPaymentId(paymentId);
         try {
-            const res = await fetch(`/api/accounting/remind/${paymentId}`, {
+            const res = await csrfFetch(`/api/accounting/remind/${paymentId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -305,7 +329,7 @@ const DashboardAccounting = () => {
         setRefundProcessing(true);
         try {
             // Session auth - no token needed
-            const res = await fetch(`/api/accounting/refund/${bookingId}`, {
+            const res = await csrfFetch(`/api/accounting/refund/${bookingId}`, {
                 method: 'POST',
                 headers: { }
             });
@@ -355,12 +379,47 @@ const DashboardAccounting = () => {
         return accountingSummary ? { ...localSummary, ...accountingSummary } : localSummary;
     }, [bookings, ledgerPayments, refundQueue, reconciliationItems, accountingSummary]);
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueSoonLimit = new Date(today);
+    dueSoonLimit.setDate(dueSoonLimit.getDate() + 7);
+
+    const paymentMatchesSegment = (booking, segment = paymentSegment) => {
+        const payments = booking.payments || [];
+        if (segment === 'all_active') return true;
+        if (segment === 'needs_verification') return payments.some((payment) => payment.status === 'Pending');
+        if (segment === 'overdue') {
+            return payments.some((payment) => payment.status === 'Pending' && payment.due_date && new Date(payment.due_date) < today);
+        }
+        if (segment === 'upcoming') {
+            return payments.some((payment) => {
+                if (payment.status !== 'Pending' || !payment.due_date) return false;
+                const due = new Date(payment.due_date);
+                return due >= today && due <= dueSoonLimit;
+            });
+        }
+        return true;
+    };
+
+    const paymentQueueCounts = useMemo(() => {
+        const pending = bookings.filter((booking) => paymentMatchesSegment(booking, 'needs_verification')).length;
+        const overdue = bookings.filter((booking) => paymentMatchesSegment(booking, 'overdue')).length;
+        const upcoming = bookings.filter((booking) => paymentMatchesSegment(booking, 'upcoming')).length;
+
+        return {
+            needs_verification: accountingSummary?.needs_verification ?? accountingSummary?.pending ?? pending,
+            overdue: accountingSummary?.overdue ?? overdue,
+            exceptions: reconciliationItems.length,
+            upcoming: accountingSummary?.due_soon ?? upcoming,
+            all_active: accountingSummary?.bookings ?? bookings.length,
+        };
+    }, [bookings, reconciliationItems.length, accountingSummary]);
+
     const tabMeta = {
         today: 'Today',
-        bookings: 'Payment Review',
-        ledger: 'Payment Ledger',
-        reconciliation: 'Payment Issues',
-        refunds: 'Refund Queue',
+        payments: 'Payments',
+        ledger: 'Ledger & Receipts',
+        refunds: 'Refunds',
         history: 'Event History',
     };
 
@@ -373,7 +432,10 @@ const DashboardAccounting = () => {
             badge: dashboardSummary.pending,
             primaryLabel: 'Open',
             tone: dashboardSummary.pending > 0 ? 'warn' : 'good',
-            onOpen: () => setActiveTab('bookings'),
+            onOpen: () => {
+                setPaymentSegment('needs_verification');
+                setActiveTab('payments');
+            },
         },
         {
             id: 'overdue-balances',
@@ -383,7 +445,10 @@ const DashboardAccounting = () => {
             badge: dashboardSummary.overdue,
             primaryLabel: 'Open',
             tone: dashboardSummary.overdue > 0 ? 'danger' : 'good',
-            onOpen: () => setActiveTab('ledger'),
+            onOpen: () => {
+                setPaymentSegment('overdue');
+                setActiveTab('payments');
+            },
         },
         {
             id: 'payment-exceptions',
@@ -393,7 +458,10 @@ const DashboardAccounting = () => {
             badge: dashboardSummary.exceptions,
             primaryLabel: 'Open',
             tone: dashboardSummary.exceptions > 0 ? 'danger' : 'good',
-            onOpen: () => setActiveTab('reconciliation'),
+            onOpen: () => {
+                setPaymentSegment('exceptions');
+                setActiveTab('payments');
+            },
         },
         {
             id: 'refund-queue',
@@ -406,6 +474,19 @@ const DashboardAccounting = () => {
             onOpen: () => setActiveTab('refunds'),
         },
     ]), [dashboardSummary.exceptions, dashboardSummary.overdue, dashboardSummary.pending, dashboardSummary.refunds]);
+
+    const todayQueues = useMemo(() => {
+        const pendingBookings = bookings.filter((booking) => paymentMatchesSegment(booking, 'needs_verification')).slice(0, 4);
+        const overdueBookings = bookings.filter((booking) => paymentMatchesSegment(booking, 'overdue')).slice(0, 4);
+        const upcomingBookings = bookings.filter((booking) => paymentMatchesSegment(booking, 'upcoming')).slice(0, 4);
+
+        return {
+            urgent: [...reconciliationItems.slice(0, 3), ...overdueBookings].slice(0, 5),
+            pendingBookings,
+            upcomingBookings,
+            refunds: refundQueue.slice(0, 4),
+        };
+    }, [bookings, reconciliationItems, refundQueue]);
 
     const exceptionLabels = {
         checkout_started_unpaid: 'Customer started checkout but did not pay',
@@ -450,7 +531,10 @@ const DashboardAccounting = () => {
             label: 'Review ledger',
             detail: 'Compare the payment record against online payment details.',
             tone: 'muted',
-            onClick: () => setActiveTab('ledger'),
+            onClick: () => {
+                setPaymentSegment('exceptions');
+                setActiveTab('payments');
+            },
         };
     };
 
@@ -488,15 +572,34 @@ const DashboardAccounting = () => {
 
     const filteredRefundQueue = useMemo(() => {
         const needle = refundSearch.trim().toLowerCase();
-        if (!needle) return refundQueue;
+        return refundQueue.filter((item) => {
+            const status = String(item.refund_status || '').toLowerCase();
+            const matchesSegment = refundSegment === 'completed'
+                ? ['reviewed', 'refunded', 'completed'].some((value) => status.includes(value))
+                : refundSegment === 'manual'
+                    ? status.includes('manual') || status.includes('failed')
+                    : refundSegment === 'provider'
+                        ? status.includes('progress') || status.includes('approved') || status.includes('processing')
+                        : !['reviewed', 'refunded', 'completed'].some((value) => status.includes(value));
 
-        return refundQueue.filter((item) => [
+            if (!matchesSegment) return false;
+            if (!needle) return true;
+
+            return [
             item.booking_id,
             item.client_full_name,
             item.client_email,
             item.event_date,
-        ].join(' ').toLowerCase().includes(needle));
-    }, [refundQueue, refundSearch]);
+            ].join(' ').toLowerCase().includes(needle);
+        });
+    }, [refundQueue, refundSearch, refundSegment]);
+
+    const refundSegments = [
+        { id: 'needs_review', label: 'Needs review' },
+        { id: 'provider', label: 'Provider refund' },
+        { id: 'manual', label: 'Manual handling' },
+        { id: 'completed', label: 'Completed' },
+    ];
 
     const pagedRefundQueue = useMemo(() => {
         return paginate(filteredRefundQueue, refundPage, refundPerPage);
@@ -623,15 +726,125 @@ const DashboardAccounting = () => {
         );
     };
 
-    const renderVerificationQueue = () => (
+    const paymentSegments = [
+        { id: 'needs_verification', label: 'Needs verification', count: paymentQueueCounts.needs_verification },
+        { id: 'overdue', label: 'Overdue', count: paymentQueueCounts.overdue },
+        { id: 'exceptions', label: 'Exceptions', count: paymentQueueCounts.exceptions },
+        { id: 'upcoming', label: 'Upcoming due', count: paymentQueueCounts.upcoming },
+        { id: 'all_active', label: 'All active', count: paymentQueueCounts.all_active },
+    ];
+
+    const renderPaymentExceptions = () => (
+        <div className="space-y-4">
+            <div className="staff-filter-bar">
+                <input
+                    value={reconciliationSearch}
+                    onChange={(event) => setReconciliationSearch(event.target.value)}
+                    className="staff-control"
+                    placeholder="Search booking, customer, or payment reference"
+                />
+                <select value={reconciliationTypeFilter} onChange={(event) => setReconciliationTypeFilter(event.target.value)} className="staff-control">
+                    <option value="all">All issue types</option>
+                    {Object.entries(exceptionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+            </div>
+            {loading && reconciliationItems.length === 0 ? (
+                <StaffSkeleton variant="panel" rows={3} label="Loading payment exceptions" />
+            ) : filteredReconciliationItems.length === 0 ? (
+                <StaffEmptyState title="No payment exceptions" message="Online checkout, due dates, and staff payment records are aligned." />
+            ) : (
+                <>
+                    <div className="staff-table-wrap custom-scrollbar">
+                        <table className="staff-table">
+                            <thead>
+                                <tr>
+                                    <th>Payment</th>
+                                    <th>Customer</th>
+                                    <th>Provider references</th>
+                                    <th>Issue</th>
+                                    <th className="text-right">Next action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {pagedReconciliationItems.map((item) => {
+                                    const nextAction = getReconciliationAction(item);
+
+                                    return (
+                                        <tr key={item.id}>
+                                            <td>
+                                                <p className="font-black text-slate-950">Payment #{item.id}</p>
+                                                <p className="text-xs font-bold text-slate-400">Booking #{item.booking_id} / {item.payment_type || 'Payment'} / {item.status}</p>
+                                            </td>
+                                            <td>
+                                                <p className="font-black text-slate-950">{item.client_full_name || 'Customer'}</p>
+                                                <p className="text-xs font-bold text-slate-400">{formatAccountingDate(item.event_date)}</p>
+                                            </td>
+                                            <td>
+                                                <div className="space-y-1 text-xs font-semibold text-slate-500">
+                                                    <p>Checkout: <span className="font-mono text-slate-800">{item.paymongo_checkout_session_id || '-'}</span></p>
+                                                    <p>Payment: <span className="font-mono text-slate-800">{item.paymongo_payment_id || '-'}</span></p>
+                                                    <p>Customer ref: <span className="font-mono text-slate-800">{item.paymongo_reference_number || '-'}</span></p>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {(item.exceptions || []).map((exception) => (
+                                                        <StaffStatusBadge key={exception} tone="danger">{exceptionLabels[exception] || exception}</StaffStatusBadge>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td className="text-right">
+                                                <div className="staff-recon-action">
+                                                    <p>{nextAction.detail}</p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={nextAction.disabled}
+                                                        onClick={nextAction.onClick}
+                                                        className={`staff-row-action ${nextAction.tone === 'primary' ? 'staff-row-action-primary' : ''} ${nextAction.tone === 'danger' ? 'staff-row-action-danger' : ''} ${nextAction.disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                    >
+                                                        {nextAction.label}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <StaffPagination page={reconciliationPage} perPage={reconciliationPerPage} total={filteredReconciliationItems.length} onPageChange={setReconciliationPage} onPerPageChange={setReconciliationPerPage} />
+                </>
+            )}
+        </div>
+    );
+
+    const renderPaymentsWorkspace = () => {
+        const visibleBookings = paymentSegment === 'exceptions'
+            ? []
+            : bookings.filter((booking) => paymentMatchesSegment(booking));
+
+        return (
         <div className="staff-work-surface">
             <div className="staff-surface-head">
                 <div>
-                    <p className="marketing-kicker">Payment review queue</p>
-                    <h3 className="mt-1 text-lg font-black text-slate-950">Customer payment records</h3>
-                    <p className="staff-section-copy">Open a booking to verify, reject, remind, or inspect receipts without expanding the whole page.</p>
+                    <p className="marketing-kicker">Payments workspace</p>
+                    <h3 className="mt-1 text-lg font-black text-slate-950">Finance actions and payment records</h3>
+                    <p className="staff-section-copy">Verify payments, chase overdue balances, resolve provider issues, and open receipts from one place.</p>
                 </div>
                 {loading && <StaffStatusBadge tone="muted">Loading</StaffStatusBadge>}
+            </div>
+            <div className="staff-tab-strip">
+                {paymentSegments.map((segment) => (
+                    <button
+                        key={segment.id}
+                        type="button"
+                        onClick={() => setPaymentSegment(segment.id)}
+                        className={`staff-tab-pill ${paymentSegment === segment.id ? 'is-active' : ''}`}
+                    >
+                        {segment.label}
+                        {Number(segment.count || 0) > 0 && <span>{segment.count}</span>}
+                    </button>
+                ))}
             </div>
             <div className="staff-filter-bar">
                 <input
@@ -655,10 +868,10 @@ const DashboardAccounting = () => {
                     <option value="complete">Complete</option>
                 </select>
             </div>
-            {loading && bookings.length === 0 ? (
+            {paymentSegment === 'exceptions' ? renderPaymentExceptions() : loading && visibleBookings.length === 0 ? (
                 <StaffSkeleton rows={6} />
-            ) : bookings.length === 0 ? (
-                <StaffEmptyState title="No payment records found" message="Try clearing filters or check back when approved bookings have payment schedules." />
+            ) : visibleBookings.length === 0 ? (
+                <StaffEmptyState title="No payment records found" message="Try another segment or clear filters to see active finance records." />
             ) : (
                 <div className="staff-table-wrap">
                     <table className="staff-table">
@@ -674,7 +887,7 @@ const DashboardAccounting = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {bookings.map((booking) => {
+                            {visibleBookings.map((booking) => {
                                 const progress = getBookingProgress(booking.payments);
                                 const totalCost = toMoneyNumber(booking.totalCost);
                                 const paidAmount = (booking.payments || [])
@@ -713,7 +926,8 @@ const DashboardAccounting = () => {
             )}
             {renderVerificationDrawer()}
         </div>
-    );
+        );
+    };
 
     if (loading && activeTab === 'today' && !accountingSummary) {
         return (
@@ -722,7 +936,7 @@ const DashboardAccounting = () => {
                 roleLabel="Finance team"
                 label="Preparing accounting workspace"
                 navGroups={[
-                    { label: 'Daily work', items: ['Today', 'Payment Review', 'Payment Ledger', 'Payment Issues', 'Refund Queue', 'Event History'] },
+                    { label: 'Daily work', items: ['Today', 'Payments', 'Refunds', 'Ledger & Receipts', 'Event History'] },
                 ]}
                 rows={5}
             />
@@ -742,10 +956,9 @@ const DashboardAccounting = () => {
                     label: 'Daily work',
                     items: [
                         { id: 'today', label: 'Today', count: dashboardSummary.pending + dashboardSummary.overdue + dashboardSummary.exceptions + dashboardSummary.refunds },
-                        { id: 'bookings', label: 'Payment Review', count: dashboardSummary.pending },
-                        { id: 'ledger', label: 'Payment Ledger' },
-                        { id: 'reconciliation', label: 'Payment Issues', count: dashboardSummary.exceptions },
-                        { id: 'refunds', label: 'Refund Queue', count: dashboardSummary.refunds },
+                        { id: 'payments', label: 'Payments', count: dashboardSummary.pending + dashboardSummary.overdue + dashboardSummary.exceptions },
+                        { id: 'refunds', label: 'Refunds', count: dashboardSummary.refunds },
+                        { id: 'ledger', label: 'Ledger & Receipts' },
                         { id: 'history', label: 'Event History' },
                     ],
                 },
@@ -774,33 +987,77 @@ const DashboardAccounting = () => {
                         <section className="staff-work-surface">
                             <div className="staff-surface-head">
                                 <div>
-                                    <p className="marketing-kicker">Recent payment checks</p>
-                                    <h3 className="mt-1 text-lg font-black text-slate-950">Payment issues preview</h3>
+                                    <p className="marketing-kicker">Finance priority desk</p>
+                                    <h3 className="mt-1 text-lg font-black text-slate-950">Work that needs Accounting today</h3>
                                 </div>
-                                {reconciliationItems.length > 0 && (
-                                    <button type="button" onClick={() => setActiveTab('reconciliation')} className="staff-row-action">
-                                        View all
+                                {(reconciliationItems.length > 0 || todayQueues.pendingBookings.length > 0) && (
+                                    <button type="button" onClick={() => { setPaymentSegment('exceptions'); setActiveTab('payments'); }} className="staff-row-action">
+                                        Open payments
                                     </button>
                                 )}
                             </div>
-                            {reconciliationItems.length === 0 ? (
-                                <StaffEmptyState title="No payment issues" message="Online checkout and staff payment records are aligned." />
+                            {todayQueues.urgent.length === 0 && todayQueues.pendingBookings.length === 0 && todayQueues.upcomingBookings.length === 0 && todayQueues.refunds.length === 0 ? (
+                                <StaffEmptyState title="No finance work waiting" message="Payment reviews, overdue balances, refund cases, and provider issues will appear here." />
                             ) : (
-                                <div className="staff-provider-list">
-                                    {reconciliationItems.slice(0, 5).map((item) => (
-                                        <button key={item.id} type="button" onClick={() => setActiveTab('reconciliation')} className="staff-provider-item">
-                                            <div className="staff-provider-main">
-                                                <span className="staff-item-kicker">Payment #{item.id}</span>
-                                                <h3>{eventDisplayName(item)}</h3>
-                                                <p>Booking #{item.booking_id} / {formatAccountingDate(item.event_date)}</p>
+                                <div className="grid gap-4">
+                                    {[
+                                        ['Urgent', todayQueues.urgent, 'exceptions'],
+                                        ['Payment verification', todayQueues.pendingBookings, 'needs_verification'],
+                                        ['Due soon', todayQueues.upcomingBookings, 'upcoming'],
+                                        ['Follow-up', todayQueues.refunds, 'refunds'],
+                                    ].map(([label, items, target]) => (
+                                        <div key={label} className="rounded-xl border border-[#720101]/10 bg-white p-4">
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <h4 className="text-sm font-black uppercase tracking-widest text-slate-500">{label}</h4>
+                                                <StaffStatusBadge tone={items.length > 0 ? (label === 'Urgent' ? 'danger' : 'warn') : 'good'}>{items.length}</StaffStatusBadge>
                                             </div>
-                                            <div className="staff-provider-tags">
-                                                {(item.exceptions || []).slice(0, 2).map((exception) => (
-                                                    <span key={exception}>{exceptionLabels[exception] || exception}</span>
-                                                ))}
-                                            </div>
-                                            <StaffStatusBadge tone="danger">{(item.exceptions || []).length}</StaffStatusBadge>
-                                        </button>
+                                            {items.length === 0 ? (
+                                                <p className="text-sm font-semibold text-slate-400">Nothing waiting here.</p>
+                                            ) : (
+                                                <div className="staff-provider-list">
+                                                    {items.slice(0, 3).map((item) => {
+                                                        const isRefund = target === 'refunds';
+                                                        const isException = Boolean(item.exceptions);
+                                                        const itemKey = `${label}-${item.id || item.booking_id}`;
+                                                        const title = isException ? `Payment #${item.id}` : eventDisplayName(item);
+                                                        const detail = isRefund
+                                                            ? `Booking #${item.booking_id} / ${formatAccountingDate(item.event_date)}`
+                                                            : isException
+                                                                ? `Booking #${item.booking_id} / ${formatAccountingDate(item.event_date)}`
+                                                                : `${formatAccountingDate(item.event_date)} / ${(item.payments || []).length} payment terms`;
+
+                                                        return (
+                                                            <button
+                                                                key={itemKey}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (isRefund) {
+                                                                        setActiveTab('refunds');
+                                                                    } else {
+                                                                        setPaymentSegment(target);
+                                                                        setActiveTab('payments');
+                                                                    }
+                                                                }}
+                                                                className="staff-provider-item"
+                                                            >
+                                                                <div className="staff-provider-main">
+                                                                    <span className="staff-item-kicker">{label}</span>
+                                                                    <h3>{title}</h3>
+                                                                    <p>{detail}</p>
+                                                                </div>
+                                                                {isException && (
+                                                                    <div className="staff-provider-tags">
+                                                                        {(item.exceptions || []).slice(0, 2).map((exception) => (
+                                                                            <span key={exception}>{exceptionLabels[exception] || exception}</span>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     ))}
                                 </div>
                             )}
@@ -808,7 +1065,7 @@ const DashboardAccounting = () => {
                     </div>
                 )}
 
-                {activeTab === 'bookings' && renderVerificationQueue()}
+                {activeTab === 'payments' && renderPaymentsWorkspace()}
 
                 {false && activeTab === 'bookings' && (
                     <div className="marketing-panel p-5 lg:p-6">
@@ -1141,8 +1398,36 @@ const DashboardAccounting = () => {
                                 >
                                     <option value="All">All</option>
                                     <option value="Verified">Verified</option>
+                                    <option value="Paid">Paid</option>
                                     <option value="Pending">Pending</option>
                                     <option value="Rejected">Rejected</option>
+                                    <option value="Refunded">Refunded</option>
+                                </select>
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-xs font-black uppercase text-slate-500 mb-1">Payment Type</label>
+                                <select
+                                    value={ledgerFilter.payment_type || 'All'}
+                                    onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { payment_type: e.target.value })); }}
+                                    className="staff-control"
+                                >
+                                    <option value="All">All types</option>
+                                    <option value="Reservation">Reservation</option>
+                                    <option value="DownPayment">Down Payment</option>
+                                    <option value="Final">Final Payment</option>
+                                </select>
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-xs font-black uppercase text-slate-500 mb-1">Method</label>
+                                <select
+                                    value={ledgerFilter.method || 'All'}
+                                    onChange={function (e) { setLedgerFilter(Object.assign({}, ledgerFilter, { method: e.target.value })); }}
+                                    className="staff-control"
+                                >
+                                    <option value="All">All methods</option>
+                                    <option value="PayMongo">PayMongo</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="Manual">Manual</option>
                                 </select>
                             </div>
                             <div className="flex flex-col">
@@ -1223,6 +1508,7 @@ const DashboardAccounting = () => {
                                                                 <th className="text-right py-4 px-6">Amount</th>
                                                                 <th className="text-center py-4 px-6">Due Date</th>
                                                                 <th className="text-center py-4 px-6">Status</th>
+                                                                <th className="text-right py-4 px-6">Receipt</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-amber-50 bg-white">
@@ -1249,6 +1535,25 @@ const DashboardAccounting = () => {
                                                                             <span className={'staff-status ' + badge.cls}>
                                                                                 {badge.text}
                                                                             </span>
+                                                                        </td>
+                                                                        <td className="py-4 px-6 text-right">
+                                                                            {isPaidStatus(p.status) ? (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setReceiptModal({ isOpen: true, payment: p, booking })}
+                                                                                    className="staff-row-action"
+                                                                                >
+                                                                                    Receipt
+                                                                                </button>
+                                                                            ) : (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => { setPaymentSegment('overdue'); setActiveTab('payments'); }}
+                                                                                    className="staff-row-action"
+                                                                                >
+                                                                                    Review
+                                                                                </button>
+                                                                            )}
                                                                         </td>
                                                                     </tr>
                                                                 );
@@ -1367,6 +1672,25 @@ const DashboardAccounting = () => {
 
                 {activeTab === 'refunds' && (
                     <div className="marketing-panel overflow-hidden">
+                        <div className="staff-surface-head p-5 pb-0">
+                            <div>
+                                <p className="marketing-kicker">Refunds</p>
+                                <h3 className="mt-1 text-lg font-black text-slate-950">Refund review and processing</h3>
+                                <p className="staff-section-copy">Review refundable amounts, provider references, manual cases, and completed refund work.</p>
+                            </div>
+                        </div>
+                        <div className="staff-tab-strip mx-5 mt-4">
+                            {refundSegments.map((segment) => (
+                                <button
+                                    key={segment.id}
+                                    type="button"
+                                    onClick={() => setRefundSegment(segment.id)}
+                                    className={`staff-tab-pill ${refundSegment === segment.id ? 'is-active' : ''}`}
+                                >
+                                    {segment.label}
+                                </button>
+                            ))}
+                        </div>
                         <div className="staff-filter-bar">
                             <input
                                 value={refundSearch}

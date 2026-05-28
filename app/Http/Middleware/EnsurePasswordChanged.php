@@ -21,6 +21,7 @@ class EnsurePasswordChanged
             'logout',
             'forgot-password',
             'reset-password/*',
+            'api/session/csrf-token',
             'verify-otp',
             'resend-otp',
             'api/notifications/unread-count'

@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import { CalendarDays, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Filter, Package, RefreshCw, Users } from 'lucide-react';
 import useCachedJson from '../hooks/useCachedJson';
 import useSmartRefresh from '../hooks/useSmartRefresh';
+import useStaffWorkspaceState from '../hooks/useStaffWorkspaceState';
 import ConfirmModal from '../Components/common/ConfirmModal';
 import StaffSkeleton, { StaffWorkspaceSkeleton } from '../Components/staff/StaffSkeleton';
 import StaffWorkspaceLayout from '../Layouts/StaffWorkspaceLayout';
@@ -13,7 +14,7 @@ import StaffEmptyState from '../Components/staff/StaffEmptyState';
 import EventHistoryPanel from '../Components/staff/EventHistoryPanel';
 import NextActionPanel from '../Components/staff/NextActionPanel';
 import { getListData } from '../utils/apiResponses';
-import csrfFetch, { csrfRequestHeaders } from '../utils/csrf';
+import csrfFetch from '../utils/csrf';
 import {
     formatBookingRef,
     formatCurrency,
@@ -95,6 +96,7 @@ const DEFAULT_ANALYTICS_FILTERS = {
 const ADMIN_EMPLOYEES_URL = '/api/admin/employees?paginated=1&per_page=25';
 const ADMIN_CUSTOMERS_URL = '/api/admin/customers?paginated=1&per_page=25';
 const ADMIN_BOOKINGS_URL = '/api/admin/bookings?paginated=1&per_page=25';
+const ADMIN_WORKSPACE_TABS = ['dashboard', 'bookings', 'preparation', 'refunds', 'analytics', 'reports', 'content', 'availability', 'users', 'configuration', 'history', 'audits', 'profile'];
 const adminEmployeesUrl = (filters = {}) => {
     const params = new URLSearchParams({ paginated: '1', per_page: '100' });
     Object.entries(filters).forEach(([key, value]) => {
@@ -156,7 +158,11 @@ const shiftMonthValue = (value, offset) => {
 
 const DashboardAdmin = () => {
     const { user, logout } = useAuth();
-    const [activeTab, setActiveTab] = useState('dashboard');
+    const [activeTab, setActiveTab] = useStaffWorkspaceState({
+        storageKey: 'ecs:staff-workspace:admin',
+        defaultTab: 'dashboard',
+        allowedTabs: ADMIN_WORKSPACE_TABS,
+    });
     const [profileForm, setProfileForm] = useState({
         username: user?.username || '',
         email: user?.email || '',
@@ -175,7 +181,7 @@ const DashboardAdmin = () => {
     const [empLoading, setEmpLoading] = useState(false);
     const [customerLoading, setCustomerLoading] = useState(false);
     const [empModal, setEmpModal] = useState({ open: false, mode: 'add', data: null });
-    const [temporaryPasswordModal, setTemporaryPasswordModal] = useState({ open: false, username: '', email: '', password: '', expiresAt: null, deliveryHint: '' });
+    const [temporaryPasswordModal, setTemporaryPasswordModal] = useState({ open: false, userId: null, username: '', email: '', password: '', expiresAt: null, deliveryHint: '', canRevealAgain: false });
     const [empForm, setEmpForm] = useState({ full_name: '', username: '', password: '', role: 'Marketing', email: '', phone: '' });
     const [empFormErrors, setEmpFormErrors] = useState({});
     const [empFormLoading, setEmpFormLoading] = useState(false);
@@ -506,16 +512,18 @@ const DashboardAdmin = () => {
 
         setTemporaryPasswordModal({
             open: true,
+            userId: data.id || fallback.id || null,
             username: data.username || fallback.username || '',
             email: data.email || fallback.email || '',
             password: data.temporary_password,
             expiresAt: data.temporary_password_expires_at || null,
             deliveryHint: data.email_delivery || (data.email || fallback.email ? 'Email delivery depends on the configured mail queue.' : 'No email address was set, so no invitation email was sent.'),
+            canRevealAgain: Boolean(data.id || fallback.id),
         });
     };
 
     const closeTemporaryPasswordModal = () => {
-        setTemporaryPasswordModal({ open: false, username: '', email: '', password: '', expiresAt: null, deliveryHint: '' });
+        setTemporaryPasswordModal({ open: false, userId: null, username: '', email: '', password: '', expiresAt: null, deliveryHint: '', canRevealAgain: false });
     };
 
     const copyTemporaryPassword = async () => {
@@ -525,6 +533,36 @@ const DashboardAdmin = () => {
         } catch (error) {
             console.error(error);
             showToast('Could not copy password automatically. Select and copy it manually.', 'error');
+        }
+    };
+
+    const handleRevealTemporaryPassword = (account) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Show temporary password?',
+            message: 'This password can only be shown until it expires or the account owner changes it. The reveal will be recorded in the activity log.',
+            confirmText: 'Show password',
+            tone: 'default',
+            onConfirm: () => confirmRevealTemporaryPassword(account),
+        });
+    };
+
+    const confirmRevealTemporaryPassword = async (account) => {
+        closeConfirmDialog();
+        try {
+            const res = await csrfFetch(`/api/admin/employees/${account.id}/temporary-password/reveal`, {
+                method: 'POST',
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast('Temporary password is available until expiry.');
+                openTemporaryPasswordModal(data, account);
+            } else {
+                showToast(getErrorMessage(data, 'Temporary password is no longer available. Reset temporary password to generate a new one.'), 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Could not show temporary password. Please try again.', 'error');
         }
     };
 
@@ -2168,13 +2206,11 @@ const DashboardAdmin = () => {
                 delete payload.role;
             }
 
-            const res = await fetch(url, {
+            const res = await csrfFetch(url, {
                 method,
                 headers: {
-                    ...csrfRequestHeaders(),
                     'Content-Type': 'application/json'
                 },
-                credentials: 'same-origin',
                 body: JSON.stringify(payload)
             });
 
@@ -2214,10 +2250,8 @@ const DashboardAdmin = () => {
         closeConfirmDialog();
         try {
             // Session auth - no token needed
-            const res = await fetch(`/api/admin/employees/${id}`, {
+            const res = await csrfFetch(`/api/admin/employees/${id}`, {
                 method: 'DELETE',
-                credentials: 'same-origin',
-                headers: csrfRequestHeaders(),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
@@ -2247,10 +2281,8 @@ const DashboardAdmin = () => {
     const confirmReactivateEmployee = async (id) => {
         closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/employees/${id}/reactivate`, {
+            const res = await csrfFetch(`/api/admin/employees/${id}/reactivate`, {
                 method: 'POST',
-                credentials: 'same-origin',
-                headers: csrfRequestHeaders(),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
@@ -2280,15 +2312,13 @@ const DashboardAdmin = () => {
     const confirmResetEmployeePassword = async (id) => {
         closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/employees/${id}/reset-password`, {
+            const res = await csrfFetch(`/api/admin/employees/${id}/reset-password`, {
                 method: 'POST',
-                credentials: 'same-origin',
-                headers: csrfRequestHeaders(),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 showToast(data.email_delivery || 'Temporary password generated.');
-                openTemporaryPasswordModal(data);
+                openTemporaryPasswordModal(data, { id });
                 fetchEmployees();
             } else {
                 showToast(getErrorMessage(data, 'Could not reset password'), 'error');
@@ -2313,10 +2343,8 @@ const DashboardAdmin = () => {
     const confirmForceEmployeePasswordChange = async (id) => {
         closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/employees/${id}/force-password-change`, {
+            const res = await csrfFetch(`/api/admin/employees/${id}/force-password-change`, {
                 method: 'POST',
-                credentials: 'same-origin',
-                headers: csrfRequestHeaders(),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
@@ -2349,10 +2377,9 @@ const DashboardAdmin = () => {
     const confirmDeleteCustomer = async (id) => {
         closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/customers/${id}`, {
+            const res = await csrfFetch(`/api/admin/customers/${id}`, {
                 method: 'DELETE',
-                credentials: 'same-origin',
-                headers: { ...csrfRequestHeaders(), 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ notify_customer: confirmNotifyCustomerRef.current }),
             });
             const data = await res.json().catch(() => ({}));
@@ -2386,10 +2413,9 @@ const DashboardAdmin = () => {
     const confirmReactivateCustomer = async (id) => {
         closeConfirmDialog();
         try {
-            const res = await fetch(`/api/admin/customers/${id}/reactivate`, {
+            const res = await csrfFetch(`/api/admin/customers/${id}/reactivate`, {
                 method: 'POST',
-                credentials: 'same-origin',
-                headers: { ...csrfRequestHeaders(), 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ notify_customer: confirmNotifyCustomerRef.current }),
             });
             const data = await res.json().catch(() => ({}));
@@ -4461,8 +4487,8 @@ const DashboardAdmin = () => {
                                 <div className="mb-5 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 shadow-sm">
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                                         <div>
-                                            <p className="text-sm font-black text-amber-950">Account emails are available as a fallback, but temporary passwords are always shown once after creation or reset.</p>
-                                            <p className="mt-1 text-xs font-bold text-amber-800">If a password email does not arrive, use the shown password and check delivery settings in Business Setup.</p>
+                                            <p className="text-sm font-black text-amber-950">Account emails are available as a fallback, and temporary passwords can be shown again until they expire or are changed.</p>
+                                            <p className="mt-1 text-xs font-bold text-amber-800">If a password email does not arrive, use Show temporary password or check delivery settings in Business Setup.</p>
                                         </div>
                                         <button type="button" onClick={() => setActiveTab('configuration')} className="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs font-black text-amber-900 hover:bg-amber-100">
                                             Open delivery settings
@@ -4521,14 +4547,14 @@ const DashboardAdmin = () => {
                                             </select>
                                         </div>
 
-                                        <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
+                                        <div className="staff-table-wrap rounded-2xl border border-[#720101]/10 bg-white shadow-sm">
                                             {empLoading ? (
                                                 <StaffSkeleton rows={6} label="Loading staff accounts" />
                                             ) : employees.length === 0 ? (
                                                 <div className="p-12 text-center text-gray-500">No employee accounts found.</div>
                                             ) : (
-                                                <table className="min-w-full divide-y divide-gray-200">
-                                                    <thead className="bg-gray-50">
+                                                <table className="staff-table">
+                                                    <thead>
                                                         <tr>
                                                             <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
                                                             <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Email</th>
@@ -4538,7 +4564,7 @@ const DashboardAdmin = () => {
                                                             <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
                                                         </tr>
                                                     </thead>
-                                                    <tbody className="bg-white divide-y divide-gray-100">
+                                                    <tbody>
                                                         {paginatedEmployees.items.map(emp => (
                                                             <tr key={emp.id} className="hover:bg-gray-50/80 transition-colors">
                                                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -4574,11 +4600,22 @@ const DashboardAdmin = () => {
                                                                             Actions <ChevronDown className="ml-1 inline h-3.5 w-3.5" />
                                                                         </summary>
                                                                         <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-100 bg-white p-1 shadow-xl">
-                                                                            {emp.role === 'Admin' ? (
-                                                                                <div className="rounded-lg bg-slate-50 px-3 py-2 text-left text-xs font-bold leading-5 text-slate-500">Admin accounts are protected from regular staff account actions.</div>
+                                                                            {emp.role === 'Admin' && emp.id === user?.id ? (
+                                                                                <div className="rounded-lg bg-slate-50 px-3 py-2 text-left text-xs font-bold leading-5 text-slate-500">Your own Admin account is protected from account actions here.</div>
+                                                                            ) : emp.role === 'Admin' ? (
+                                                                                <>
+                                                                                    {emp.must_change_password && (
+                                                                                        <button type="button" onClick={() => handleRevealTemporaryPassword(emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Show temporary password</button>
+                                                                                    )}
+                                                                                    <button type="button" onClick={() => handleResetEmployeePassword(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Reset temporary password</button>
+                                                                                    <div className="rounded-lg bg-slate-50 px-3 py-2 text-left text-xs font-bold leading-5 text-slate-500">Admin profile edits and deactivation stay protected.</div>
+                                                                                </>
                                                                             ) : (
                                                                                 <>
                                                                                     <button type="button" onClick={() => openEmpModal('edit', emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Edit account</button>
+                                                                                    {emp.must_change_password && (
+                                                                                        <button type="button" onClick={() => handleRevealTemporaryPassword(emp)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Show temporary password</button>
+                                                                                    )}
                                                                                     <button type="button" onClick={() => handleResetEmployeePassword(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-amber-700 hover:bg-amber-50">Reset temporary password</button>
                                                                                     <button type="button" onClick={() => handleForceEmployeePasswordChange(emp.id)} className="block w-full rounded-lg px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-50">Force password change</button>
                                                                                     {emp.account_status === 'deactivated' ? (
@@ -4641,14 +4678,14 @@ const DashboardAdmin = () => {
                                             </select>
                                         </div>
 
-                                        <div className="bg-white shadow overflow-x-auto sm:rounded-xl border border-gray-100">
+                                        <div className="staff-table-wrap rounded-2xl border border-[#720101]/10 bg-white shadow-sm">
                                             {customerLoading ? (
                                                 <StaffSkeleton rows={6} label="Loading customer accounts" />
                                             ) : customers.length === 0 ? (
                                                 <div className="p-12 text-center text-gray-500">No customer accounts found.</div>
                                             ) : (
-                                                <table className="min-w-full divide-y divide-gray-200">
-                                                    <thead className="bg-gray-50">
+                                                <table className="staff-table">
+                                                    <thead>
                                                         <tr>
                                                             <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Customer</th>
                                                             <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Contact</th>
@@ -4657,7 +4694,7 @@ const DashboardAdmin = () => {
                                                             <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
                                                         </tr>
                                                     </thead>
-                                                    <tbody className="bg-white divide-y divide-gray-100">
+                                                    <tbody>
                                                         {paginatedCustomers.items.map(customer => (
                                                             <tr key={customer.id} className="hover:bg-gray-50/80 transition-colors">
                                                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -4778,7 +4815,7 @@ const DashboardAdmin = () => {
                                     </div>
                                 </div>
 
-                                <div className="bg-white shadow-sm overflow-hidden sm:rounded-xl border border-gray-200">
+                                <div className="staff-table-wrap rounded-2xl border border-[#720101]/10 bg-white shadow-sm">
                                     {bookingsLoading ? (
                                         <StaffSkeleton rows={7} label="Loading bookings" />
                                     ) : visibleBookings.length === 0 ? (
@@ -4790,8 +4827,8 @@ const DashboardAdmin = () => {
                                             <p className="mt-1 text-sm text-gray-500">Try clearing the search or switching filters.</p>
                                         </div>
                                     ) : (
-                                        <table className="min-w-full divide-y divide-gray-200">
-                                            <thead className="bg-gray-50">
+                                        <table className="staff-table">
+                                            <thead>
                                                 <tr>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Booking</th>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Client</th>
@@ -4801,7 +4838,7 @@ const DashboardAdmin = () => {
                                                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="bg-white divide-y divide-gray-100">
+                                            <tbody>
                                                 {paginatedBookings.items.map(booking => {
                                                     const status = normalizeStatus(booking.status);
                                                     return (
@@ -4922,9 +4959,9 @@ const DashboardAdmin = () => {
                                             <p className="mt-1 text-sm text-gray-500">Cancelled bookings with verified payments will appear here.</p>
                                         </div>
                                     ) : (
-                                        <div className="overflow-x-auto">
-                                            <table className="min-w-full divide-y divide-gray-100">
-                                                <thead className="bg-gray-50">
+                                        <div className="staff-table-wrap">
+                                            <table className="staff-table">
+                                                <thead>
                                                     <tr>
                                                         <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-500">Booking</th>
                                                         <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-500">Client</th>
@@ -4934,7 +4971,7 @@ const DashboardAdmin = () => {
                                                         <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-500">Action</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                <tbody>
                                                     {refundQueue.map((item) => {
                                                         const totalPaid = Number(item.total_paid || 0);
                                                         const penalty = totalPaid * 0.1;
@@ -5022,7 +5059,7 @@ const DashboardAdmin = () => {
                                     ) : visibleAudits.length === 0 ? (
                                         <StaffEmptyState title="No activity matches these filters" message="Adjust the role, workspace, result, or activity type to review more staff activity." />
                                     ) : (
-                                        <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                        <table className="staff-table">
                                             <thead>
                                                 <tr>
                                                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Time</th>
@@ -5032,7 +5069,7 @@ const DashboardAdmin = () => {
                                                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Result</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-100 bg-white">
+                                            <tbody>
                                                 {paginatedAudits.items.map((audit) => {
                                                     const result = getAuditResult(audit);
 
@@ -5355,9 +5392,9 @@ const DashboardAdmin = () => {
                                 </div>
                                 <div>
                                     <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-3 border-b border-gray-100 pb-2">Payment Schedule</h4>
-                                    <div className="overflow-x-auto rounded-lg border border-gray-100">
-                                        <table className="w-full text-sm">
-                                            <thead className="bg-gray-50">
+                                    <div className="staff-table-wrap rounded-lg border border-[#720101]/10">
+                                        <table className="staff-table">
+                                            <thead>
                                                 <tr>
                                                     <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-500">Term</th>
                                                     <th className="px-4 py-3 text-right text-xs font-bold uppercase text-gray-500">Amount</th>
@@ -5366,7 +5403,7 @@ const DashboardAdmin = () => {
                                                     <th className="px-4 py-3 text-right text-xs font-bold uppercase text-gray-500">Action</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-100 bg-white">
+                                            <tbody>
                                                 {(eventDetailsModal.data?.payments || []).map(payment => (
                                                     <tr key={payment.id}>
                                                         <td className="px-4 py-3 font-semibold text-gray-900">{paymentLabel(payment.payment_type)}</td>
@@ -5605,7 +5642,7 @@ const DashboardAdmin = () => {
                         <div className="border-b border-amber-100 bg-[#fffaf3] px-6 py-5">
                             <p className="text-xs font-black uppercase tracking-[0.28em] text-[#a56500]">Staff access</p>
                             <h3 className="mt-2 text-2xl font-black text-slate-950">Temporary password</h3>
-                            <p className="mt-2 text-sm font-semibold text-slate-600">Copy this password now. For security, it is only shown in this dialog.</p>
+                            <p className="mt-2 text-sm font-semibold text-slate-600">Copy this password now. It can be shown again only until it expires or the account owner changes it.</p>
                         </div>
                         <div className="space-y-4 px-6 py-5">
                             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -5628,6 +5665,19 @@ const DashboardAdmin = () => {
                         </div>
                         <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
                             <button type="button" onClick={closeTemporaryPasswordModal} className="rounded-lg px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100">Close</button>
+                            {temporaryPasswordModal.canRevealAgain && temporaryPasswordModal.userId && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleRevealTemporaryPassword({
+                                        id: temporaryPasswordModal.userId,
+                                        username: temporaryPasswordModal.username,
+                                        email: temporaryPasswordModal.email,
+                                    })}
+                                    className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-2.5 text-sm font-black text-amber-900 hover:bg-amber-100"
+                                >
+                                    Show again until expiry
+                                </button>
+                            )}
                             <button type="button" onClick={copyTemporaryPassword} className="rounded-lg bg-[#8b0000] px-5 py-2.5 text-sm font-black text-white shadow-sm hover:bg-[#6f0000]">Copy password</button>
                         </div>
                     </div>

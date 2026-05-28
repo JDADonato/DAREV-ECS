@@ -28,6 +28,7 @@ use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\StaffEventHistoryController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Models\Announcement;
@@ -80,8 +81,22 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('auth')->group(function () {
-    Route::get('/api/session/csrf-token', fn () => response()->json(['token' => csrf_token()]))
-        ->name('session.csrf-token');
+    Route::get('/api/session/csrf-token', function (Request $request) {
+        if (app()->isLocal() || config('app.debug')) {
+            $user = $request->user();
+            Log::info('[auth-flow-debug] CSRF token refresh requested.', [
+                'user_id' => $user?->id,
+                'role' => $user?->role,
+                'authenticated' => (bool) $user,
+                'host' => $request->getHost(),
+                'session_id_hash' => substr(hash('sha256', $request->session()->getId()), 0, 12),
+            ]);
+        }
+
+        return response()
+            ->json(['token' => csrf_token()])
+            ->header('X-ECS-Debug-Request', 'csrf-refresh');
+    })->name('session.csrf-token');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/password/change-required', [AuthController::class, 'showChangeRequired'])->name('password.change-required');
     Route::post('/password/change-required', [AuthController::class, 'changeRequiredPassword'])->middleware('throttle:5,1')->name('password.change-required.update');
@@ -305,6 +320,7 @@ Route::middleware(['auth', 'role:Admin'])->group(function () {
     Route::put('/api/admin/employees/{id}', [AdminController::class, 'updateEmployee']);
     Route::delete('/api/admin/employees/{id}', [AdminController::class, 'deleteEmployee']);
     Route::post('/api/admin/employees/{id}/reset-password', [AdminController::class, 'resetEmployeePassword']);
+    Route::post('/api/admin/employees/{id}/temporary-password/reveal', [AdminController::class, 'revealTemporaryPassword']);
     Route::post('/api/admin/employees/{id}/force-password-change', [AdminController::class, 'forceEmployeePasswordChange']);
     Route::post('/api/admin/employees/{id}/reactivate', [AdminController::class, 'reactivateEmployee']);
     Route::get('/api/admin/system-delivery', [AdminController::class, 'deliveryDiagnostics']);

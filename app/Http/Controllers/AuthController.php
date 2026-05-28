@@ -65,6 +65,10 @@ class AuthController extends Controller
         }
 
         if ($user->temporary_password_expires_at && now()->isAfter($user->temporary_password_expires_at)) {
+            $user->forceFill([
+                'temporary_password_secret' => null,
+            ])->save();
+
             throw ValidationException::withMessages([
                 'password' => ['This temporary password has expired. Please ask an administrator for a reset.'],
             ]);
@@ -234,6 +238,18 @@ class AuthController extends Controller
 
     public function changeRequiredPassword(Request $request)
     {
+        if (app()->isLocal() || config('app.debug')) {
+            $user = $request->user();
+            Log::info('[auth-flow-debug] Required password change request entered.', [
+                'user_id' => $user?->id,
+                'role' => $user?->role,
+                'expects_json' => $request->expectsJson(),
+                'is_inertia' => (bool) $request->header('X-Inertia'),
+                'host' => $request->getHost(),
+                'session_id_hash' => substr(hash('sha256', $request->session()->getId()), 0, 12),
+            ]);
+        }
+
         $request->validate([
             'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
@@ -247,6 +263,7 @@ class AuthController extends Controller
         $user->forceFill([
             'password' => Hash::make($request->password),
             'temporary_password_expires_at' => null,
+            'temporary_password_secret' => null,
             'password_changed_at' => now(),
         ])->save();
 
@@ -260,7 +277,7 @@ class AuthController extends Controller
         $user->refresh();
         Auth::setUser($user);
 
-        Log::info('Required password changed.', [
+        Log::info('[auth-flow-debug] Required password changed.', [
             'user_id' => $user->id,
             'role' => $user->role,
             'redirect' => $dashboardRoute,
@@ -269,7 +286,9 @@ class AuthController extends Controller
         ]);
 
         if ($request->header('X-Inertia')) {
-            return Inertia::location($dashboardRoute);
+            $response = Inertia::location($dashboardRoute);
+            $response->headers->set('X-ECS-Debug-Request', 'password-change');
+            return $response;
         }
 
         if ($request->expectsJson()) {
@@ -278,10 +297,11 @@ class AuthController extends Controller
                 'redirect' => $dashboardRoute,
                 'role' => $user->role,
                 'must_change_password' => $user->requiresPasswordChange(),
-            ]);
+            ])->header('X-ECS-Debug-Request', 'password-change');
         }
 
         return redirect($dashboardRoute)
+            ->header('X-ECS-Debug-Request', 'password-change')
             ->with('message', 'Password updated. Welcome to your workspace.');
     }
 

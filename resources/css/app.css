@@ -3414,11 +3414,6 @@
     height: .8rem;
   }
 
-  .staff-skeleton-nav-item.is-active span {
-    background: linear-gradient(90deg, rgba(255,255,255,.32), rgba(255,255,255,.72), rgba(255,255,255,.32));
-    background-size: 200% 100%;
-  }
-
   .staff-sidebar-user-actions span {
     width: 3.2rem;
     height: 2rem;
@@ -3947,6 +3942,45 @@
     border-bottom: 1px solid rgba(114,1,1,.08);
     background: #fbf8f2;
     padding: .8rem 1rem;
+  }
+
+  .staff-tab-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    border-bottom: 1px solid rgba(114,1,1,.08);
+    background: #fffaf3;
+    padding: .75rem 1rem;
+  }
+
+  .staff-tab-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    border: 1px solid rgba(114,1,1,.12);
+    border-radius: 999px;
+    background: #fff;
+    color: #64748b;
+    padding: .48rem .75rem;
+    font-size: .75rem;
+    font-weight: 900;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+
+  .staff-tab-pill:hover,
+  .staff-tab-pill.is-active {
+    border-color: rgba(114,1,1,.34);
+    background: #720101;
+    color: #fff;
+  }
+
+  .staff-tab-pill span {
+    min-width: 1.3rem;
+    border-radius: 999px;
+    background: rgba(240,170,11,.18);
+    padding: .1rem .35rem;
+    text-align: center;
+    color: inherit;
   }
 
   .event-history-filter-bar {

@@ -19,10 +19,9 @@ export const StaffWorkspaceSkeleton = ({
                 {navGroups.map((group) => (
                     <section key={group.label} className="staff-sidebar-group">
                         <p>{group.label}</p>
-                        {group.items.map((item, index) => (
-                            <div key={item} className={`staff-sidebar-item staff-skeleton-nav-item ${index === 0 ? 'is-active' : ''}`}>
+                        {group.items.map((item) => (
+                            <div key={item} className="staff-sidebar-item staff-skeleton-nav-item">
                                 <span>{item}</span>
-                                {index === 0 && <em> </em>}
                             </div>
                         ))}
                     </section>

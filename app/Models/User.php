@@ -37,6 +37,7 @@ class User extends Authenticatable
         'must_change_password',
         'password_changed_at',
         'temporary_password_expires_at',
+        'temporary_password_secret',
         'last_login_at',
     ];
 
@@ -47,6 +48,7 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'otp_code',
+        'temporary_password_secret',
     ];
 
     /**
@@ -64,6 +66,7 @@ class User extends Authenticatable
             'must_change_password' => 'boolean',
             'password_changed_at' => 'datetime',
             'temporary_password_expires_at' => 'datetime',
+            'temporary_password_secret' => 'encrypted',
             'last_login_at' => 'datetime',
             'notification_preferences' => 'array',
             'profile_preferences' => 'array',

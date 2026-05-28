@@ -27,14 +27,30 @@ class StaffAccountAccessNotification extends Notification
         $subject = $this->purpose === 'reset'
             ? 'Your Eloquente account password was reset'
             : 'Your Eloquente account is ready';
+        $headline = $this->purpose === 'reset'
+            ? 'Temporary password reset'
+            : 'Welcome to Eloquente';
+        $name = $notifiable->full_name ?: $notifiable->username;
 
         return (new MailMessage)
             ->subject($subject)
-            ->greeting('Hello ' . ($notifiable->full_name ?: $notifiable->username) . ',')
-            ->line("You can now sign in to the Eloquente {$workspaceLabel}.")
-            ->line('Temporary password: ' . $this->temporaryPassword)
-            ->line('For security, you will be asked to set your own password after signing in.')
-            ->action('Sign in', url('/login'))
-            ->line('If you were not expecting this, please contact the administrator.');
+            ->view('emails.generic', [
+                'emailTitle' => $subject,
+                'headline' => $headline,
+                'preheader' => 'Use your temporary password to sign in, then set your own password.',
+                'greeting' => "Hello {$name},",
+                'lines' => [
+                    "You can now sign in to the Eloquente {$workspaceLabel}.",
+                    'For security, you will be asked to set your own password after signing in.',
+                ],
+                'details' => [
+                    'Username' => $notifiable->username,
+                    'Role' => $notifiable->role,
+                    'Temporary password' => $this->temporaryPassword,
+                ],
+                'ctaUrl' => url('/login'),
+                'ctaLabel' => 'Sign in',
+                'note' => 'If you were not expecting this account access, please contact the administrator.',
+            ]);
     }
 }

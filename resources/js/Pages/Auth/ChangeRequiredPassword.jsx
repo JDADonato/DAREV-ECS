@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { usePage } from '@inertiajs/react';
 import { Loader2, LockKeyhole } from 'lucide-react';
@@ -12,6 +12,20 @@ const dashboardForRole = (role) => {
     return '/';
 };
 
+const authFlowDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_DEBUG_AUTH_FLOW === 'true';
+const authFlowDebug = (message, details = {}) => {
+    if (!authFlowDebugEnabled) return;
+    console.info('[auth-flow-debug]', message, details);
+};
+
+const csrfMetaState = () => {
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    return {
+        tokenPresent: Boolean(token),
+        tokenLength: token.length,
+    };
+};
+
 const ChangeRequiredPassword = () => {
     const toast = useToast();
     const { auth } = usePage().props;
@@ -22,6 +36,15 @@ const ChangeRequiredPassword = () => {
         password: '',
         password_confirmation: '',
     });
+
+    useEffect(() => {
+        authFlowDebug('Change-required password page loaded', {
+            path: window.location.pathname,
+            role: auth?.user?.role,
+            mustChangePassword: auth?.user?.must_change_password,
+            ...csrfMetaState(),
+        });
+    }, [auth?.user?.must_change_password, auth?.user?.role]);
 
     const signOut = async () => {
         setProcessing(true);
@@ -41,6 +64,10 @@ const ChangeRequiredPassword = () => {
         setErrors({});
 
         try {
+            authFlowDebug('Submitting required password change', {
+                role: auth?.user?.role,
+                ...csrfMetaState(),
+            });
             const response = await axios.post('/password/change-required', form, {
                 headers: {
                     Accept: 'application/json',
@@ -48,6 +75,12 @@ const ChangeRequiredPassword = () => {
             });
             const target = response.data?.redirect || dashboardForRole(auth?.user?.role);
             setRedirectTarget(target);
+            authFlowDebug('Required password change response received', {
+                status: response.status,
+                redirect: target,
+                role: response.data?.role,
+                mustChangePassword: response.data?.must_change_password,
+            });
 
             if (response.data?.must_change_password) {
                 toast.error('Password was saved, but your account still needs a password reset. Please try signing in again.');
@@ -55,15 +88,28 @@ const ChangeRequiredPassword = () => {
             }
 
             toast.success('Password updated.');
+            authFlowDebug('Navigating after required password change', {
+                redirect: target,
+                currentPath: window.location.pathname,
+            });
             window.location.replace(target);
             window.setTimeout(() => {
                 if (window.location.pathname === '/password/change-required') {
+                    authFlowDebug('Primary navigation did not leave password page; using fallback', {
+                        redirect: target,
+                    });
                     window.location.href = target;
                 }
             }, 800);
         } catch (error) {
             const nextErrors = error.response?.data?.errors || {};
             setErrors(nextErrors);
+            authFlowDebug('Required password change failed', {
+                status: error.response?.status,
+                message: error.message,
+                hasValidationErrors: Object.keys(nextErrors).length > 0,
+                ...csrfMetaState(),
+            });
             toast.error(error.response?.status === 419
                 ? 'Your session expired. Refresh and try again.'
                 : 'Please check your new password.');
@@ -83,7 +129,9 @@ const ChangeRequiredPassword = () => {
             subtitle="Use at least 8 characters. Choose something only you know."
             features={[]}
             hideAuthSwitch
-            hideHomeLink
+            backLabel="Back to sign in"
+            backHref="/login"
+            onBack={signOut}
         >
             <form className="space-y-5" onSubmit={submit}>
                 {['password', 'password_confirmation'].map((field) => (
@@ -124,15 +172,6 @@ const ChangeRequiredPassword = () => {
                         Continue to dashboard
                     </a>
                 )}
-
-                <button
-                    type="button"
-                    disabled={processing}
-                    onClick={signOut}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                    Sign out and use another account
-                </button>
             </form>
         </AuthShell>
     );

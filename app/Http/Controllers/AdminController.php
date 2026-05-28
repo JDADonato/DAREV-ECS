@@ -107,6 +107,7 @@ class AdminController extends Controller
             'account_status' => 'active',
             'must_change_password' => true,
             'temporary_password_expires_at' => now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS),
+            'temporary_password_secret' => $temporaryPassword,
         ]);
 
         $emailDelivery = app(EmailDeliveryService::class)
@@ -156,6 +157,7 @@ class AdminController extends Controller
             $updates['password'] = Hash::make($request->password);
             $updates['must_change_password'] = true;
             $updates['temporary_password_expires_at'] = now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS);
+            $updates['temporary_password_secret'] = null;
         }
 
         if (empty($updates)) {
@@ -172,7 +174,7 @@ class AdminController extends Controller
         }
 
         $this->recordAccountAudit('Staff account updated', $user, 'Succeeded', [
-            'changed_fields' => array_values(array_diff(array_keys($updates), ['password'])),
+            'changed_fields' => array_values(array_diff(array_keys($updates), ['password', 'temporary_password_secret'])),
             'role_changed' => isset($updates['role']) && $updates['role'] !== $originalRole,
             'email_delivery' => $emailDelivery['status'] ?? null,
         ]);
@@ -197,6 +199,8 @@ class AdminController extends Controller
             'deactivated_at' => now(),
             'deactivated_by' => Auth::id(),
             'deactivation_reason' => 'Deactivated by administrator.',
+            'temporary_password_expires_at' => null,
+            'temporary_password_secret' => null,
         ])->save();
 
         $emailDelivery = app(EmailDeliveryService::class)
@@ -216,7 +220,7 @@ class AdminController extends Controller
     {
         $user = User::find($id);
 
-        if (!$user || in_array($user->role, ['Admin', 'Client'])) {
+        if (!$user || $user->role === 'Client' || ((int) $user->id === (int) Auth::id())) {
             return response()->json(['error' => 'Cannot modify this user'], 403);
         }
 
@@ -225,6 +229,7 @@ class AdminController extends Controller
             'password' => Hash::make($temporaryPassword),
             'must_change_password' => true,
             'temporary_password_expires_at' => now()->addHours(self::TEMPORARY_PASSWORD_TTL_HOURS),
+            'temporary_password_secret' => $temporaryPassword,
         ])->save();
 
         $emailDelivery = app(EmailDeliveryService::class)
@@ -234,6 +239,7 @@ class AdminController extends Controller
         ]);
 
         return response()->json([
+            'id' => $user->id,
             'username' => $user->username,
             'email' => $user->email,
             'message' => 'Temporary password generated. Share it through a private channel.',
@@ -244,15 +250,71 @@ class AdminController extends Controller
         ]);
     }
 
+    public function revealTemporaryPassword(int $id)
+    {
+        $user = User::whereIn('role', ['Admin', 'Marketing', 'Accounting'])->find($id);
+
+        if (!$user || (int) $user->id === (int) Auth::id()) {
+            return response()->json(['error' => 'Temporary password is not available for this account.'], 403);
+        }
+
+        if ($user->temporary_password_expires_at && now()->isAfter($user->temporary_password_expires_at)) {
+            $user->forceFill([
+                'temporary_password_secret' => null,
+            ])->save();
+
+            $this->recordAccountAudit('Temporary password viewed', $user, 'Denied', [
+                'reason' => 'expired',
+                'expires_at' => $user->temporary_password_expires_at,
+            ]);
+
+            return response()->json([
+                'message' => 'Temporary password is no longer available. Reset temporary password to generate a new one.',
+            ], 410);
+        }
+
+        if (!$user->requiresPasswordChange() || empty($user->temporary_password_secret)) {
+            $this->recordAccountAudit('Temporary password viewed', $user, 'Denied', [
+                'reason' => $user->requiresPasswordChange() ? 'missing_secret' : 'password_already_changed',
+                'expires_at' => $user->temporary_password_expires_at,
+            ]);
+
+            return response()->json([
+                'message' => 'Temporary password is no longer available. Reset temporary password to generate a new one.',
+            ], 410);
+        }
+
+        $this->recordAccountAudit('Temporary password viewed', $user, 'Succeeded', [
+            'expires_at' => $user->temporary_password_expires_at,
+        ]);
+
+        return response()->json([
+            'id' => $user->id,
+            'username' => $user->username,
+            'email' => $user->email,
+            'temporary_password' => $user->temporary_password_secret,
+            'temporary_password_expires_at' => $user->temporary_password_expires_at,
+            'email_delivery' => 'This password is available until it expires or the account owner changes it.',
+            'email_delivery_status' => [
+                'status' => 'revealed',
+                'message' => 'Temporary password was shown from secure temporary storage.',
+            ],
+        ]);
+    }
+
     public function forceEmployeePasswordChange(int $id)
     {
         $user = User::find($id);
 
-        if (!$user || in_array($user->role, ['Admin', 'Client'])) {
+        if (!$user || $user->role === 'Client' || ((int) $user->id === (int) Auth::id())) {
             return response()->json(['error' => 'Cannot modify this user'], 403);
         }
 
-        $user->forceFill(['must_change_password' => true])->save();
+        $user->forceFill([
+            'must_change_password' => true,
+            'temporary_password_expires_at' => null,
+            'temporary_password_secret' => null,
+        ])->save();
 
         $emailDelivery = app(EmailDeliveryService::class)
             ->sendToNotifiable($user, new StaffAccountLifecycleNotification('force_password_change'), 'staff_force_password_change');

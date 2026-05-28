@@ -56,13 +56,23 @@ class StaffAccountLifecycleNotification extends Notification implements ShouldQu
 
         $message = (new MailMessage)
             ->subject($content['subject'])
-            ->greeting("Hello {$name},")
-            ->line($content['line']);
+            ->view('emails.generic', [
+                'emailTitle' => $content['subject'],
+                'headline' => 'Account access update',
+                'preheader' => 'An Eloquente account access setting was updated.',
+                'greeting' => "Hello {$name},",
+                'lines' => [
+                    $content['line'],
+                ],
+                'details' => [
+                    'Username' => $notifiable->username,
+                    'Role' => $this->role ?: $notifiable->role,
+                ],
+                'ctaUrl' => $content['action'] ? url('/login') : null,
+                'ctaLabel' => $content['action'],
+                'note' => 'If you were not expecting this change, please contact the administrator.',
+            ]);
 
-        if ($content['action']) {
-            $message->action($content['action'], url('/login'));
-        }
-
-        return $message->line('If you were not expecting this change, please contact the administrator.');
+        return $message;
     }
 }

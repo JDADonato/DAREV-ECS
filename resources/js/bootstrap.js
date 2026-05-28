@@ -5,6 +5,15 @@ window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 window.axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 window.axios.defaults.withCredentials = true;
 
+const authFlowDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_DEBUG_AUTH_FLOW === 'true';
+const authFlowDebug = (message, details = {}) => {
+    if (!authFlowDebugEnabled) {
+        return;
+    }
+
+    console.info('[auth-flow-debug]', message, details);
+};
+
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 const originalFetch = window.fetch.bind(window);
 
@@ -23,6 +32,10 @@ const updateCsrfToken = (token) => {
 
     meta.setAttribute('content', token);
     window.axios.defaults.headers.common['X-CSRF-TOKEN'] = token;
+    authFlowDebug('CSRF token updated', {
+        tokenPresent: Boolean(token),
+        tokenLength: token ? String(token).length : 0,
+    });
 };
 
 const notifySessionExpired = () => {
@@ -34,6 +47,7 @@ const notifySessionExpired = () => {
 };
 
 const refreshCsrfToken = async () => {
+    authFlowDebug('Refreshing CSRF token');
     const response = await originalFetch('/api/session/csrf-token', {
         method: 'GET',
         credentials: 'same-origin',
@@ -51,6 +65,79 @@ const refreshCsrfToken = async () => {
     updateCsrfToken(data.token);
     return data.token;
 };
+
+const isSameOriginUrl = (rawUrl = window.location.href) => {
+    const url = new URL(rawUrl || window.location.href, window.location.href);
+    return url.origin === window.location.origin;
+};
+
+const isUnsafeMethod = (method = 'GET') => !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
+
+window.axios.interceptors.request.use((config) => {
+    const method = config.method || 'get';
+    const sameOrigin = isSameOriginUrl(config.url);
+
+    if (sameOrigin && isUnsafeMethod(method)) {
+        config.headers = config.headers || {};
+        config.headers['X-CSRF-TOKEN'] = csrfToken();
+        config.headers['X-Requested-With'] = 'XMLHttpRequest';
+        authFlowDebug('Axios mutation prepared', {
+            url: config.url,
+            method: String(method).toUpperCase(),
+            tokenPresent: Boolean(csrfToken()),
+            retry: Boolean(config.__csrfRetry),
+        });
+    }
+
+    return config;
+});
+
+window.axios.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const response = error.response;
+        const config = error.config || {};
+        const method = config.method || 'get';
+        const shouldRetry = response?.status === 419
+            && isSameOriginUrl(config.url)
+            && isUnsafeMethod(method)
+            && !config.__csrfRetry;
+
+        if (!shouldRetry) {
+            if (response?.status === 419) {
+                authFlowDebug('Axios mutation failed with unrecoverable CSRF mismatch', {
+                    url: config.url,
+                    method: String(method).toUpperCase(),
+                    retry: Boolean(config.__csrfRetry),
+                });
+                notifySessionExpired();
+            }
+            return Promise.reject(error);
+        }
+
+        try {
+            authFlowDebug('Axios mutation received 419; refreshing token and retrying once', {
+                url: config.url,
+                method: String(method).toUpperCase(),
+            });
+            const token = await refreshCsrfToken();
+            config.__csrfRetry = true;
+            config.headers = config.headers || {};
+            config.headers['X-CSRF-TOKEN'] = token;
+            config.headers['X-Requested-With'] = 'XMLHttpRequest';
+
+            return window.axios(config);
+        } catch (refreshError) {
+            authFlowDebug('Axios CSRF refresh failed', {
+                url: config.url,
+                method: String(method).toUpperCase(),
+                message: refreshError?.message,
+            });
+            notifySessionExpired();
+            return Promise.reject(error);
+        }
+    }
+);
 
 const withCsrfHeaders = (input, init = {}) => {
     const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
@@ -77,10 +164,9 @@ const withCsrfHeaders = (input, init = {}) => {
 
 window.fetch = async (input, init = {}) => {
     const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-    const unsafeMethod = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const unsafeMethod = isUnsafeMethod(method);
     const rawUrl = input instanceof Request ? input.url : input;
-    const url = new URL(rawUrl, window.location.href);
-    const sameOrigin = url.origin === window.location.origin;
+    const sameOrigin = isSameOriginUrl(rawUrl);
 
     if (!unsafeMethod || !sameOrigin) {
         return originalFetch(input, init);
@@ -130,7 +216,7 @@ import Pusher from 'pusher-js';
 
 window.Pusher = Pusher;
 
-if (import.meta.env.VITE_REVERB_APP_KEY) {
+if (import.meta.env.VITE_REVERB_ENABLED === 'true' && import.meta.env.VITE_REVERB_APP_KEY) {
     window.Echo = new Echo({
         broadcaster: 'reverb',
         key: import.meta.env.VITE_REVERB_APP_KEY,

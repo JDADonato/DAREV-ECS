@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -159,8 +160,9 @@ class ChatController extends Controller
 
         $message->load('sender:id,username,role');
 
-        // Broadcast the message to the conversation channel
-        broadcast(new MessageSent($message))->toOthers();
+        // Broadcast the message to the conversation channel. If Reverb is offline,
+        // message delivery still succeeds and polling/refresh can catch up.
+        $this->broadcastSafely(new MessageSent($message), true);
 
         // ── Step 4: Email notification with 15-minute cooldown ──
         // Only send when staff replies to a client (not the other way around)
@@ -236,12 +238,12 @@ class ChatController extends Controller
 
         $message->load('sender:id,username,role');
 
-        // Broadcast events
+        // Broadcast events. Fail softly so an offline Reverb server does not block chat.
         if ($isNew) {
             $conversation->load('client:id,username,email');
-            broadcast(new ConversationCreated($conversation));
+            $this->broadcastSafely(new ConversationCreated($conversation));
         }
-        broadcast(new MessageSent($message))->toOthers();
+        $this->broadcastSafely(new MessageSent($message), true);
 
         return response()->json([
             'conversation' => [
@@ -294,8 +296,8 @@ class ChatController extends Controller
         $this->upsertParticipant($conversation, $user->id, 'owner', $user->id);
         $conversation->load(['client:id,username,email', 'staff:id,username', 'participants.user:id,username,full_name,role']);
 
-        // Broadcast to all staff and the client
-        broadcast(new ConversationClaimed($conversation));
+        // Broadcast to all staff and the client. Fail softly when Reverb is offline.
+        $this->broadcastSafely(new ConversationClaimed($conversation));
 
         return response()->json([
             'success' => true,
@@ -457,8 +459,8 @@ class ChatController extends Controller
         $conversation->refresh();
         $conversation->load(['client:id,username,email', 'staff:id,username', 'participants.user:id,username,full_name,role']);
 
-        // Broadcast claim event so UI updates for everyone
-        broadcast(new ConversationClaimed($conversation));
+        // Broadcast claim event so UI updates for everyone. Fail softly when Reverb is offline.
+        $this->broadcastSafely(new ConversationClaimed($conversation));
 
         return response()->json([
             'success' => true,
@@ -728,6 +730,24 @@ class ChatController extends Controller
             'sender_role' => $msg->sender->role ?? 'Unknown',
             'is_booking_card' => str_starts_with($msg->message, '📋 BOOKING DETAILS'),
         ];
+    }
+
+    private function broadcastSafely(object $event, bool $toOthers = false): void
+    {
+        try {
+            $pendingBroadcast = broadcast($event);
+
+            if ($toOthers) {
+                $pendingBroadcast->toOthers();
+            }
+
+            unset($pendingBroadcast);
+        } catch (\Throwable $e) {
+            Log::warning('Realtime chat broadcast skipped.', [
+                'event' => $event::class,
+                'reason' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function addSystemMessage(Conversation $conversation, string $text, array $metadata = []): Message

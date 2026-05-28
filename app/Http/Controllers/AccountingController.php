@@ -99,6 +99,19 @@ class AccountingController extends Controller
                 ->whereDoesntHave('payments', fn ($paymentQuery) => $paymentQuery->whereNotIn('status', ['Paid', 'Verified']));
         }
 
+        match ($request->query('finance_segment')) {
+            'needs_verification' => $query->whereHas('payments', fn ($paymentQuery) => $paymentQuery->where('status', 'Pending')),
+            'overdue' => $query->whereHas('payments', fn ($paymentQuery) => $paymentQuery
+                ->where('status', 'Pending')
+                ->whereNotNull('due_date')
+                ->whereDate('due_date', '<', now()->toDateString())),
+            'upcoming' => $query->whereHas('payments', fn ($paymentQuery) => $paymentQuery
+                ->where('status', 'Pending')
+                ->whereNotNull('due_date')
+                ->whereBetween('due_date', [now()->toDateString(), now()->addDays(7)->toDateString()])),
+            default => null,
+        };
+
         match ($request->query('sort', 'eventDateSoonest')) {
             'eventDateLatest' => $query->orderBy('event_date', 'desc'),
             'bookingNewest' => $query->orderBy('created_at', 'desc'),
@@ -110,10 +123,20 @@ class AccountingController extends Controller
 
         $perPage = min(max((int) $request->query('per_page', 25), 1), 100);
         $bookings = $query->paginate($perPage)->through(function ($b) {
+                $paidAmount = (float) $b->payments
+                    ->whereIn('status', ['Paid', 'Verified'])
+                    ->sum(fn (Payment $payment) => (float) $payment->amount);
+                $totalCost = (float) ($b->total_cost ?? $b->budget ?? 0);
+
                 return array_merge($b->toArray(), [
-                'totalCost' => $b->total_cost ?? $b->budget ?? 0,
+                'totalCost' => $totalCost,
                 'event_display_name' => $b->event_display_name,
                 'username'  => $b->user->username ?? null,
+                'paid_amount' => $paidAmount,
+                'remaining_balance' => max($totalCost - $paidAmount, 0),
+                'finance_state' => $b->payments->contains(fn (Payment $payment) => $payment->status === 'Pending' && $payment->due_date && $payment->due_date->isPast())
+                    ? 'overdue'
+                    : ($b->payments->contains(fn (Payment $payment) => $payment->status === 'Pending') ? 'needs_verification' : 'settled'),
                 ]);
             });
 
@@ -151,9 +174,16 @@ class AccountingController extends Controller
         return response()->json([
             'bookings' => Booking::query()->whereNotIn('status', ['Pending', 'Cancelled', 'Completed', 'completed'])->count(),
             'pending' => $pending,
+            'needs_verification' => $pending,
             'overdue' => $overdue,
             'refunds' => $refunds,
             'exceptions' => $exceptions,
+            'due_soon' => (clone $paymentQuery)
+                ->where('status', 'Pending')
+                ->whereNotNull('due_date')
+                ->whereBetween('due_date', [now()->toDateString(), now()->addDays(7)->toDateString()])
+                ->count(),
+            'refund_manual_review' => RefundCase::query()->whereIn('status', ['Failed', 'Manual Review'])->count(),
             'collected' => $collected,
         ]);
     }
@@ -369,6 +399,16 @@ class AccountingController extends Controller
                 ->orderBy('id');
         }]);
 
+        foreach ($booking->payments as $payment) {
+            PaymentEventService::record(
+                'payment_terms_updated',
+                'accounting',
+                $payment,
+                ['booking_id' => $booking->id],
+                $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Payment terms updated successfully.',
@@ -414,6 +454,27 @@ class AccountingController extends Controller
 
         if ($request->endDate) {
             $query->where('created_at', '<=', $request->endDate);
+        }
+
+        if ($request->filled('clientSearch')) {
+            $search = trim((string) $request->query('clientSearch'));
+            $query->whereHas('booking', function ($bookingQuery) use ($search) {
+                $bookingQuery->where('client_full_name', 'like', "%{$search}%")
+                    ->orWhere('event_name', 'like', "%{$search}%")
+                    ->orWhereHas('user', fn ($userQuery) => $userQuery->where('username', 'like', "%{$search}%"));
+                if (ctype_digit($search)) {
+                    $bookingQuery->orWhere('id', (int) $search);
+                }
+            });
+        }
+
+        if ($request->filled('method') && $request->query('method') !== 'All') {
+            $method = trim((string) $request->query('method'));
+            $query->where('payment_method', 'like', "%{$method}%");
+        }
+
+        if ($request->filled('payment_type') && $request->query('payment_type') !== 'All') {
+            $query->where('payment_type', $request->query('payment_type'));
         }
 
         $query->orderBy('created_at', 'desc');
@@ -524,6 +585,14 @@ class AccountingController extends Controller
                     $client->notify(new PaymentReminderNotification($payment));
                     $notified = true;
 
+                    PaymentEventService::record(
+                        'payment_reminder_sent',
+                        'accounting',
+                        $payment,
+                        ['channel' => 'notification'],
+                        $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                    );
+
                     Log::info('Payment reminder notification sent.', [
                         'payment_id' => $paymentId,
                         'user_id'    => $client->id,
@@ -559,6 +628,35 @@ class AccountingController extends Controller
                 $bookingRef = str_pad($booking->id, 5, '0', STR_PAD_LEFT);
                 $clientName = $booking->client_full_name ?: 'Valued Client';
 
+                Mail::send('emails.generic', [
+                    'emailTitle' => 'Payment reminder',
+                    'headline' => 'Your payment is coming up',
+                    'preheader' => 'A friendly reminder for your Eloquente booking payment.',
+                    'greeting' => "Hello {$clientName},",
+                    'lines' => ['This is a friendly reminder about an upcoming payment for your booking.'],
+                    'details' => [
+                        'Payment type' => $type,
+                        'Amount due' => 'PHP ' . $amount,
+                        'Due date' => $dueDate,
+                        'Booking reference' => "#{$bookingRef}",
+                    ],
+                    'ctaLabel' => 'View payment',
+                    'ctaUrl' => route('payment.page'),
+                    'note' => 'Please settle your payment on or before the due date to keep your booking active.',
+                ], function ($message) use ($email, $clientName, $bookingRef) {
+                    $message->to($email, $clientName)
+                            ->subject("Payment Reminder - Booking #{$bookingRef} | Eloquente Catering");
+                });
+
+                PaymentEventService::record(
+                    'payment_reminder_sent',
+                    'accounting',
+                    $payment,
+                    ['channel' => 'mail', 'recipient' => $email],
+                    $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+                );
+
+                /*
                 Mail::raw(
                     implode("\n\n", [
                         "Hello {$clientName},",
@@ -575,6 +673,7 @@ class AccountingController extends Controller
                                 ->subject("Payment Reminder – Booking #{$bookingRef} | Eloquente Catering");
                     }
                 );
+                */
 
                 Log::info('Payment reminder raw mail sent (no user account).', [
                     'payment_id' => $paymentId,
@@ -849,6 +948,10 @@ class AccountingController extends Controller
         $data['client_full_name'] = $payment->booking->client_full_name ?? null;
         $data['package_id'] = $payment->booking->package_id ?? null;
         $data['username'] = $payment->booking?->user?->username;
+        $data['receipt_url'] = route('documents.receipt', $payment);
+        $data['finance_state'] = $payment->status === 'Pending' && $payment->due_date && $payment->due_date->isPast()
+            ? 'overdue'
+            : (in_array($payment->status, ['Paid', 'Verified'], true) ? 'settled' : strtolower((string) $payment->status));
 
         return $data;
     }

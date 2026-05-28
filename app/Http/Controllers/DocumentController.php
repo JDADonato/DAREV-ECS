@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Booking;
 use App\Models\Payment;
 use App\Services\BrandedPdfService;
+use App\Services\PaymentEventService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -19,6 +20,14 @@ class DocumentController extends Controller
         if (!$booking || (!$user->isAdmin() && !$user->isMarketing() && !$user->isAccounting() && (int) $booking->user_id !== (int) $user->id)) {
             abort(403);
         }
+
+        PaymentEventService::record(
+            'receipt_downloaded',
+            $user->role === 'Client' ? 'client' : strtolower((string) $user->role),
+            $payment,
+            ['booking_id' => $booking->id],
+            $payment->paymongo_payment_id ?: $payment->paymongo_checkout_session_id
+        );
 
         return response($pdf->receipt($payment, $booking), 200, [
             'Content-Type' => 'application/pdf',
